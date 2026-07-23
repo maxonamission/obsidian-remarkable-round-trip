@@ -1,0 +1,10 @@
+{
+	"id": "remarkable-round-trip",
+	"name": "reMarkable Round-Trip",
+	"version": "0.2.0",
+	"minAppVersion": "1.7.2",
+	"description": "Send notes to your reMarkable as e-ink friendly PDFs, with a stable document-ID that links annotations back to the source note.",
+	"author": "Max Kloosterman",
+	"authorUrl": "https://github.com/maxonamission",
+	"isDesktopOnly": false
+}

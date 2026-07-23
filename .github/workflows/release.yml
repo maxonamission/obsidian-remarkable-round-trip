@@ -1,0 +1,74 @@
+name: Release Obsidian Plugin
+
+on:
+  # Tag-triggered so a build-provenance attestation can be signed from the
+  # release tag once this plugin heads for the community directory (same
+  # lesson as Readability Compass, BC_E1_S25).
+  push:
+    tags:
+      - "*"
+  # Manual dispatch: used for the experimental BRAT releases.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Bare version to release (must match manifest.json and a CHANGELOG section), e.g. 0.2.0"
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build the plugin from this repo's source
+        # main.js is NOT committed; building it here keeps the release
+        # asset provably tied to this repository's source.
+        run: |
+          npm ci
+          npm run build
+      - name: Determine version
+        id: version
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          VERSION="${VERSION_INPUT:-${GITHUB_REF_NAME}}"
+          MANIFEST=$(node -p "require('./manifest.json').version")
+          if [ "$VERSION" != "$MANIFEST" ]; then
+            echo "::error::manifest.json says $MANIFEST, but the requested release is $VERSION."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Extract release notes for this version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          : > RELEASE_NOTES.md
+          if [ -f CHANGELOG.md ]; then
+            awk -v v="$VERSION" '
+              $0 ~ ("^## \\[" v "\\]") { f=1; next }
+              /^## \[/ && f { exit }
+              f { print }
+            ' CHANGELOG.md > RELEASE_NOTES.md
+          fi
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true
+          files: |
+            main.js
+            manifest.json
