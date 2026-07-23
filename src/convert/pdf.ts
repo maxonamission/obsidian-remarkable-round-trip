@@ -217,23 +217,82 @@ function drawCode(ts: Typesetter, codeLines: string[]): void {
 	ts.y -= size * 0.8;
 }
 
+/**
+ * Distribute a table's total width over columns based on their natural
+ * (content) widths. Fits naturally when there is room; otherwise columns
+ * shrink proportionally, but never below `minWidth` (or their own natural
+ * width, if smaller) so narrow columns stay readable while wide ones wrap.
+ * Exported for tests (GP_E2_S11: cells wrap, content is never truncated).
+ */
+export function computeColumnWidths(
+	naturals: number[],
+	total: number,
+	minWidth = 56,
+): number[] {
+	const sum = naturals.reduce((a, b) => a + b, 0);
+	if (sum <= total) return [...naturals];
+	const floors = naturals.map((n) => Math.min(minWidth, n));
+	const flexTotal = total - floors.reduce((a, b) => a + b, 0);
+	const flexNat = naturals.map((n, i) => n - floors[i]);
+	const flexSum = flexNat.reduce((a, b) => a + b, 0);
+	if (flexTotal <= 0 || flexSum <= 0) {
+		return naturals.map(() => total / naturals.length);
+	}
+	return naturals.map((n, i) => floors[i] + (flexNat[i] * flexTotal) / flexSum);
+}
+
 function drawTable(ts: Typesetter, rows: string[][]): void {
-	// Simple fixed-grid rendering: equal column widths, truncated cells.
+	// Content-weighted columns; cell text wraps across lines (beta finding
+	// GP_E2_S11: truncation lost content on real documents).
 	const size = ts.opts.fontSize - 1;
-	const cols = Math.max(...rows.map((r) => r.length), 1);
-	const colWidth = contentWidth(ts) / cols;
 	const step = size * ts.opts.lineHeight;
+	const pad = 8;
+	const total = contentWidth(ts);
+	const cols = Math.max(...rows.map((r) => r.length), 1);
+
+	const naturals = Array.from({ length: cols }, (_, c) =>
+		Math.max(
+			...rows.map((row, rowIndex) => {
+				const font = rowIndex === 0 ? ts.bold : ts.body;
+				const text = toWinAnsi(row[c] ?? "");
+				return text === "" ? 0 : font.widthOfTextAtSize(text, size) + pad;
+			}),
+		),
+	);
+	const widths = computeColumnWidths(naturals, total);
+	const offsets = widths.map((_, c) => widths.slice(0, c).reduce((a, b) => a + b, 0));
+
 	rows.forEach((row, rowIndex) => {
-		ensureRoom(ts, step);
-		ts.y -= step;
 		const font = rowIndex === 0 ? ts.bold : ts.body;
-		row.forEach((cell, col) => {
-			let text = toWinAnsi(cell);
-			while (text.length > 0 && font.widthOfTextAtSize(text, size) > colWidth - 6) {
-				text = text.slice(0, -1);
+		const cellLines = row.map((cell, c) =>
+			wrapText(toWinAnsi(cell), font, size, Math.max(widths[c] - pad, 24)),
+		);
+		const rowLines = Math.max(1, ...cellLines.map((lines) => lines.length));
+		// Keep the row on one page when it fits; taller-than-page rows fall
+		// back to a mid-row break via the per-line floor guard below.
+		ensureRoom(ts, Math.min(rowLines * step, PAGE_HEIGHT - 2 * ts.opts.margin));
+		const top = ts.y;
+		let lowest = top;
+		row.forEach((_cell, c) => {
+			let y = top;
+			for (const line of cellLines[c]) {
+				y -= step;
+				if (y < ts.opts.margin) break;
+				ts.page.drawText(line, { x: ts.opts.margin + offsets[c], y, size, font });
 			}
-			ts.page.drawText(text, { x: ts.opts.margin + col * colWidth, y: ts.y, size, font });
+			lowest = Math.min(lowest, y);
 		});
+		ts.y = lowest;
+		if (rowIndex === 0) {
+			ts.y -= 3;
+			ts.page.drawLine({
+				start: { x: ts.opts.margin, y: ts.y },
+				end: { x: ts.opts.margin + total, y: ts.y },
+				thickness: 0.5,
+				color: rgb(0.4, 0.4, 0.4),
+			});
+			ts.y -= 3;
+		}
 	});
 	ts.y -= size * 0.8;
 }

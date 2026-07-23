@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.1] - 2026-07-23
+
+First beta feedback — thank you!
+
+### Fixed
+
+- Tables no longer truncate cell text: cells now wrap across lines, column
+  widths follow the content (narrow columns stay readable, wide ones wrap),
+  and the header row gets a separator line.
+
 ## [0.2.0] - 2026-07-22
 
 First public beta (via BRAT).
