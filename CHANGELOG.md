@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.6.0] - 2026-07-25
+
+### Fixed
+
+- **Importing annotations found nothing.** The plugin asked the cloud for a
+  document's file list under the wrong name, so it always got an empty list
+  — no highlights could ever be found. It now uses the same address the
+  reMarkable API expects.
+
+### Added
+
+- **Every import writes a report**: to `reMarkable Round-Trip log.md` in
+  your vault and to your clipboard. Per note it says what was found — how
+  many files, how many highlight files, how many pen strokes — and ends
+  with the most likely explanation when nothing came back. No console
+  needed, which matters on mobile.
+- New command **Re-import all annotations (ignore what was already
+  imported)**, for when a normal import skips everything because it has
+  seen those documents before.
+
+### Note
+
+Only *text* highlights come back: the reMarkable writes a highlight file
+when you select text and highlight it. Freehand marks and handwriting are
+pen strokes; importing those is the next step and the report now tells you
+when that is what your document contains.
+
 ## [0.5.2] - 2026-07-25
 
 ### Added

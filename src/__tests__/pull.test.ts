@@ -41,16 +41,19 @@ function makeDeps(overrides: Partial<PullDeps> = {}) {
 describe("collectHighlights", () => {
 	it("reads only highlight files and orders them by page", async () => {
 		const { deps } = makeDeps();
-		const highlights = await collectHighlights("device-a", "hash-1", deps);
+		const { highlights, scan } = await collectHighlights("device-a", "hash-1", deps);
 		expect(highlights.map((h) => h.text)).toEqual(["van pagina 1", "van pagina 2"]);
 		expect(highlights.map((h) => h.page)).toEqual([1, 2]);
+		expect(scan).toMatchObject({ totalFiles: 4, highlightFiles: 2, strokeFiles: 1 });
 	});
 
 	it("returns nothing when the document has no highlight files", async () => {
 		const { deps } = makeDeps({
 			listDocumentFiles: () => Promise.resolve([{ id: "device-a.content", hash: "h" }]),
 		});
-		expect(await collectHighlights("device-a", "hash-1", deps)).toEqual([]);
+		const { highlights, scan } = await collectHighlights("device-a", "hash-1", deps);
+		expect(highlights).toEqual([]);
+		expect(scan).toMatchObject({ highlightFiles: 0, strokeFiles: 0, totalFiles: 1 });
 	});
 
 	it("skips a page it cannot read instead of failing the document", async () => {
@@ -60,13 +63,14 @@ describe("collectHighlights", () => {
 					? Promise.reject(new Error("stuk"))
 					: Promise.resolve(page("van pagina 2")),
 		});
-		const highlights = await collectHighlights("device-a", "hash-1", deps);
+		const { highlights, scan } = await collectHighlights("device-a", "hash-1", deps);
 		expect(highlights.map((h) => h.text)).toEqual(["van pagina 2"]);
+		expect(scan.unreadableFiles).toBe(1);
 	});
 
 	it("still returns highlights when the page order is unavailable", async () => {
 		const { deps } = makeDeps({ readPageOrder: undefined });
-		const highlights = await collectHighlights("device-a", "hash-1", deps);
+		const { highlights } = await collectHighlights("device-a", "hash-1", deps);
 		expect(highlights).toHaveLength(2);
 		expect(highlights.every((h) => h.page === undefined)).toBe(true);
 	});

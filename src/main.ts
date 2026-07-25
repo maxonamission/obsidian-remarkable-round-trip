@@ -34,6 +34,7 @@ import { EmbedContent } from "./preprocess/preprocess";
 import { DOCID_FRONTMATTER_KEY } from "./id/docid";
 import { NoteInput, sendBatch, SendResult } from "./sync/send";
 import { DocumentFile, PullResult, pullAnnotations } from "./incoming/pull";
+import { renderImportReport } from "./incoming/report";
 import {
 	companionPath,
 	renderAnnotationBlock,
@@ -88,6 +89,12 @@ export default class RoundTripPlugin extends Plugin {
 			id: "import-annotations",
 			name: "Import annotations from reMarkable",
 			callback: () => void this.pullAnnotations(),
+		});
+
+		this.addCommand({
+			id: "import-annotations-force",
+			name: "Re-import all annotations (ignore what was already imported)",
+			callback: () => void this.pullAnnotations({ force: true }),
 		});
 
 		this.addCommand({
@@ -423,7 +430,7 @@ export default class RoundTripPlugin extends Plugin {
 	 * Import annotations for every note we have sent (F10/F11). Runs on an
 	 * explicit command only — the vault is never written to behind your back.
 	 */
-	async pullAnnotations(): Promise<void> {
+	async pullAnnotations(options: { force?: boolean } = {}): Promise<void> {
 		const mappings = Object.keys(this.settings.mappings).length;
 		if (mappings === 0) {
 			notify("Nothing to import yet — send a note to your reMarkable first.");
@@ -434,14 +441,18 @@ export default class RoundTripPlugin extends Plugin {
 			return;
 		}
 
+		const log: string[] = [];
+		const startedAt = new Date().toISOString().slice(0, 16).replace("T", " ");
 		const notice = progressNotice(`Checking ${mappings} document(s) for annotations…`);
 		try {
 			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
 			const { results, table } = await pullAnnotations(
 				this.settings.mappings,
 				{
+					force: options.force,
+					log: (line) => log.push(line),
 					listDocumentHashes: async () => {
-						const items = await api.listItems();
+						const items = await api.listItems(true);
 						return new Map(
 							items
 								.filter((item) => item.type === "DocumentType")
@@ -449,7 +460,10 @@ export default class RoundTripPlugin extends Plugin {
 						);
 					},
 					listDocumentFiles: async (deviceDocId, hash) => {
-						const { entries } = await api.raw.getEntries(deviceDocId, hash);
+						// The document's file index is addressed as `<id>.docSchema`
+						// — the same name rmapi-js uses internally. Passing the bare
+						// id returned nothing (GP_E3_S6).
+						const { entries } = await api.raw.getEntries(`${deviceDocId}.docSchema`, hash);
 						return entries.map((entry): DocumentFile => ({ id: entry.id, hash: entry.hash }));
 					},
 					readFile: (file) => api.raw.getText(file.id, file.hash),
@@ -460,11 +474,48 @@ export default class RoundTripPlugin extends Plugin {
 			);
 			this.settings.mappings = table;
 			await this.saveSettings();
+
+			const report = `${renderImportReport({
+				results,
+				forced: options.force === true,
+				startedAt,
+				pluginVersion: this.manifest.version,
+			})}\n\n--- details ---\n${log.join("\n")}`;
+			await this.deliverReport(report);
 			reportPullResults(results);
 		} catch (error) {
-			notify(toTransportError(error).message, 10000);
+			const failure = toTransportError(error).message;
+			await this.deliverReport(
+				`reMarkable Round-Trip — import report (${startedAt})\nplugin ${this.manifest.version}\n\n` +
+					`Run failed: ${failure}\n\n--- details ---\n${log.join("\n")}`,
+			);
+			notify(failure, 10000);
 		} finally {
 			notice.hide();
+		}
+	}
+
+	/**
+	 * Make a diagnostic report reachable on mobile: written to a note in the
+	 * vault (so it survives and can be shared) and copied to the clipboard.
+	 */
+	private async deliverReport(report: string): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(report);
+		} catch {
+			// Clipboard may be denied; the note below is the durable copy.
+		}
+		try {
+			const path = "reMarkable Round-Trip log.md";
+			const existing = this.app.vault.getFileByPath(path);
+			const body = `\`\`\`\n${report}\n\`\`\`\n`;
+			if (existing) {
+				await this.app.vault.modify(existing, body);
+			} else {
+				await this.app.vault.create(path, body);
+			}
+		} catch {
+			// Writing the log must never break the import itself.
 		}
 	}
 
