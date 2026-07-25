@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.2] - 2026-07-25
+
+### Added
+
+- New command **Check reMarkable cloud status (read-only)**. If your tablet
+  reports a sync error, this tells you whether the problem sits in your
+  cloud account or on the device itself — useful when you only have a phone
+  at hand. It reads and reports; it never writes, uploads or deletes. The
+  report is copied to your clipboard so you can paste it somewhere.
+
 ## [0.5.1] - 2026-07-25
 
 ### Fixed

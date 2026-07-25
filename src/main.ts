@@ -29,6 +29,7 @@ import {
 } from "./transport/cloud";
 import { installFetchShim, ShimTransport } from "./transport/fetchshim";
 import { MirrorTransport, toTransportError } from "./transport/mirror";
+import { describeDiagnosis, diagnoseCloud } from "./transport/diagnose";
 import { EmbedContent } from "./preprocess/preprocess";
 import { DOCID_FRONTMATTER_KEY } from "./id/docid";
 import { NoteInput, sendBatch, SendResult } from "./sync/send";
@@ -76,6 +77,12 @@ export default class RoundTripPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => this.watchQueue?.noteRemoved(file.path)),
 		);
+
+		this.addCommand({
+			id: "check-cloud-status",
+			name: "Check reMarkable cloud status (read-only)",
+			callback: () => void this.checkCloudStatus(),
+		});
 
 		this.addCommand({
 			id: "import-annotations",
@@ -372,6 +379,44 @@ export default class RoundTripPlugin extends Plugin {
 			frontier = next;
 		}
 		return map;
+	}
+
+	/**
+	 * Read-only account check (GP_E3_S5): tells a user whether a sync problem
+	 * lives in the cloud or on the tablet, without touching anything.
+	 */
+	async checkCloudStatus(): Promise<void> {
+		if (this.settings.deviceToken === "") {
+			notify("Not paired with a reMarkable account yet — open the plugin settings first.");
+			return;
+		}
+		const notice = progressNotice("Reading your reMarkable cloud account…");
+		try {
+			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
+			const diagnosis = await diagnoseCloud(
+				{
+					getRootHash: () => api.raw.getRootHash(),
+					listItems: () => api.listItems(true),
+				},
+				this.settings.mappings,
+			);
+			const report = describeDiagnosis(diagnosis);
+			// On mobile a Notice scrolls away and there is no console to open,
+			// so put the report on the clipboard: it can be pasted into a note
+			// or a bug report.
+			let copied = false;
+			try {
+				await navigator.clipboard.writeText(report);
+				copied = true;
+			} catch {
+				// Clipboard access can be denied; the notice below still shows it.
+			}
+			notify(copied ? `${report}\n\n(Copied to clipboard.)` : report, 30000);
+		} catch (error) {
+			notify(toTransportError(error).message, 15000);
+		} finally {
+			notice.hide();
+		}
 	}
 
 	/**
