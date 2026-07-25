@@ -5,7 +5,8 @@
  * accordion only from ~5 sections; documented in the story).
  */
 
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, Setting } from "obsidian";
+import { notify } from "./notify";
 import type RoundTripPlugin from "./main";
 import type { MappingTable } from "./id/mapping";
 import type { OutputFormat } from "./sync/send";
@@ -137,7 +138,7 @@ export class RoundTripSettingTab extends PluginSettingTab {
 							// network error at send time. http is allowed (LAN
 							// rmfakecloud) but https is the sane default.
 							if (url !== "" && !/^https?:\/\//i.test(url)) {
-								new Notice("Endpoint URL must start with https:// (or http:// for LAN).");
+								notify("Endpoint URL must start with https:// (or http:// for LAN).");
 								return;
 							}
 							this.plugin.settings.customEndpointUrl = url;
@@ -343,10 +344,10 @@ export class RoundTripSettingTab extends PluginSettingTab {
 			const registration = await client.register(this.pairingCode);
 			this.plugin.settings.deviceToken = registration.deviceToken;
 			await this.plugin.saveSettings();
-			new Notice("Paired with your reMarkable account.");
+			notify("Paired with your reMarkable account.");
 			this.display();
 		} catch (error) {
-			new Notice(
+			notify(
 				error instanceof TransportError
 					? error.message
 					: "Pairing failed — check your connection and try again.",
@@ -357,7 +358,7 @@ export class RoundTripSettingTab extends PluginSettingTab {
 	private async unpair(): Promise<void> {
 		this.plugin.settings.deviceToken = "";
 		await this.plugin.saveSettings();
-		new Notice("Device token removed.");
+		notify("Device token removed.");
 		this.display();
 	}
 }

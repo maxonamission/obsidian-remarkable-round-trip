@@ -8,13 +8,13 @@
 
 import {
 	Menu,
-	Notice,
 	Plugin,
 	TAbstractFile,
 	TFile,
 	TFolder,
 	requestUrl,
 } from "obsidian";
+import { notify, progressNotice, updateProgress } from "./notify";
 import {
 	DEFAULT_SETTINGS,
 	RoundTripSettings,
@@ -226,12 +226,12 @@ export default class RoundTripPlugin extends Plugin {
 	 */
 	async sendFiles(files: TFile[], options: { auto?: boolean } = {}): Promise<void> {
 		if (files.length === 0) {
-			new Notice("No markdown notes to send.");
+			notify("No markdown notes to send.");
 			return;
 		}
 		const client = this.createClient();
 		if (!client.isRegistered) {
-			new Notice("Not paired with a reMarkable account yet — open the plugin settings first.");
+			notify("Not paired with a reMarkable account yet — open the plugin settings first.");
 			return;
 		}
 
@@ -249,7 +249,7 @@ export default class RoundTripPlugin extends Plugin {
 			} catch (error) {
 				mirroringDegraded = true;
 				console.error("reMarkable Round-Trip: folder mirroring unavailable", error);
-				new Notice(
+				notify(
 					"Could not reach the reMarkable folder API — sending to the device root instead. " +
 						"Your notes are still delivered.",
 					8000,
@@ -257,7 +257,7 @@ export default class RoundTripPlugin extends Plugin {
 			}
 		}
 
-		const notice = new Notice(`Sending 0/${files.length} to reMarkable…`, 0);
+		const notice = progressNotice(`Sending 0/${files.length} to reMarkable…`);
 		try {
 			const notes: NoteInput[] = [];
 			const embedMaps = new Map<string, Map<string, EmbedContent>>();
@@ -325,7 +325,7 @@ export default class RoundTripPlugin extends Plugin {
 					frontmatterAsTitleBlock: this.settings.frontmatterAsTitleBlock,
 					skipUnchanged: options.auto === true,
 				},
-				(done, total) => notice.setMessage(`Sending ${done}/${total} to reMarkable…`),
+				(done, total) => updateProgress(notice, `Sending ${done}/${total} to reMarkable…`),
 			);
 
 			this.settings.mappings = table;
@@ -381,15 +381,15 @@ export default class RoundTripPlugin extends Plugin {
 	async pullAnnotations(): Promise<void> {
 		const mappings = Object.keys(this.settings.mappings).length;
 		if (mappings === 0) {
-			new Notice("Nothing to import yet — send a note to your reMarkable first.");
+			notify("Nothing to import yet — send a note to your reMarkable first.");
 			return;
 		}
 		if (this.settings.deviceToken === "") {
-			new Notice("Not paired with a reMarkable account yet — open the plugin settings first.");
+			notify("Not paired with a reMarkable account yet — open the plugin settings first.");
 			return;
 		}
 
-		const notice = new Notice(`Checking ${mappings} document(s) for annotations…`, 0);
+		const notice = progressNotice(`Checking ${mappings} document(s) for annotations…`);
 		try {
 			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
 			const { results, table } = await pullAnnotations(
@@ -411,13 +411,13 @@ export default class RoundTripPlugin extends Plugin {
 					writeAnnotations: (entry, highlights) =>
 						this.writeAnnotations(entry.notePath, highlights),
 				},
-				(done, total) => notice.setMessage(`Checking ${done}/${total} for annotations…`),
+				(done, total) => updateProgress(notice, `Checking ${done}/${total} for annotations…`),
 			);
 			this.settings.mappings = table;
 			await this.saveSettings();
 			reportPullResults(results);
 		} catch (error) {
-			new Notice(toTransportError(error).message, 10000);
+			notify(toTransportError(error).message, 10000);
 		} finally {
 			notice.hide();
 		}
@@ -466,14 +466,14 @@ function reportPullResults(results: PullResult[]): void {
 			.slice(0, 3)
 			.map((f) => `${f.notePath.split("/").pop()}: ${f.error}`)
 			.join("\n");
-		new Notice(`${failures.length} document(s) could not be imported.\n${detail}`, 10000);
+		notify(`${failures.length} document(s) could not be imported.\n${detail}`, 10000);
 		return;
 	}
 	if (imported.length === 0) {
-		new Notice("No new annotations — everything is already up to date.");
+		notify("No new annotations — everything is already up to date.");
 		return;
 	}
-	new Notice(
+	notify(
 		`Imported ${total} highlight(s) from ${imported.length} document(s).`,
 	);
 }
@@ -520,7 +520,7 @@ function reportResults(
 	options: { quietWhenAllSkipped?: boolean; mirroringDegraded?: boolean } = {},
 ): void {
 	if (options.mirroringDegraded) {
-		new Notice(
+		notify(
 			"Some folders could not be created on the device — those notes went to the root.",
 			8000,
 		);
@@ -534,13 +534,13 @@ function reportResults(
 			sent.length === 1
 				? `Sent "${sent[0].path.split("/").pop()}" to reMarkable.`
 				: `Sent ${sent.length} notes to reMarkable.`;
-		new Notice(missing.length > 0 ? `${base} (${missing.length} embeds not found)` : base);
+		notify(missing.length > 0 ? `${base} (${missing.length} embeds not found)` : base);
 	} else {
 		const detail = failures
 			.slice(0, 3)
 			.map((f) => `${f.path.split("/").pop()}: ${f.error}`)
 			.join("\n");
-		new Notice(
+		notify(
 			`${results.length - failures.length}/${results.length} sent; ${failures.length} failed.\n${detail}`,
 			10000,
 		);

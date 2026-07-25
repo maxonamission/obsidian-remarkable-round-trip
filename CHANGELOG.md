@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.1] - 2026-07-25
+
+### Fixed
+
+- Uploads no longer fail when the reMarkable cloud is busy. If your tablet
+  (or another app) writes to the cloud at the same time, the server refuses
+  the change — "failed to upload root schema". The plugin now refreshes its
+  view of your document tree and retries, and only gives up after several
+  attempts, with an explanation instead of a raw error.
+
+### Changed
+
+- Every message from this plugin is now prefixed with **reMarkable
+  Round-Trip**, so you can tell at a glance whether a notification came from
+  here, from Obsidian, or from the reMarkable app.
+
 ## [0.5.0] - 2026-07-25
 
 ### Added

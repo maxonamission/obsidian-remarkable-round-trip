@@ -20,14 +20,69 @@ export interface MirrorApi {
 	putPdf(
 		visibleName: string,
 		buffer: Uint8Array,
-		opts?: { parent?: string },
+		opts?: { parent?: string; refresh?: boolean },
 	): Promise<{ id: string; hash: string }>;
 	putEpub(
 		visibleName: string,
 		buffer: Uint8Array,
-		opts?: { parent?: string },
+		opts?: { parent?: string; refresh?: boolean },
 	): Promise<{ id: string; hash: string }>;
 	move(hash: string, parent: string, refresh?: boolean): Promise<unknown>;
+}
+
+/**
+ * Writing to the cloud means updating the account's shared root listing. If
+ * anything else touched it in the meantime — the tablet syncing your fresh
+ * annotations, a second client, another send — the server rejects the write
+ * ("precondition failed" / "failed to upload root schema") and rmapi-js
+ * raises a generation error. The library documents this as *expected*: you
+ * refresh your view of the tree and try again (GP_E3_S4).
+ */
+export function isGenerationConflict(error: unknown): boolean {
+	const name = error instanceof Error ? error.name : "";
+	const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+	return (
+		// rmapi-js' own signal is the reliable one; the strings cover the same
+		// condition reaching us as a plain server message.
+		name === "GenerationError" ||
+		message.includes("precondition failed") ||
+		message.includes("root schema") ||
+		message.includes("generation mismatch") ||
+		message.includes("generation conflict")
+	);
+}
+
+export interface RetryOptions {
+	attempts?: number;
+	backoffMs?: (attempt: number) => number;
+	sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Run a cloud write, retrying on a generation conflict with a refreshed
+ * view of the tree. `run(refresh)` is called with refresh=true from the
+ * second attempt onwards.
+ */
+export async function withGenerationRetry<T>(
+	run: (refresh: boolean) => Promise<T>,
+	options: RetryOptions = {},
+): Promise<T> {
+	const attempts = options.attempts ?? 4;
+	const backoffMs = options.backoffMs ?? ((attempt: number) => 300 * 2 ** (attempt - 1));
+	const sleep =
+		options.sleep ?? ((ms: number) => new Promise<void>((r) => window.setTimeout(r, ms)));
+
+	let lastError: unknown;
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		try {
+			return await run(attempt > 1);
+		} catch (error) {
+			lastError = error;
+			if (attempt === attempts || !isGenerationConflict(error)) throw error;
+			await sleep(backoffMs(attempt));
+		}
+	}
+	throw lastError;
 }
 
 export interface MirrorEntry {
@@ -49,17 +104,28 @@ export class MirrorTransport {
 		private readonly api: MirrorApi,
 		/** Device base folder under which the vault tree is mirrored ("" = root). */
 		private readonly baseFolder: string,
+		private readonly retry: RetryOptions = {},
 	) {}
 
-	private async allItems(): Promise<MirrorEntry[]> {
-		if (this.items === null) {
-			this.items = await this.api.listItems();
+	private async allItems(refresh = false): Promise<MirrorEntry[]> {
+		if (this.items === null || refresh) {
+			this.items = await this.api.listItems(refresh);
 		}
 		return this.items;
 	}
 
-	private async findOrCreateFolder(name: string, parent: string): Promise<string> {
-		const items = await this.allItems();
+	/** Drop cached views so the next call sees the server's current tree. */
+	private invalidate(): void {
+		this.items = null;
+		this.folderIds.clear();
+	}
+
+	private async findOrCreateFolder(
+		name: string,
+		parent: string,
+		refresh = false,
+	): Promise<string> {
+		const items = await this.allItems(refresh);
 		const existing = items.find(
 			(e) =>
 				e.type === "CollectionType" &&
@@ -67,7 +133,10 @@ export class MirrorTransport {
 				(e.parent ?? "") === parent,
 		);
 		if (existing) return existing.id;
-		const created = await this.api.putFolder(name, { parent });
+		const created = await withGenerationRetry(
+			(retryRefresh) => this.api.putFolder(name, { parent }, retryRefresh),
+			this.retry,
+		);
 		// Keep the local view consistent for subsequent lookups in this run.
 		this.items?.push({
 			id: created.id,
@@ -115,10 +184,15 @@ export class MirrorTransport {
 	): Promise<UploadResult> {
 		const { parentId = "", format = "pdf" } = options;
 		const visibleName = fileName.replace(/\.(pdf|epub)$/i, "");
-		const entry =
-			format === "epub"
-				? await this.api.putEpub(visibleName, bytes, { parent: parentId })
-				: await this.api.putPdf(visibleName, bytes, { parent: parentId });
+		const entry = await withGenerationRetry((refresh) => {
+			// A retry means the tree moved under us; our cached folder ids may
+			// be stale too, so drop them before trying again.
+			if (refresh) this.invalidate();
+			const opts = { parent: parentId, refresh };
+			return format === "epub"
+				? this.api.putEpub(visibleName, bytes, opts)
+				: this.api.putPdf(visibleName, bytes, opts);
+		}, this.retry);
 		return { deviceDocId: entry.id, hash: entry.hash };
 	}
 
@@ -131,7 +205,10 @@ export class MirrorTransport {
 		const items = await this.allItems();
 		const doc = items.find((e) => e.type === "DocumentType" && e.id === deviceDocId);
 		if (!doc) return;
-		await this.api.move(doc.hash, "trash");
+		await withGenerationRetry(
+			(refresh) => this.api.move(doc.hash, "trash", refresh),
+			this.retry,
+		);
 	}
 }
 
@@ -139,6 +216,13 @@ export class MirrorTransport {
 export function toTransportError(error: unknown): TransportError {
 	if (error instanceof TransportError) return error;
 	const message = error instanceof Error ? error.message : String(error);
+	if (isGenerationConflict(error)) {
+		return new TransportError(
+			"The reMarkable cloud was busy syncing (your tablet or another app was " +
+				"writing at the same time), so the upload was refused. Nothing was lost — " +
+				"wait until the tablet finishes syncing and send again.",
+		);
+	}
 	return new TransportError(
 		`Folder mirroring failed (${message}). ` +
 			"You can disable 'Mirror vault folders' in the settings to fall back to root uploads.",

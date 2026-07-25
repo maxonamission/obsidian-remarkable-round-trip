@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { MirrorApi, MirrorEntry, MirrorTransport, toTransportError } from "../transport/mirror";
+import {
+	MirrorApi,
+	MirrorEntry,
+	MirrorTransport,
+	isGenerationConflict,
+	toTransportError,
+	withGenerationRetry,
+} from "../transport/mirror";
 import { TransportError } from "../transport/http";
 
 function fakeApi(initial: MirrorEntry[] = []) {
@@ -117,9 +124,72 @@ describe("MirrorTransport upload + replace", () => {
 	});
 });
 
+describe("generation conflicts", () => {
+	const NO_WAIT = { backoffMs: () => 0, sleep: () => Promise.resolve() };
+
+	it("recognises the conflict in its various guises", () => {
+		const named = new Error("boem");
+		named.name = "GenerationError";
+		expect(isGenerationConflict(named)).toBe(true);
+		expect(isGenerationConflict(new Error("precondition failed"))).toBe(true);
+		expect(isGenerationConflict(new Error("Failed to upload root schema"))).toBe(true);
+		expect(isGenerationConflict(new Error("gewoon kapot"))).toBe(false);
+	});
+
+	it("retries with a refreshed view and succeeds", async () => {
+		const seen: boolean[] = [];
+		let calls = 0;
+		const result = await withGenerationRetry((refresh) => {
+			seen.push(refresh);
+			calls++;
+			return calls < 3
+				? Promise.reject(new Error("Failed to upload root schema"))
+				: Promise.resolve("ok");
+		}, NO_WAIT);
+		expect(result).toBe("ok");
+		// First attempt without refresh, retries with.
+		expect(seen).toEqual([false, true, true]);
+	});
+
+	it("does not retry unrelated failures", async () => {
+		let calls = 0;
+		await expect(
+			withGenerationRetry(() => {
+				calls++;
+				return Promise.reject(new Error("gewoon kapot"));
+			}, NO_WAIT),
+		).rejects.toThrow(/gewoon kapot/);
+		expect(calls).toBe(1);
+	});
+
+	it("retries an upload that hits a busy cloud, refreshing the tree", async () => {
+		const { api, calls } = fakeApi();
+		let attempts = 0;
+		const flaky: MirrorApi = {
+			...api,
+			putPdf: (name, buffer, opts) => {
+				attempts++;
+				if (attempts === 1) return Promise.reject(new Error("precondition failed"));
+				return api.putPdf(name, buffer, opts);
+			},
+		};
+		const mirror = new MirrorTransport(flaky, "", NO_WAIT);
+		const result = await mirror.upload("Nota.pdf", new Uint8Array([1]), { parentId: "dir-1" });
+		expect(attempts).toBe(2);
+		expect(calls.putPdf).toEqual(["dir-1:Nota"]);
+		expect(result.deviceDocId).toMatch(/^doc-/);
+	});
+
+	it("explains a persistent conflict in plain language", () => {
+		const message = toTransportError(new Error("Failed to upload root schema")).message;
+		expect(message).toContain("busy syncing");
+		expect(message).toContain("Nothing was lost");
+	});
+});
+
 describe("toTransportError", () => {
 	it("wraps foreign errors with the fallback advice and keeps TransportErrors", () => {
-		const wrapped = toTransportError(new Error("root generation mismatch"));
+		const wrapped = toTransportError(new Error("iets heel anders ging stuk"));
 		expect(wrapped).toBeInstanceOf(TransportError);
 		expect(wrapped.message).toContain("Mirror vault folders");
 		const original = new TransportError("al netjes");
