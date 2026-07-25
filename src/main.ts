@@ -204,15 +204,24 @@ export default class RoundTripPlugin extends Plugin {
 		}
 
 		// Folder mirroring (GP_E2_S7): one rmapi-js session per send-run so the
-		// folder listing is fetched once and reused across the batch.
+		// folder listing is fetched once and reused across the batch. When the
+		// mirroring API is unreachable we degrade to root uploads instead of
+		// refusing to send (N3 — and a beta tester hit exactly this on mobile,
+		// GP_E2_S12).
 		let mirror: MirrorTransport | null = null;
+		let mirroringDegraded = false;
 		if (this.settings.mirrorFolders) {
 			try {
 				const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
 				mirror = new MirrorTransport(api, this.settings.deviceBaseFolder);
 			} catch (error) {
-				new Notice(toTransportError(error).message, 10000);
-				return;
+				mirroringDegraded = true;
+				console.error("reMarkable Round-Trip: folder mirroring unavailable", error);
+				new Notice(
+					"Could not reach the reMarkable folder API — sending to the device root instead. " +
+						"Your notes are still delivered.",
+					8000,
+				);
 			}
 		}
 
@@ -253,7 +262,14 @@ export default class RoundTripPlugin extends Plugin {
 								activeMirror
 									.ensureFolderPath(notePath.split("/").slice(0, -1).join("/"))
 									.catch((error: unknown) => {
-										throw toTransportError(error);
+										// Losing the folder is not worth losing the note:
+										// deliver it to the device root instead (N3).
+										mirroringDegraded = true;
+										console.error(
+											`reMarkable Round-Trip: folder for "${notePath}" unavailable`,
+											toTransportError(error).message,
+										);
+										return "";
 									})
 						: undefined,
 					replacePrevious: activeMirror
@@ -281,7 +297,10 @@ export default class RoundTripPlugin extends Plugin {
 
 			this.settings.mappings = table;
 			await this.saveSettings();
-			reportResults(results, { quietWhenAllSkipped: options.auto === true });
+			reportResults(results, {
+				quietWhenAllSkipped: options.auto === true,
+				mirroringDegraded: mirroringDegraded && mirror !== null,
+			});
 		} finally {
 			notice.hide();
 		}
@@ -349,8 +368,14 @@ function collectMarkdownFiles(folder: TFolder): TFile[] {
 
 function reportResults(
 	results: SendResult[],
-	options: { quietWhenAllSkipped?: boolean } = {},
+	options: { quietWhenAllSkipped?: boolean; mirroringDegraded?: boolean } = {},
 ): void {
+	if (options.mirroringDegraded) {
+		new Notice(
+			"Some folders could not be created on the device — those notes went to the root.",
+			8000,
+		);
+	}
 	const failures = results.filter((r): r is Extract<SendResult, { ok: false }> => !r.ok);
 	const missing = results.flatMap((r) => (r.ok ? r.missingEmbeds : []));
 	if (failures.length === 0) {

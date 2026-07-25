@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.2] - 2026-07-24
+
+### Fixed
+
+- Sending no longer fails on mobile when the connection to the reMarkable
+  folder API drops ("unexpected end of stream"): requests are retried, and
+  if folder mirroring stays unreachable your notes are delivered to the
+  device root instead of the send being refused.
+
 ## [0.2.1] - 2026-07-23
 
 First beta feedback — thank you!

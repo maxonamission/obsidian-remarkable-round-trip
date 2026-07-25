@@ -22,11 +22,19 @@ export default tseslint.config(
 		},
 	},
 	{
-		// Tests run under vitest/node, never inside an Obsidian window.
+		// Tests run under vitest/node, never inside an Obsidian window — the
+		// runtime-compatibility rules (and Node globals) do not apply there.
 		files: ["src/__tests__/**/*.ts"],
+		languageOptions: {
+			globals: { Buffer: "readonly", process: "readonly" },
+		},
 		rules: {
 			"obsidianmd/prefer-window-timers": "off",
 			"obsidianmd/prefer-active-doc": "off",
+			"obsidianmd/no-nodejs-modules": "off",
+			"obsidianmd/no-global-this": "off",
+			"no-restricted-globals": "off",
+			"no-undef": "off",
 		},
 	},
 	{
