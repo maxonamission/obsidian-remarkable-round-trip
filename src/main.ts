@@ -35,6 +35,8 @@ import { DOCID_FRONTMATTER_KEY } from "./id/docid";
 import { NoteInput, sendBatch, SendResult } from "./sync/send";
 import { DocumentFile, PullResult, pullAnnotations } from "./incoming/pull";
 import { renderImportReport } from "./incoming/report";
+import { parseRmLines } from "./incoming/rmlines";
+import { paintPlan, planRender } from "./incoming/strokerender";
 import {
 	companionPath,
 	renderAnnotationBlock,
@@ -467,8 +469,13 @@ export default class RoundTripPlugin extends Plugin {
 						return entries.map((entry): DocumentFile => ({ id: entry.id, hash: entry.hash }));
 					},
 					readFile: (file) => api.raw.getText(file.id, file.hash),
-					writeAnnotations: (entry, highlights) =>
-						this.writeAnnotations(entry.notePath, highlights),
+					readBytes: (file) => api.raw.getHash(file.id, file.hash),
+					renderStrokes: this.settings.importHandwriting
+						? (deviceDocId, pageIndex, bytes) =>
+								this.renderHandwriting(deviceDocId, pageIndex, bytes)
+						: undefined,
+					writeAnnotations: (entry, highlights, images) =>
+						this.writeAnnotations(entry.notePath, highlights, images),
 				},
 				(done, total) => updateProgress(notice, `Checking ${done}/${total} for annotations…`),
 			);
@@ -519,16 +526,62 @@ export default class RoundTripPlugin extends Plugin {
 		}
 	}
 
+	/**
+	 * Rasterise one handwritten page to PNG and store it in the vault (F12).
+	 * Canvas lives only here, at the edge; the geometry is planned by the
+	 * pure renderer. Returns the vault path to embed, or null for a page
+	 * without ink.
+	 */
+	private async renderHandwriting(
+		deviceDocId: string,
+		pageIndex: number,
+		bytes: Uint8Array,
+	): Promise<string | null> {
+		const plan = planRender(parseRmLines(bytes));
+		if (plan === null) return null;
+
+		const canvas = document.createElement("canvas");
+		canvas.width = plan.width;
+		canvas.height = plan.height;
+		const context = canvas.getContext("2d");
+		if (context === null) throw new Error("no 2D canvas available for rendering");
+		paintPlan(context, plan);
+
+		const blob = await new Promise<Blob | null>((resolve) =>
+			canvas.toBlob((result) => resolve(result), "image/png"),
+		);
+		if (blob === null) throw new Error("could not encode the page as PNG");
+		const buffer = await blob.arrayBuffer();
+
+		const folder = this.settings.handwritingFolder.replace(/^\/+|\/+$/g, "");
+		if (folder !== "" && !this.app.vault.getFolderByPath(folder)) {
+			await this.app.vault.createFolder(folder);
+		}
+		// Deterministic name: a re-import overwrites the page instead of
+		// piling up copies next to it.
+		const name = `${deviceDocId}-p${String(pageIndex).padStart(2, "0")}.png`;
+		const path = folder === "" ? name : `${folder}/${name}`;
+		const existing = this.app.vault.getFileByPath(path);
+		if (existing) {
+			await this.app.vault.modifyBinary(existing, buffer);
+		} else {
+			await this.app.vault.createBinary(path, buffer);
+		}
+		return path;
+	}
+
 	/** Write one note's annotations to its configured destination (F11). */
 	private async writeAnnotations(
 		notePath: string,
 		highlights: Parameters<typeof renderAnnotationBlock>[0]["highlights"],
+		images: string[] = [],
 	): Promise<void> {
 		const sourceName = (notePath.split("/").pop() ?? notePath).replace(/\.md$/i, "");
 		const block = renderAnnotationBlock({
 			sourcePath: notePath,
 			sourceName,
 			highlights,
+			images,
 			importedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
 		});
 

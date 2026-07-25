@@ -72,7 +72,9 @@ your source note stays untouched; a setting switches to a section inside the
 source note. Either way the plugin only replaces its own marked block, so
 your own writing around it survives a re-import.
 
-Handwritten annotations are not included yet — that is the next step.
+Handwritten pages come back as images: strokes are rendered to PNG, cropped
+to the ink, and embedded alongside the highlights. You can turn that off, or
+point it at a different folder.
 
 ## Known limitations (beta)
 

@@ -32,6 +32,10 @@ export interface RoundTripSettings {
 	annotationTarget: "companion" | "source";
 	/** Vault folder for companion notes; empty = vault root. */
 	annotationFolder: string;
+	/** Import handwritten annotations as PNG images (F12). */
+	importHandwriting: boolean;
+	/** Vault folder for the rendered handwriting images. */
+	handwritingFolder: string;
 	/** Mirror vault folders on the device (GP_E2_S7); off = flat root uploads. */
 	mirrorFolders: boolean;
 	/** Device folder under which the vault tree is mirrored ("" = root). */
@@ -53,6 +57,8 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	watchFolderPath: "reMarkable-out",
 	annotationTarget: "companion",
 	annotationFolder: "reMarkable-in",
+	importHandwriting: true,
+	handwritingFolder: "reMarkable-in/handwriting",
 	mirrorFolders: true,
 	deviceBaseFolder: "Obsidian",
 	mappings: {},
@@ -283,6 +289,40 @@ export class RoundTripSettingTab extends PluginSettingTab {
 						.setValue(this.plugin.settings.annotationFolder)
 						.onChange(async (value) => {
 							this.plugin.settings.annotationFolder = value.trim().replace(/^\/+|\/+$/g, "");
+							await this.plugin.saveSettings();
+						}),
+				);
+		}
+
+		new Setting(containerEl)
+			.setName("Import handwriting as images")
+			.setDesc(
+				"Handwritten notes and freehand marks are pen strokes, not text. " +
+					"With this on, each written page is rendered to a PNG and embedded " +
+					"with the annotations so you can read it back.",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.importHandwriting)
+					.onChange(async (value) => {
+						this.plugin.settings.importHandwriting = value;
+						await this.plugin.saveSettings();
+						this.display();
+					}),
+			);
+
+		if (this.plugin.settings.importHandwriting) {
+			new Setting(containerEl)
+				.setName("Folder for handwriting images")
+				.setDesc("Vault path where the rendered pages are stored.")
+				.addText((text) =>
+					text
+						.setPlaceholder("reMarkable-in/handwriting")
+						.setValue(this.plugin.settings.handwritingFolder)
+						.onChange(async (value) => {
+							this.plugin.settings.handwritingFolder = value
+								.trim()
+								.replace(/^\/+|\/+$/g, "");
 							await this.plugin.saveSettings();
 						}),
 				);

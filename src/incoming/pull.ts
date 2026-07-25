@@ -33,6 +33,8 @@ export interface DocumentScan {
 	parsedHighlights: number;
 	/** Files we could not read; they were skipped, not fatal. */
 	unreadableFiles: number;
+	/** Pages rendered from handwriting (F12). */
+	renderedPages: number;
 }
 
 export interface PullDeps {
@@ -42,6 +44,17 @@ export interface PullDeps {
 	listDocumentFiles: (deviceDocId: string, hash: string) => Promise<DocumentFile[]>;
 	/** Text contents of one document file. */
 	readFile: (file: DocumentFile) => Promise<string>;
+	/** Raw bytes of one document file (for `.rm` stroke pages). */
+	readBytes?: (file: DocumentFile) => Promise<Uint8Array>;
+	/**
+	 * Render one page's strokes to an image and return the vault path of the
+	 * embed. Absent means handwriting import is switched off.
+	 */
+	renderStrokes?: (
+		deviceDocId: string,
+		pageIndex: number,
+		bytes: Uint8Array,
+	) => Promise<string | null>;
 	/** Diagnostic sink; the plugin edge collects these for the user. */
 	log?: (line: string) => void;
 	/**
@@ -50,7 +63,11 @@ export interface PullDeps {
 	 */
 	readPageOrder?: (deviceDocId: string, hash: string) => Promise<string[]>;
 	/** Persist the rendered annotations for one source note. */
-	writeAnnotations: (entry: MappingEntry, highlights: Highlight[]) => Promise<void>;
+	writeAnnotations: (
+		entry: MappingEntry,
+		highlights: Highlight[],
+		images: string[],
+	) => Promise<void>;
 	/** Re-import even when the device hash is unchanged. */
 	force?: boolean;
 }
@@ -86,20 +103,23 @@ export async function collectHighlights(
 	deviceDocId: string,
 	hash: string,
 	deps: PullDeps,
-): Promise<{ highlights: Highlight[]; scan: DocumentScan }> {
+): Promise<{ highlights: Highlight[]; scan: DocumentScan; images: string[] }> {
 	const allFiles = await deps.listDocumentFiles(deviceDocId, hash);
 	const files = allFiles.filter((file) => isHighlightFile(file.id));
+	const strokeFiles = allFiles.filter((file) => file.id.endsWith(".rm"));
 	const scan: DocumentScan = {
 		totalFiles: allFiles.length,
 		highlightFiles: files.length,
-		strokeFiles: allFiles.filter((file) => file.id.endsWith(".rm")).length,
+		strokeFiles: strokeFiles.length,
 		parsedHighlights: 0,
 		unreadableFiles: 0,
+		renderedPages: 0,
 	};
+	const images = await renderStrokePages(deviceDocId, strokeFiles, deps, scan);
 	deps.log?.(
 		`  files: ${scan.totalFiles} total, ${scan.highlightFiles} highlight, ${scan.strokeFiles} stroke (.rm)`,
 	);
-	if (files.length === 0) return { highlights: [], scan };
+	if (files.length === 0) return { highlights: [], scan, images };
 
 	const order = deps.readPageOrder ? await deps.readPageOrder(deviceDocId, hash) : [];
 	const pageNumber = new Map(order.map((pageId, index) => [pageId, index + 1]));
@@ -132,7 +152,37 @@ export async function collectHighlights(
 	perFile.sort((a, b) => a.page - b.page);
 	const highlights = perFile.flatMap((entry) => entry.highlights);
 	scan.parsedHighlights = highlights.length;
-	return { highlights, scan };
+	return { highlights, scan, images };
+}
+
+/** Render each handwritten page to an image; failures cost that page only. */
+async function renderStrokePages(
+	deviceDocId: string,
+	strokeFiles: DocumentFile[],
+	deps: PullDeps,
+	scan: DocumentScan,
+): Promise<string[]> {
+	if (!deps.renderStrokes || !deps.readBytes || strokeFiles.length === 0) return [];
+	const images: string[] = [];
+	// Page order inside a document is not encoded in the file names, so keep
+	// the order the index gave us — it matches the document's own order.
+	for (const [index, file] of strokeFiles.entries()) {
+		try {
+			const bytes = await deps.readBytes(file);
+			const path = await deps.renderStrokes(deviceDocId, index + 1, bytes);
+			if (path !== null) {
+				images.push(path);
+				scan.renderedPages++;
+			}
+		} catch (error) {
+			scan.unreadableFiles++;
+			deps.log?.(
+				`  could not render ${file.id}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+	deps.log?.(`  rendered ${images.length} handwritten page(s)`);
+	return images;
 }
 
 /**
@@ -196,8 +246,12 @@ export async function pullAnnotations(
 					skipReason: "unchanged",
 				};
 			} else {
-				const { highlights, scan } = await collectHighlights(entry.deviceDocId, hash, deps);
-				await deps.writeAnnotations(entry, highlights);
+				const { highlights, scan, images } = await collectHighlights(
+					entry.deviceDocId,
+					hash,
+					deps,
+				);
+				await deps.writeAnnotations(entry, highlights, images);
 				updated = { ...updated, [entry.docId]: { ...entry, importedHash: hash } };
 				result = {
 					ok: true,

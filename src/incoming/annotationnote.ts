@@ -18,6 +18,8 @@ export interface AnnotationRenderInput {
 	/** Basename of the source note, used as link text. */
 	sourceName: string;
 	highlights: Highlight[];
+	/** Vault paths of rendered handwriting images, in page order (F12). */
+	images?: string[];
 	/** ISO timestamp of this import. */
 	importedAt: string;
 }
@@ -28,8 +30,12 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): string {
 	lines.push(`Annotations from [[${input.sourceName}]], imported ${input.importedAt}.`);
 	lines.push("");
 
-	if (input.highlights.length === 0) {
-		lines.push("_No text highlights found in this document._");
+	const images = input.images ?? [];
+
+	if (input.highlights.length === 0 && images.length === 0) {
+		lines.push("_No text highlights or handwriting found in this document._");
+	} else if (input.highlights.length === 0) {
+		lines.push("_No text highlights; handwriting is shown below._");
 	} else {
 		let currentPage: number | undefined;
 		for (const highlight of input.highlights) {
@@ -41,6 +47,13 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): string {
 			const suffix = color === undefined ? "" : ` ^[${color}]`;
 			lines.push(`> ${highlight.text}${suffix}`, "");
 		}
+	}
+
+	if (images.length > 0) {
+		lines.push("", "### Handwriting", "");
+		images.forEach((path, index) => {
+			lines.push(`Page ${index + 1}:`, `![[${path}]]`, "");
+		});
 	}
 
 	// Trailing blank line before the end marker keeps the block readable when

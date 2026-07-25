@@ -10,6 +10,7 @@ const scan = (over: Partial<NonNullable<Extract<PullResult, { ok: true }>["scan"
 	strokeFiles: 0,
 	parsedHighlights: 0,
 	unreadableFiles: 0,
+	renderedPages: 0,
 	...over,
 });
 

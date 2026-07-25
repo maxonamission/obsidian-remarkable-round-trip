@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.0] - 2026-07-25
+
+### Added
+
+- **Handwriting comes back too.** Handwritten notes and freehand marks are
+  pen strokes rather than text, so they need rendering: each written page is
+  now drawn to a PNG and embedded with your annotations, cropped to the ink
+  so it stays readable. Switchable off, with a configurable folder for the
+  images. Re-importing overwrites a page instead of piling up copies.
+
+With that, the round trip is closed: send a note, annotate it by hand or by
+highlighting text, and both come back linked to the note they came from.
+
+### Note
+
+The reMarkable stroke format is not officially documented and no JavaScript
+library for it existed, so this reader was written from scratch and verified
+against real device files. Unusual pens or a future firmware may still
+surprise it; the import report tells you when a page could not be read.
+
 ## [0.6.0] - 2026-07-25
 
 ### Fixed

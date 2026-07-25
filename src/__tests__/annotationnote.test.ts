@@ -30,9 +30,30 @@ describe("renderAnnotationBlock", () => {
 		expect(block).toContain("> op pagina twee");
 	});
 
-	it("says so plainly when a document has no text highlights", () => {
+	it("says so plainly when a document holds neither highlights nor handwriting", () => {
 		const block = renderAnnotationBlock({ ...INPUT, highlights: [] });
-		expect(block).toContain("_No text highlights found");
+		expect(block).toContain("_No text highlights or handwriting found");
+	});
+
+	it("embeds handwriting images per page", () => {
+		const block = renderAnnotationBlock({
+			...INPUT,
+			images: ["reMarkable-in/handwriting/dev-p01.png", "reMarkable-in/handwriting/dev-p02.png"],
+		});
+		expect(block).toContain("### Handwriting");
+		expect(block).toContain("Page 1:");
+		expect(block).toContain("![[reMarkable-in/handwriting/dev-p01.png]]");
+		expect(block).toContain("![[reMarkable-in/handwriting/dev-p02.png]]");
+	});
+
+	it("mentions handwriting when there are images but no highlights", () => {
+		const block = renderAnnotationBlock({
+			...INPUT,
+			highlights: [],
+			images: ["a.png"],
+		});
+		expect(block).toContain("_No text highlights; handwriting is shown below._");
+		expect(block).toContain("![[a.png]]");
 	});
 });
 
