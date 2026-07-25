@@ -33,6 +33,7 @@ import { EmbedContent } from "./preprocess/preprocess";
 import { DOCID_FRONTMATTER_KEY } from "./id/docid";
 import { NoteInput, sendBatch, SendResult } from "./sync/send";
 import { WatchQueue } from "./sync/watcher";
+import { flattenSelection } from "./sync/selection";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "svg", "webp", "avif"]);
 const MAX_EMBED_DEPTH = 3;
@@ -99,6 +100,25 @@ export default class RoundTripPlugin extends Plugin {
 							.onClick(() => void this.sendFiles(collectMarkdownFiles(file))),
 					);
 				}
+			}),
+		);
+
+		// Multi-selection in the file explorer: Obsidian fires `files-menu`
+		// instead of `file-menu`. The selection can mix notes and folders.
+		this.registerEvent(
+			this.app.workspace.on("files-menu", (menu: Menu, selection: TAbstractFile[]) => {
+				const notes = collectFromSelection(selection);
+				if (notes.length === 0) return;
+				menu.addItem((item) =>
+					item
+						.setTitle(
+							notes.length === 1
+								? "Send 1 note to reMarkable"
+								: `Send ${notes.length} notes to reMarkable`,
+						)
+						.setIcon("send")
+						.onClick(() => void this.sendFiles(notes)),
+				);
 			}),
 		);
 	}
@@ -355,6 +375,19 @@ function scanEmbeds(content: string, fromPath: string): { linkpath: string; from
 		found.push({ linkpath: match[1].trim(), fromPath });
 	}
 	return found;
+}
+
+/** Adapt Obsidian's TFile/TFolder tree to the pure selection flattener. */
+function collectFromSelection(selection: TAbstractFile[]): TFile[] {
+	return flattenSelection(selection, (item) => {
+		if (item instanceof TFile) {
+			return item.extension === "md" ? { kind: "note" } : { kind: "other" };
+		}
+		if (item instanceof TFolder) {
+			return { kind: "folder", children: item.children };
+		}
+		return { kind: "other" };
+	}) as TFile[];
 }
 
 function collectMarkdownFiles(folder: TFolder): TFile[] {

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0] - 2026-07-25
+
+### Added
+
+- Send a multi-selection: select several notes (and/or folders) in the file
+  explorer, right-click, and send them in one batch. Folders in the
+  selection are expanded recursively, and a note that is both selected and
+  inside a selected folder is sent only once.
+
 ## [0.2.3] - 2026-07-25
 
 ### Fixed

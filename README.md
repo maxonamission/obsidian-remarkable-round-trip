@@ -31,6 +31,8 @@ Self-hosting [rmfakecloud](https://ddvk.github.io/rmfakecloud/)? Toggle
 - **Command palette**: *Send current note to reMarkable*.
 - **Right-click a note or folder**: *Send to reMarkable* (folders send all
   notes inside, with progress and per-file error reporting).
+- **Right-click a multi-selection**: select several notes and/or folders in
+  the file explorer and send them in one batch; duplicates are filtered out.
 - **Watch folder** (optional, off by default): notes dropped into a
   configurable vault folder are converted and uploaded automatically;
   unchanged notes are skipped.
