@@ -250,7 +250,11 @@ export class RoundTripSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Frontmatter as title block")
-			.setDesc("Show frontmatter fields at the top of the document instead of dropping them.")
+			.setDesc(
+				"Off (default): frontmatter is left out of the PDF. On: your fields " +
+					"(tags, author, dates…) are listed under the title; the plugin's own " +
+					"remarkable-id stays hidden.",
+			)
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.frontmatterAsTitleBlock)

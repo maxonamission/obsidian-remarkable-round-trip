@@ -57,13 +57,42 @@ export function parseFrontmatter(source: string): {
 	const match = source.match(FRONTMATTER_RE);
 	if (!match) return { fields: {}, body: source };
 	const fields: Record<string, string> = {};
+	const listItems: Record<string, string[]> = {};
+	let currentKey: string | null = null;
+
 	for (const line of match[1].split(/\r?\n/)) {
+		// A YAML block-sequence item belonging to the key above it
+		// ("tags:\n  - one\n  - two" → "one, two"). Without this, list-valued
+		// fields silently vanished from the title block (GP_E2_S13).
+		const item = line.match(/^\s*-\s+(.*)$/);
+		if (item && currentKey !== null) {
+			const value = unquote(item[1]);
+			if (value !== "") (listItems[currentKey] ??= []).push(value);
+			continue;
+		}
 		const kv = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-		if (!kv) continue; // nested/list values: skip, we only surface scalars
-		const value = kv[2].trim().replace(/^["']|["']$/g, "");
-		fields[kv[1]] = value;
+		if (!kv) continue; // nested maps stay unsupported: they need a YAML parser
+		currentKey = kv[1];
+		const raw = kv[2].trim();
+		// Inline flow sequence: "tags: [a, b]".
+		const inline = raw.match(/^\[(.*)\]$/);
+		fields[currentKey] = inline
+			? inline[1]
+					.split(",")
+					.map((part) => unquote(part.trim()))
+					.filter((part) => part !== "")
+					.join(", ")
+			: unquote(raw);
+	}
+
+	for (const [key, items] of Object.entries(listItems)) {
+		if (fields[key] === "") fields[key] = items.join(", ");
 	}
 	return { fields, body: source.slice(match[0].length) };
+}
+
+function unquote(value: string): string {
+	return value.trim().replace(/^["']|["']$/g, "");
 }
 
 function displayTextForLink(target: string, alias: string | undefined): string {
@@ -149,14 +178,17 @@ function renderTitleBlock(
 	return `${lines.join("\n")}\n\n---\n\n`;
 }
 
-/** Default frontmatter keys that never belong in a rendered title block. */
+/**
+ * Frontmatter keys that never belong in a rendered title block: plugin and
+ * Obsidian plumbing only. User-authored fields — including `tags` and
+ * `aliases` — stay visible, because on paper they are part of the note's
+ * context (GP_E2_S13: hiding them made the title block look broken).
+ */
 export const DEFAULT_HIDDEN_FRONTMATTER_KEYS = [
 	"remarkable-id",
 	"position",
 	"cssclass",
 	"cssclasses",
-	"aliases",
-	"tags",
 ];
 
 export function preprocess(

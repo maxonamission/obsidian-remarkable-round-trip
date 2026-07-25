@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.3] - 2026-07-25
+
+### Fixed
+
+- "Frontmatter as title block" now actually shows your fields: list values
+  (`tags:` with `- items`, or `[a, b]`) were silently dropped, and `tags`
+  and `aliases` were hidden by default — so the block could come out empty.
+  Only the plugin's own `remarkable-id` and Obsidian styling keys stay
+  hidden now.
+
+### Changed
+
+- Clearer wording for the "Frontmatter as title block" setting: frontmatter
+  is left out of the PDF unless you turn this on.
+
 ## [0.2.2] - 2026-07-24
 
 ### Fixed

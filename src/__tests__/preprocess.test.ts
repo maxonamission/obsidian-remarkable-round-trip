@@ -8,6 +8,24 @@ describe("parseFrontmatter", () => {
 		expect(body).toBe("Body");
 	});
 
+	it("joins a YAML list into one readable value", () => {
+		const { fields } = parseFrontmatter(
+			"---\ntags:\n  - frontmattertest\n  - tweede\nauthor: Max\n---\nBody",
+		);
+		expect(fields).toEqual({ tags: "frontmattertest, tweede", author: "Max" });
+	});
+
+	it("reads an inline flow sequence", () => {
+		const { fields } = parseFrontmatter('---\ntags: [een, "twee"]\n---\nBody');
+		expect(fields.tags).toBe("een, twee");
+	});
+
+	it("does not attach list items to an unrelated earlier key", () => {
+		const { fields } = parseFrontmatter("---\nauthor: Max\ntags:\n  - een\n---\nBody");
+		expect(fields.author).toBe("Max");
+		expect(fields.tags).toBe("een");
+	});
+
 	it("leaves content without frontmatter untouched", () => {
 		const { fields, body } = parseFrontmatter("Just text\n---\nnot frontmatter");
 		expect(fields).toEqual({});
@@ -29,6 +47,16 @@ describe("preprocess", () => {
 		);
 		expect(result.markdown).toContain("- author: Max");
 		expect(result.markdown).not.toContain("remarkable-id");
+	});
+
+	it("keeps user-authored tags in the title block (real beta note)", () => {
+		const result = preprocess(
+			"---\ntags:\n  - frontmattertest\nremarkable-id: 1d867b85-120e-4e4d-b144-412a56d97652\n---\nText",
+			{ frontmatterAsTitleBlock: true },
+		);
+		expect(result.markdown).toContain("- tags: frontmattertest");
+		expect(result.markdown).not.toContain("1d867b85");
+		expect(result.markdown).toContain("Text");
 	});
 
 	it("flattens wikilinks to their display text", () => {
