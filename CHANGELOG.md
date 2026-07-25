@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0] - 2026-07-25
+
+### Added
+
+- **EPUB as an alternative format** (*Settings → Document format*). PDF
+  keeps a fixed page layout, which is what annotations anchor to — still the
+  default, and the right choice if you plan to write on the document. EPUB
+  reflows, so the device picks the font size, it carries a table of contents
+  built from your headings, and it keeps non-Latin scripts intact where the
+  PDF path falls back to ASCII. Best for reading only.
+- The PDF typography settings are hidden while EPUB is selected: an EPUB is
+  laid out by the reader, not by the plugin.
+
 ## [0.3.0] - 2026-07-25
 
 ### Added

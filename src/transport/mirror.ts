@@ -22,6 +22,11 @@ export interface MirrorApi {
 		buffer: Uint8Array,
 		opts?: { parent?: string },
 	): Promise<{ id: string; hash: string }>;
+	putEpub(
+		visibleName: string,
+		buffer: Uint8Array,
+		opts?: { parent?: string },
+	): Promise<{ id: string; hash: string }>;
 	move(hash: string, parent: string, refresh?: boolean): Promise<unknown>;
 }
 
@@ -102,14 +107,18 @@ export class MirrorTransport {
 		return parent;
 	}
 
-	/** Upload a PDF into the given collection ("" = root). */
-	async uploadPdf(
+	/** Upload a document into the given collection ("" = root). */
+	async upload(
 		fileName: string,
-		pdfBytes: Uint8Array,
-		parentId: string,
+		bytes: Uint8Array,
+		options: { parentId?: string; format?: "pdf" | "epub" } = {},
 	): Promise<UploadResult> {
-		const visibleName = fileName.replace(/\.pdf$/i, "");
-		const entry = await this.api.putPdf(visibleName, pdfBytes, { parent: parentId });
+		const { parentId = "", format = "pdf" } = options;
+		const visibleName = fileName.replace(/\.(pdf|epub)$/i, "");
+		const entry =
+			format === "epub"
+				? await this.api.putEpub(visibleName, bytes, { parent: parentId })
+				: await this.api.putPdf(visibleName, bytes, { parent: parentId });
 		return { deviceDocId: entry.id, hash: entry.hash };
 	}
 

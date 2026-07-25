@@ -7,6 +7,7 @@
 import { preprocess, EmbedResolver } from "../preprocess/preprocess";
 import { parseBlocks } from "../convert/mdblocks";
 import { renderPdf, PdfLayoutOptions } from "../convert/pdf";
+import { renderEpub } from "../convert/epub";
 import { ensureDocId } from "../id/docid";
 import { MappingTable, contentHash, recordUpload } from "../id/mapping";
 import type { UploadResult } from "../transport/cloud";
@@ -20,14 +21,19 @@ export interface NoteInput {
 	existingDocId?: unknown;
 }
 
+/** Document format delivered to the device (PRD F3). */
+export type OutputFormat = "pdf" | "epub";
+
 export interface SendDeps {
 	client: {
-		uploadPdf(
+		upload(
 			fileName: string,
-			pdfBytes: Uint8Array,
-			parentId?: string,
+			bytes: Uint8Array,
+			options: { parentId?: string; format: OutputFormat },
 		): Promise<UploadResult>;
 	};
+	/** Delivered format; PDF is the default because it anchors annotations. */
+	format?: OutputFormat;
 	/** Resolve an embed for a given note (notePath disambiguates targets). */
 	resolveEmbed: (linkpath: string, notePath: string) => ReturnType<EmbedResolver>;
 	/** Persist a newly generated docId into the note's frontmatter. */
@@ -99,11 +105,18 @@ export async function sendNote(
 			};
 		}
 		const blocks = parseBlocks(pre.markdown);
-		const pdf = await renderPdf(blocks, { title: note.basename, docId }, deps.layout);
+		const format: OutputFormat = deps.format ?? "pdf";
+		const bytes =
+			format === "epub"
+				? await renderEpub(blocks, { title: note.basename, docId })
+				: await renderPdf(blocks, { title: note.basename, docId }, deps.layout);
 		const parentId = deps.resolveParent
 			? await deps.resolveParent(note.path)
 			: undefined;
-		const upload = await deps.client.uploadPdf(`${note.basename}.pdf`, pdf, parentId);
+		const upload = await deps.client.upload(`${note.basename}.${format}`, bytes, {
+			parentId,
+			format,
+		});
 
 		const previous = table[docId];
 		if (

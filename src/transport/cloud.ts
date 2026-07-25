@@ -132,22 +132,24 @@ export class RemarkableCloudClient {
 	}
 
 	/**
-	 * Upload a PDF via the simple endpoint. Returns the cloud-assigned
-	 * document ID, which the mapping store links to the note's stable docId
-	 * (F5). An optional parent collection ID is honored when given (the
-	 * endpoint itself cannot create folders — see MirrorTransport for that).
+	 * Upload a document (PDF or EPUB) via the simple endpoint. Returns the
+	 * cloud-assigned document ID, which the mapping store links to the note's
+	 * stable docId (F5). An optional parent collection ID is honored when
+	 * given (the endpoint itself cannot create folders — see MirrorTransport).
 	 */
-	async uploadPdf(
+	async upload(
 		fileName: string,
-		pdfBytes: Uint8Array,
-		parentId?: string,
+		bytes: Uint8Array,
+		options: { parentId?: string; format?: "pdf" | "epub" } = {},
 	): Promise<UploadResult> {
+		const { parentId, format = "pdf" } = options;
+		const contentType = format === "epub" ? "application/epub+zip" : "application/pdf";
 		const userToken = await this.ensureUserToken();
 		const meta: { file_name: string; parent?: string } = { file_name: fileName };
 		if (parentId !== undefined && parentId !== "") meta.parent = parentId;
-		const body = pdfBytes.buffer.slice(
-			pdfBytes.byteOffset,
-			pdfBytes.byteOffset + pdfBytes.byteLength,
+		const body = bytes.buffer.slice(
+			bytes.byteOffset,
+			bytes.byteOffset + bytes.byteLength,
 		) as ArrayBuffer;
 		const attempt = () =>
 			this.http({
@@ -155,7 +157,7 @@ export class RemarkableCloudClient {
 				method: "POST",
 				headers: {
 					Authorization: `Bearer ${userToken}`,
-					"Content-Type": "application/pdf",
+					"Content-Type": contentType,
 					"rm-meta": toBase64(JSON.stringify(meta)),
 					"rm-source": "RoR-Browser",
 				},

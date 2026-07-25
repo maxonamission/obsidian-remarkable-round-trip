@@ -43,7 +43,10 @@ What happens to your note:
   inline; callouts become titled quotes; comments are removed; frontmatter is
   stripped (or rendered as a title block, if you prefer).
 - The note is typeset as a PDF on the reMarkable 2 page grid, with
-  configurable font size, line spacing and margins.
+  configurable font size, line spacing and margins. Prefer reading comfort
+  over annotation anchoring? Switch the format to **EPUB**: it reflows, the
+  device sets the type size, you get a table of contents from your headings,
+  and non-Latin scripts survive intact.
 - Your vault folders are recreated on the device under a configurable base
   folder (default `Obsidian`); re-sending a note replaces the previous copy
   (the old one goes to the device trash).

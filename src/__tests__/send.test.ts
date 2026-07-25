@@ -9,7 +9,7 @@ function makeDeps(overrides: Partial<SendDeps> = {}) {
 	const persisted: { path: string; docId: string }[] = [];
 	const deps: SendDeps = {
 		client: {
-			uploadPdf: (fileName, bytes) => {
+			upload: (fileName, bytes) => {
 				uploads.push({ fileName, bytes });
 				return Promise.resolve({ deviceDocId: `device-${uploads.length}` });
 			},
@@ -59,11 +59,38 @@ describe("sendNote", () => {
 
 	it("returns a failure result instead of throwing", async () => {
 		const { deps } = makeDeps({
-			client: { uploadPdf: () => Promise.reject(new Error("cloud down")) },
+			client: { upload: () => Promise.reject(new Error("cloud down")) },
 		});
 		const { result, table } = await sendNote(NOTE, {}, deps);
 		expect(result).toMatchObject({ ok: false, error: "cloud down" });
 		expect(table).toEqual({});
+	});
+});
+
+describe("sendNote output format", () => {
+	it("delivers an EPUB with the right extension and format flag", async () => {
+		const { deps, uploads } = makeDeps({ format: "epub" });
+		const formats: string[] = [];
+		deps.client = {
+			upload: (fileName, bytes, uploadOptions) => {
+				formats.push(uploadOptions.format);
+				uploads.push({ fileName, bytes });
+				return Promise.resolve({ deviceDocId: "device-1" });
+			},
+		};
+		const { result } = await sendNote(NOTE, {}, deps);
+		if (!result.ok) throw new Error("unexpected failure");
+
+		expect(uploads[0].fileName).toBe("Nota.epub");
+		expect(formats).toEqual(["epub"]);
+		// EPUB is a ZIP: "PK" magic bytes.
+		expect(Array.from(uploads[0].bytes.slice(0, 2))).toEqual([0x50, 0x4b]);
+	});
+
+	it("defaults to PDF when no format is given", async () => {
+		const { deps, uploads } = makeDeps();
+		await sendNote(NOTE, {}, deps);
+		expect(uploads[0].fileName).toBe("Nota.pdf");
 	});
 });
 
@@ -110,8 +137,8 @@ describe("sendNote folder mirroring hooks", () => {
 		});
 		const uploadArgs: (string | undefined)[] = [];
 		deps.client = {
-			uploadPdf: (fileName, bytes, parentId) => {
-				uploadArgs.push(parentId);
+			upload: (fileName, bytes, uploadOptions) => {
+				uploadArgs.push(uploadOptions.parentId);
 				uploads.push({ fileName, bytes });
 				return Promise.resolve({ deviceDocId: `device-${uploads.length}` });
 			},
@@ -151,7 +178,7 @@ describe("sendBatch", () => {
 		let calls = 0;
 		const { deps } = makeDeps({
 			client: {
-				uploadPdf: () => {
+				upload: () => {
 					calls++;
 					return calls === 1
 						? Promise.reject(new Error("eerste faalt"))

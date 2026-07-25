@@ -8,6 +8,7 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type RoundTripPlugin from "./main";
 import type { MappingTable } from "./id/mapping";
+import type { OutputFormat } from "./sync/send";
 import { TransportError } from "./transport/http";
 
 export interface RoundTripSettings {
@@ -16,6 +17,8 @@ export interface RoundTripSettings {
 	/** Use a self-hosted rmfakecloud endpoint instead of the official cloud. */
 	useCustomEndpoint: boolean;
 	customEndpointUrl: string;
+	/** Delivered document format (F3); PDF anchors annotations, EPUB reflows. */
+	outputFormat: OutputFormat;
 	/** Render frontmatter as a small title block instead of dropping it. */
 	frontmatterAsTitleBlock: boolean;
 	fontSize: number;
@@ -36,6 +39,7 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	deviceToken: "",
 	useCustomEndpoint: false,
 	customEndpointUrl: "",
+	outputFormat: "pdf",
 	frontmatterAsTitleBlock: false,
 	fontSize: 11,
 	lineHeight: 1.5,
@@ -136,49 +140,75 @@ export class RoundTripSettingTab extends PluginSettingTab {
 				);
 		}
 
-		new Setting(containerEl).setName("Page layout").setHeading();
+		new Setting(containerEl).setName("Document format").setHeading();
 
 		new Setting(containerEl)
-			.setName("Font size")
-			.setDesc("Body text size in points (headings scale along).")
-			.addSlider((slider) =>
-				slider
-					.setLimits(9, 14, 0.5)
-					.setValue(this.plugin.settings.fontSize)
-					.setDynamicTooltip()
+			.setName("Send notes as")
+			.setDesc(
+				"PDF keeps a fixed page layout, which is what annotations anchor to — " +
+					"the right choice if you plan to write on the document. EPUB reflows, " +
+					"so the device picks the font size and it handles non-Latin scripts " +
+					"better; best for reading only.",
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("pdf", "PDF — fixed layout, best for annotating")
+					.addOption("epub", "EPUB — reflowable, best for reading")
+					.setValue(this.plugin.settings.outputFormat)
 					.onChange(async (value) => {
-						this.plugin.settings.fontSize = value;
+						this.plugin.settings.outputFormat = value === "epub" ? "epub" : "pdf";
 						await this.plugin.saveSettings();
+						this.display();
 					}),
 			);
 
-		new Setting(containerEl)
-			.setName("Line spacing")
-			.setDesc("Line height as a multiple of the font size; roomier reads better on e-ink.")
-			.addSlider((slider) =>
-				slider
-					.setLimits(1.2, 1.9, 0.1)
-					.setValue(this.plugin.settings.lineHeight)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						this.plugin.settings.lineHeight = value;
-						await this.plugin.saveSettings();
-					}),
-			);
+		// The typography sliders only shape the PDF; an EPUB is laid out by the
+		// reader, so showing them there would promise control we do not have.
+		if (this.plugin.settings.outputFormat === "pdf") {
+			new Setting(containerEl).setName("Page layout").setHeading();
 
-		new Setting(containerEl)
-			.setName("Page margin")
-			.setDesc("Margin in points around the text — also your annotation space.")
-			.addSlider((slider) =>
-				slider
-					.setLimits(24, 64, 4)
-					.setValue(this.plugin.settings.margin)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						this.plugin.settings.margin = value;
-						await this.plugin.saveSettings();
-					}),
-			);
+			new Setting(containerEl)
+				.setName("Font size")
+				.setDesc("Body text size in points (headings scale along).")
+				.addSlider((slider) =>
+					slider
+						.setLimits(9, 14, 0.5)
+						.setValue(this.plugin.settings.fontSize)
+						.setDynamicTooltip()
+						.onChange(async (value) => {
+							this.plugin.settings.fontSize = value;
+							await this.plugin.saveSettings();
+						}),
+				);
+
+			new Setting(containerEl)
+				.setName("Line spacing")
+				.setDesc("Line height as a multiple of the font size; roomier reads better on e-ink.")
+				.addSlider((slider) =>
+					slider
+						.setLimits(1.2, 1.9, 0.1)
+						.setValue(this.plugin.settings.lineHeight)
+						.setDynamicTooltip()
+						.onChange(async (value) => {
+							this.plugin.settings.lineHeight = value;
+							await this.plugin.saveSettings();
+						}),
+				);
+
+			new Setting(containerEl)
+				.setName("Page margin")
+				.setDesc("Margin in points around the text — also your annotation space.")
+				.addSlider((slider) =>
+					slider
+						.setLimits(24, 64, 4)
+						.setValue(this.plugin.settings.margin)
+						.setDynamicTooltip()
+						.onChange(async (value) => {
+							this.plugin.settings.margin = value;
+							await this.plugin.saveSettings();
+						}),
+				);
+		}
 
 		new Setting(containerEl).setName("Device organization").setHeading();
 

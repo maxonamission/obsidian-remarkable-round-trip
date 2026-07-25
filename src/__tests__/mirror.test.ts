@@ -4,7 +4,13 @@ import { TransportError } from "../transport/http";
 
 function fakeApi(initial: MirrorEntry[] = []) {
 	const items = [...initial];
-	const calls = { listItems: 0, putFolder: [] as string[], putPdf: [] as string[], moves: [] as [string, string][] };
+	const calls = {
+		listItems: 0,
+		putFolder: [] as string[],
+		putPdf: [] as string[],
+		putEpub: [] as string[],
+		moves: [] as [string, string][],
+	};
 	let nextId = 1;
 	const api: MirrorApi = {
 		listItems: () => {
@@ -26,6 +32,11 @@ function fakeApi(initial: MirrorEntry[] = []) {
 		},
 		putPdf: (visibleName, _buffer, opts) => {
 			calls.putPdf.push(`${opts?.parent ?? ""}:${visibleName}`);
+			const id = `doc-${nextId++}`;
+			return Promise.resolve({ id, hash: `hash-${id}` });
+		},
+		putEpub: (visibleName, _buffer, opts) => {
+			calls.putEpub.push(`${opts?.parent ?? ""}:${visibleName}`);
 			const id = `doc-${nextId++}`;
 			return Promise.resolve({ id, hash: `hash-${id}` });
 		},
@@ -79,9 +90,20 @@ describe("MirrorTransport upload + replace", () => {
 	it("uploads without the .pdf suffix into the given parent", async () => {
 		const { api, calls } = fakeApi();
 		const mirror = new MirrorTransport(api, "");
-		const result = await mirror.uploadPdf("Nota.pdf", new Uint8Array([1]), "dir-9");
+		const result = await mirror.upload("Nota.pdf", new Uint8Array([1]), { parentId: "dir-9" });
 		expect(calls.putPdf).toEqual(["dir-9:Nota"]);
 		expect(result.deviceDocId).toMatch(/^doc-/);
+	});
+
+	it("routes an EPUB to putEpub and strips the .epub suffix", async () => {
+		const { api, calls } = fakeApi();
+		const mirror = new MirrorTransport(api, "");
+		await mirror.upload("Nota.epub", new Uint8Array([1]), {
+			parentId: "dir-9",
+			format: "epub",
+		});
+		expect(calls.putEpub).toEqual(["dir-9:Nota"]);
+		expect(calls.putPdf).toEqual([]);
 	});
 
 	it("moves the previous device copy to trash, ignoring already-gone docs", async () => {

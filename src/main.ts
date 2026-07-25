@@ -269,14 +269,15 @@ export default class RoundTripPlugin extends Plugin {
 				{
 					client: activeMirror
 						? {
-								uploadPdf: (fileName, bytes, parentId) =>
+								upload: (fileName, bytes, uploadOptions) =>
 									activeMirror
-										.uploadPdf(fileName, bytes, parentId ?? "")
+										.upload(fileName, bytes, uploadOptions)
 										.catch((error: unknown) => {
 											throw toTransportError(error);
 										}),
 							}
 						: client,
+					format: this.settings.outputFormat,
 					resolveParent: activeMirror
 						? (notePath) =>
 								activeMirror
