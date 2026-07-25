@@ -487,6 +487,7 @@ export default class RoundTripPlugin extends Plugin {
 				forced: options.force === true,
 				startedAt,
 				pluginVersion: this.manifest.version,
+				handwritingEnabled: this.settings.importHandwriting,
 			})}\n\n--- details ---\n${log.join("\n")}`;
 			await this.deliverReport(report);
 			reportPullResults(results);

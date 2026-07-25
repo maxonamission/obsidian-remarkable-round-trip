@@ -81,8 +81,9 @@ point it at a different folder.
 - Images render as placeholders in the PDF.
 - Standard PDF fonts (full Latin-1 coverage; other scripts get ASCII
   fallbacks).
-- The incoming route (highlights/annotations back into the vault) is not
-  built yet — it is the next phase.
+- The stroke reader is written against an undocumented format: unusual pens
+  or a future firmware may not render. The import report says so when a page
+  could not be read.
 
 ## License
 

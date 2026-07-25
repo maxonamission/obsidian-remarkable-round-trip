@@ -19,7 +19,7 @@ describe("renderImportReport", () => {
 		expect(renderImportReport({ ...base, results: [] })).toContain("nothing to import");
 	});
 
-	it("names the most likely cause when a document only holds pen strokes", () => {
+	it("points at the setting when strokes were found but handwriting import is off", () => {
 		const results: PullResult[] = [
 			{
 				ok: true,
@@ -29,10 +29,56 @@ describe("renderImportReport", () => {
 				scan: scan({ strokeFiles: 3 }),
 			},
 		];
-		const report = renderImportReport({ ...base, results });
+		const report = renderImportReport({ ...base, handwritingEnabled: false, results });
 		expect(report).toContain("pen strokes but no text highlights");
-		expect(report).toContain("not built yet");
+		expect(report).toContain("switched off");
 		expect(report).toContain("5 files, 0 highlight, 3 stroke");
+	});
+
+	it("does not claim handwriting import is missing when strokes rendered nothing", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 0,
+				scan: scan({ strokeFiles: 3 }),
+			},
+		];
+		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		expect(report).not.toContain("not built yet");
+		expect(report).toContain("could not be rendered");
+	});
+
+	it("reports rendered handwriting as a success, even without highlights", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 0,
+				scan: scan({ strokeFiles: 1, renderedPages: 1 }),
+			},
+		];
+		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		expect(report).toContain("0 highlight(s), 1 handwritten page(s)");
+		expect(report).toContain("1 handwritten page(s) came back");
+		expect(report).not.toContain("not built yet");
+	});
+
+	it("mentions handwriting alongside imported highlights", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 2,
+				scan: scan({ highlightFiles: 1, parsedHighlights: 2, strokeFiles: 2, renderedPages: 2 }),
+			},
+		];
+		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		expect(report).toContain("Imported successfully");
+		expect(report).toContain("2 handwritten page(s) came back");
 	});
 
 	it("points at an unrecognised format when highlight files yield nothing", () => {

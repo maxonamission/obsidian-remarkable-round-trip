@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.1] - 2026-07-25
+
+### Fixed
+
+- **The import report contradicted itself.** After a run that rendered your
+  handwriting, the summary still claimed importing handwriting "is not built
+  yet" — advice from before 0.7.0 that the report never stopped giving. It
+  now counts the rendered pages: they show up per note, and the closing
+  sentence tells you the pages came back as images. When strokes are found
+  but nothing is rendered, it says whether the setting is off or the pages
+  could not be read, instead of blaming a missing feature.
+
 ## [0.7.0] - 2026-07-25
 
 ### Added

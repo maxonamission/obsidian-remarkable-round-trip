@@ -13,6 +13,8 @@ export interface ImportReportInput {
 	forced: boolean;
 	startedAt: string;
 	pluginVersion: string;
+	/** Whether handwriting rendering was on for this run (F12 setting). */
+	handwritingEnabled?: boolean;
 }
 
 export function renderImportReport(input: ImportReportInput): string {
@@ -45,8 +47,10 @@ export function renderImportReport(input: ImportReportInput): string {
 			lines.push(`✓ ${result.notePath}: ${result.highlightCount} highlight(s)`);
 			continue;
 		}
+		const rendered =
+			scan.renderedPages > 0 ? `, ${scan.renderedPages} handwritten page(s)` : "";
 		lines.push(
-			`✓ ${result.notePath}: ${result.highlightCount} highlight(s) ` +
+			`✓ ${result.notePath}: ${result.highlightCount} highlight(s)${rendered} ` +
 				`(${scan.totalFiles} files, ${scan.highlightFiles} highlight, ${scan.strokeFiles} stroke)`,
 		);
 		if (scan.unreadableFiles > 0) {
@@ -54,19 +58,36 @@ export function renderImportReport(input: ImportReportInput): string {
 		}
 	}
 
-	lines.push("", diagnose(input.results));
+	lines.push("", diagnose(input));
 	return lines.join("\n");
 }
 
 /** The most useful next sentence, given what the run found. */
-function diagnose(results: PullResult[]): string {
+function diagnose(input: ImportReportInput): string {
+	const results = input.results;
 	const successes = results.filter((r): r is Extract<PullResult, { ok: true }> => r.ok);
 	const scanned = successes.filter((r) => r.scan !== undefined);
 	const imported = successes.filter((r) => r.highlightCount > 0);
 	const failures = results.filter((r) => !r.ok);
+	const renderedPages = successes.reduce((total, r) => total + (r.scan?.renderedPages ?? 0), 0);
+	const handwriting =
+		renderedPages > 0
+			? ` ${renderedPages} handwritten page(s) came back as images, embedded with the annotations.`
+			: "";
 
 	if (imported.length > 0) {
-		return "Imported successfully. Re-running skips documents you have not touched since.";
+		return (
+			"Imported successfully. Re-running skips documents you have not touched since." +
+			handwriting
+		);
+	}
+	if (renderedPages > 0) {
+		return (
+			`No text highlights were found, but ${renderedPages} handwritten page(s) came back ` +
+			"as images, embedded with the annotations. The reMarkable only writes a highlight " +
+			"file when you select text and highlight it on a text layer; freehand marks and " +
+			"handwriting are pen strokes, and those are rendered to pictures instead."
+		);
 	}
 	if (failures.length === results.length && failures.length > 0) {
 		return "Every document failed — that points at the connection or your pairing rather than at the documents.";
@@ -82,11 +103,17 @@ function diagnose(results: PullResult[]): string {
 	const withHighlightFiles = scanned.filter((r) => (r.scan?.highlightFiles ?? 0) > 0);
 
 	if (withHighlightFiles.length === 0 && withStrokes.length > 0) {
+		const why =
+			input.handwritingEnabled === false
+				? "Importing handwriting is switched off — turn on 'Import handwriting' in the " +
+					"settings to get those pages back as images."
+				: "Those strokes could not be rendered: the pages hold no ink this version " +
+					"recognises, or reading them failed (see the details below).";
 		return (
 			"The documents contain pen strokes but no text highlights. The reMarkable " +
 			"only writes a highlight file when you select text and highlight it " +
 			"(the 'smart' highlighter on a text layer); freehand marks and handwriting " +
-			"are strokes, and importing those is not built yet."
+			`are strokes. ${why}`
 		);
 	}
 	if (withHighlightFiles.length === 0) {
