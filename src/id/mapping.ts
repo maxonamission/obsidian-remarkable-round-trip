@@ -15,6 +15,11 @@ export interface MappingEntry {
 	uploadedAt: string;
 	/** Simple content hash of the uploaded (preprocessed) markdown. */
 	contentHash: string;
+	/**
+	 * Device document hash at the last annotation import (F10). Unset until
+	 * the first import; equal to the current device hash means "nothing new".
+	 */
+	importedHash?: string;
 }
 
 export type MappingTable = Record<string, MappingEntry>;
@@ -29,6 +34,11 @@ export function contentHash(text: string): string {
 	return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+/**
+ * Record a fresh upload. `importedHash` is deliberately *not* carried over:
+ * a re-send creates a new document on the device, so an import marker from
+ * the previous copy would wrongly suppress the next annotation import.
+ */
 export function recordUpload(
 	table: MappingTable,
 	entry: Omit<MappingEntry, "uploadedAt"> & { uploadedAt?: string },
@@ -37,6 +47,7 @@ export function recordUpload(
 		...table,
 		[entry.docId]: {
 			...entry,
+			importedHash: undefined,
 			uploadedAt: entry.uploadedAt ?? new Date().toISOString(),
 		},
 	};

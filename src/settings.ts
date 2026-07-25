@@ -27,6 +27,10 @@ export interface RoundTripSettings {
 	/** Watch folder (F6): auto-send notes dropped into this vault folder. */
 	watchFolderEnabled: boolean;
 	watchFolderPath: string;
+	/** Where imported annotations land (F11): companion note or in the source. */
+	annotationTarget: "companion" | "source";
+	/** Vault folder for companion notes; empty = vault root. */
+	annotationFolder: string;
 	/** Mirror vault folders on the device (GP_E2_S7); off = flat root uploads. */
 	mirrorFolders: boolean;
 	/** Device folder under which the vault tree is mirrored ("" = root). */
@@ -46,6 +50,8 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	margin: 40,
 	watchFolderEnabled: false,
 	watchFolderPath: "reMarkable-out",
+	annotationTarget: "companion",
+	annotationFolder: "reMarkable-in",
 	mirrorFolders: true,
 	deviceBaseFolder: "Obsidian",
 	mappings: {},
@@ -240,6 +246,42 @@ export class RoundTripSettingTab extends PluginSettingTab {
 							this.plugin.settings.deviceBaseFolder = value
 								.trim()
 								.replace(/^\/+|\/+$/g, "");
+							await this.plugin.saveSettings();
+						}),
+				);
+		}
+
+		new Setting(containerEl).setName("Annotations back into the vault").setHeading();
+
+		new Setting(containerEl)
+			.setName("Where imported annotations land")
+			.setDesc(
+				"A companion note keeps your source note untouched and links back to it. " +
+					"Writing into the source note itself is possible, but the plugin then " +
+					"edits a note you wrote — it only ever replaces its own marked block.",
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("companion", "Companion note (recommended)")
+					.addOption("source", "Section inside the source note")
+					.setValue(this.plugin.settings.annotationTarget)
+					.onChange(async (value) => {
+						this.plugin.settings.annotationTarget = value === "source" ? "source" : "companion";
+						await this.plugin.saveSettings();
+						this.display();
+					}),
+			);
+
+		if (this.plugin.settings.annotationTarget === "companion") {
+			new Setting(containerEl)
+				.setName("Folder for companion notes")
+				.setDesc("Vault path, e.g. reMarkable-in; empty puts them in the vault root.")
+				.addText((text) =>
+					text
+						.setPlaceholder("reMarkable-in")
+						.setValue(this.plugin.settings.annotationFolder)
+						.onChange(async (value) => {
+							this.plugin.settings.annotationFolder = value.trim().replace(/^\/+|\/+$/g, "");
 							await this.plugin.saveSettings();
 						}),
 				);

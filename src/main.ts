@@ -32,6 +32,12 @@ import { MirrorTransport, toTransportError } from "./transport/mirror";
 import { EmbedContent } from "./preprocess/preprocess";
 import { DOCID_FRONTMATTER_KEY } from "./id/docid";
 import { NoteInput, sendBatch, SendResult } from "./sync/send";
+import { DocumentFile, PullResult, pullAnnotations } from "./incoming/pull";
+import {
+	companionPath,
+	renderAnnotationBlock,
+	upsertAnnotationBlock,
+} from "./incoming/annotationnote";
 import { WatchQueue } from "./sync/watcher";
 import { flattenSelection } from "./sync/selection";
 
@@ -70,6 +76,12 @@ export default class RoundTripPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => this.watchQueue?.noteRemoved(file.path)),
 		);
+
+		this.addCommand({
+			id: "import-annotations",
+			name: "Import annotations from reMarkable",
+			callback: () => void this.pullAnnotations(),
+		});
 
 		this.addCommand({
 			id: "send-current-note",
@@ -361,6 +373,109 @@ export default class RoundTripPlugin extends Plugin {
 		}
 		return map;
 	}
+
+	/**
+	 * Import annotations for every note we have sent (F10/F11). Runs on an
+	 * explicit command only — the vault is never written to behind your back.
+	 */
+	async pullAnnotations(): Promise<void> {
+		const mappings = Object.keys(this.settings.mappings).length;
+		if (mappings === 0) {
+			new Notice("Nothing to import yet — send a note to your reMarkable first.");
+			return;
+		}
+		if (this.settings.deviceToken === "") {
+			new Notice("Not paired with a reMarkable account yet — open the plugin settings first.");
+			return;
+		}
+
+		const notice = new Notice(`Checking ${mappings} document(s) for annotations…`, 0);
+		try {
+			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
+			const { results, table } = await pullAnnotations(
+				this.settings.mappings,
+				{
+					listDocumentHashes: async () => {
+						const items = await api.listItems();
+						return new Map(
+							items
+								.filter((item) => item.type === "DocumentType")
+								.map((item) => [item.id, item.hash]),
+						);
+					},
+					listDocumentFiles: async (deviceDocId, hash) => {
+						const { entries } = await api.raw.getEntries(deviceDocId, hash);
+						return entries.map((entry): DocumentFile => ({ id: entry.id, hash: entry.hash }));
+					},
+					readFile: (file) => api.raw.getText(file.id, file.hash),
+					writeAnnotations: (entry, highlights) =>
+						this.writeAnnotations(entry.notePath, highlights),
+				},
+				(done, total) => notice.setMessage(`Checking ${done}/${total} for annotations…`),
+			);
+			this.settings.mappings = table;
+			await this.saveSettings();
+			reportPullResults(results);
+		} catch (error) {
+			new Notice(toTransportError(error).message, 10000);
+		} finally {
+			notice.hide();
+		}
+	}
+
+	/** Write one note's annotations to its configured destination (F11). */
+	private async writeAnnotations(
+		notePath: string,
+		highlights: Parameters<typeof renderAnnotationBlock>[0]["highlights"],
+	): Promise<void> {
+		const sourceName = (notePath.split("/").pop() ?? notePath).replace(/\.md$/i, "");
+		const block = renderAnnotationBlock({
+			sourcePath: notePath,
+			sourceName,
+			highlights,
+			importedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+		});
+
+		const targetPath =
+			this.settings.annotationTarget === "source"
+				? notePath
+				: companionPath(notePath, this.settings.annotationFolder);
+
+		const existing = this.app.vault.getFileByPath(targetPath);
+		if (existing) {
+			const current = await this.app.vault.read(existing);
+			await this.app.vault.modify(existing, upsertAnnotationBlock(current, block));
+			return;
+		}
+		// A companion note may need its folder created first.
+		const folder = targetPath.split("/").slice(0, -1).join("/");
+		if (folder !== "" && !this.app.vault.getFolderByPath(folder)) {
+			await this.app.vault.createFolder(folder);
+		}
+		await this.app.vault.create(targetPath, `${block}\n`);
+	}
+}
+
+function reportPullResults(results: PullResult[]): void {
+	const failures = results.filter((r): r is Extract<PullResult, { ok: false }> => !r.ok);
+	const imported = results.filter((r) => r.ok && r.skipped !== true);
+	const total = imported.reduce((sum, r) => sum + (r.ok ? r.highlightCount : 0), 0);
+
+	if (failures.length > 0) {
+		const detail = failures
+			.slice(0, 3)
+			.map((f) => `${f.notePath.split("/").pop()}: ${f.error}`)
+			.join("\n");
+		new Notice(`${failures.length} document(s) could not be imported.\n${detail}`, 10000);
+		return;
+	}
+	if (imported.length === 0) {
+		new Notice("No new annotations — everything is already up to date.");
+		return;
+	}
+	new Notice(
+		`Imported ${total} highlight(s) from ${imported.length} document(s).`,
+	);
 }
 
 function getFrontmatterValue(

@@ -59,6 +59,21 @@ Your notes go directly from Obsidian to the endpoint you configure — the
 official reMarkable cloud or your own rmfakecloud server. No other services,
 no telemetry.
 
+## Getting annotations back
+
+Annotate a document on your reMarkable, then run **Import annotations from
+reMarkable** from the command palette. The plugin finds the documents that
+changed since the last import, pulls their text highlights, and writes them
+into your vault — grouped per page, with colours, linked to the note they
+came from.
+
+By default they go into a companion note (`Your note — annotations.md`) so
+your source note stays untouched; a setting switches to a section inside the
+source note. Either way the plugin only replaces its own marked block, so
+your own writing around it survives a re-import.
+
+Handwritten annotations are not included yet — that is the next step.
+
 ## Known limitations (beta)
 
 - Images render as placeholders in the PDF.

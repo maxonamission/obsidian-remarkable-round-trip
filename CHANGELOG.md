@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0] - 2026-07-25
+
+### Added
+
+- **The round trip begins: annotations come back.** New command *Import
+  annotations from reMarkable* reads the text highlights you made on the
+  device and writes them into your vault, linked to the note they came
+  from. Documents you have not touched since the last import are skipped.
+- Highlights land in a **companion note** by default (`Note — annotations.md`),
+  which leaves your source note untouched and links back to it. You can
+  switch to a section inside the source note instead — either way the plugin
+  only ever replaces its own marked block, so anything you write around it
+  survives a re-import.
+- Highlights are grouped per page and keep their colour.
+
+Handwritten annotations are not included yet — that is the next step.
+
 ## [0.4.0] - 2026-07-25
 
 ### Added
