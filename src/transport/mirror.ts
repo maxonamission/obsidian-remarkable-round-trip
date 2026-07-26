@@ -7,6 +7,7 @@
  */
 
 import { TransportError } from "./http";
+import { adviseFailure, classifyFailure } from "./failure";
 import type { UploadResult } from "./cloud";
 
 /** The slice of rmapi-js' RemarkableApi that mirroring needs. */
@@ -222,6 +223,12 @@ export function toTransportError(error: unknown): TransportError {
 				"writing at the same time), so the upload was refused. Nothing was lost — " +
 				"wait until the tablet finishes syncing and send again.",
 		);
+	}
+	// A network or credential failure is not a mirroring problem, and telling
+	// someone to switch mirroring off would not help them (GP_E3_S10).
+	const kind = classifyFailure(error);
+	if (kind !== "unknown") {
+		return new TransportError(`${message}. ${adviseFailure(kind)}`);
 	}
 	return new TransportError(
 		`Folder mirroring failed (${message}). ` +

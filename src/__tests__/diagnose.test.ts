@@ -67,8 +67,26 @@ describe("describeDiagnosis", () => {
 		expect(text).toContain("local to");
 	});
 
-	it("points at connection or pairing when the cloud cannot be read", () => {
-		const text = describeDiagnosis({ reachable: false, error: "401" });
+	it("falls back to the general verdict for an error it cannot place", () => {
+		const text = describeDiagnosis({ reachable: false, error: "iets onbekends" });
 		expect(text).toContain("not at the tablet");
+	});
+});
+
+describe("describeDiagnosis on a failure", () => {
+	it("blames the network, not the pairing, when the host cannot be resolved", () => {
+		const verdict = describeDiagnosis({
+			reachable: false,
+			error:
+				'Request Failed. UnknownHostException Unable to resolve host ' +
+				'"eu.tectonic.remarkable.com": No address associated with hostname',
+		});
+		expect(verdict).toContain("network problem, not your pairing");
+		expect(verdict).not.toContain("connection or your pairing");
+	});
+
+	it("points at pairing when the cloud refuses the credentials", () => {
+		const verdict = describeDiagnosis({ reachable: false, error: "401 Unauthorized" });
+		expect(verdict).toContain("Pair again");
 	});
 });

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.1] - 2026-07-26
+
+### Fixed
+
+- **A network failure was reported as a possible pairing problem.** When your
+  device cannot look up the reMarkable server at all — no connection, or a
+  VPN, private DNS or ad-blocking resolver in the way — it never reaches
+  reMarkable, so pairing cannot be the cause. Messages now say which of the
+  three it is: a network problem, refused credentials, or an error from the
+  cloud itself. This applies to sending, importing, and the read-only cloud
+  check alike.
+
 ## [0.9.0] - 2026-07-26
 
 ### Added

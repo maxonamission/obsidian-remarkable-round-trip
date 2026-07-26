@@ -6,6 +6,7 @@
  * user can read — and paste — so the next question is answerable.
  */
 
+import { adviseFailure, classifyFailure } from "../transport/failure";
 import { PullResult } from "./pull";
 
 export interface ImportReportInput {
@@ -114,7 +115,11 @@ function diagnose(input: ImportReportInput): string {
 		);
 	}
 	if (failures.length === results.length && failures.length > 0) {
-		return "Every document failed — that points at the connection or your pairing rather than at the documents.";
+		const kind = classifyFailure(failures[0].ok ? "" : failures[0].error);
+		const advice = adviseFailure(kind);
+		return advice === ""
+			? "Every document failed — that points at the connection or your pairing rather than at the documents."
+			: `Every document failed, so the cause is not in the documents. ${advice}`;
 	}
 	if (scanned.length === 0) {
 		return (

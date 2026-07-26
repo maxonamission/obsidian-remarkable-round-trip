@@ -11,6 +11,7 @@
  */
 
 import { MappingTable } from "../id/mapping";
+import { adviseFailure, classifyFailure } from "./failure";
 
 export interface DiagnoseApi {
 	/** [rootHash, generation, schemaVersion] of the account's sync root. */
@@ -61,9 +62,13 @@ export async function diagnoseCloud(
 /** Human-readable verdict, aimed at someone holding only a phone. */
 export function describeDiagnosis(diagnosis: CloudDiagnosis): string {
 	if (!diagnosis.reachable) {
+		const error = diagnosis.error ?? "unknown error";
+		const advice = adviseFailure(classifyFailure(error));
 		return (
-			`Could not read your reMarkable cloud account (${diagnosis.error ?? "unknown error"}). ` +
-			"That points at the connection or your pairing, not at the tablet itself."
+			`Could not read your reMarkable cloud account (${error}). ` +
+			(advice === ""
+				? "That points at the connection or your pairing, not at the tablet itself."
+				: advice)
 		);
 	}
 	const lines = [

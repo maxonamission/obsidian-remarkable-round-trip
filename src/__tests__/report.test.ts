@@ -207,11 +207,23 @@ describe("renderImportReport", () => {
 		expect(renderImportReport({ ...base, results })).toContain("no longer on the reMarkable");
 	});
 
-	it("blames the connection when every document failed", () => {
-		const results: PullResult[] = [
-			{ ok: false, docId: "a", notePath: "Nota.md", error: "401" },
+	it("names the cause when every document failed", () => {
+		const auth: PullResult[] = [{ ok: false, docId: "a", notePath: "Nota.md", error: "401" }];
+		expect(renderImportReport({ ...base, results: auth })).toContain("Pair again");
+
+		const offline: PullResult[] = [
+			{ ok: false, docId: "a", notePath: "Nota.md", error: "Unable to resolve host" },
 		];
-		expect(renderImportReport({ ...base, results })).toContain("connection or your pairing");
+		expect(renderImportReport({ ...base, results: offline })).toContain(
+			"network problem, not your pairing",
+		);
+
+		const unknown: PullResult[] = [
+			{ ok: false, docId: "a", notePath: "Nota.md", error: "iets onbekends" },
+		];
+		expect(renderImportReport({ ...base, results: unknown })).toContain(
+			"connection or your pairing",
+		);
 	});
 
 	it("confirms success and mentions the forced mode", () => {
