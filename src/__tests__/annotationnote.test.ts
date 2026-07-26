@@ -38,10 +38,14 @@ describe("renderAnnotationBlock", () => {
 	it("embeds handwriting images per page", () => {
 		const block = renderAnnotationBlock({
 			...INPUT,
-			images: ["reMarkable-in/handwriting/dev-p01.png", "reMarkable-in/handwriting/dev-p02.png"],
+			images: [
+				{ path: "reMarkable-in/handwriting/dev-p01.png", page: 1, quote: "de zin ernaast" },
+				{ path: "reMarkable-in/handwriting/dev-p02.png", page: 2 },
+			],
 		});
 		expect(block).toContain("### Handwriting");
-		expect(block).toContain("Page 1:");
+		expect(block).toContain("**Page 1**");
+		expect(block).toContain("> de zin ernaast");
 		expect(block).toContain("![[reMarkable-in/handwriting/dev-p01.png]]");
 		expect(block).toContain("![[reMarkable-in/handwriting/dev-p02.png]]");
 	});
@@ -50,7 +54,7 @@ describe("renderAnnotationBlock", () => {
 		const block = renderAnnotationBlock({
 			...INPUT,
 			highlights: [],
-			images: ["a.png"],
+			images: [{ path: "a.png" }],
 		});
 		expect(block).toContain("_No text highlights; handwriting is shown below._");
 		expect(block).toContain("![[a.png]]");

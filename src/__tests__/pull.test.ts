@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { PdfLayout } from "../convert/pdf";
 import { MappingTable } from "../id/mapping";
 import { Highlight } from "../incoming/highlights";
-import { DocumentFile, PullDeps, collectHighlights, pullAnnotations } from "../incoming/pull";
+import {
+	DocumentFile,
+	PullDeps,
+	StrokeRenderRequest,
+	collectHighlights,
+	pullAnnotations,
+} from "../incoming/pull";
 
 const TABLE: MappingTable = {
 	"doc-a": {
@@ -14,6 +23,7 @@ const TABLE: MappingTable = {
 };
 
 const page = (text: string) => JSON.stringify({ highlights: [[{ text, color: 3 }]] });
+const CONTENT = JSON.stringify({ cPages: { pages: [{ id: "p1" }, { id: "p2" }] } });
 
 function makeDeps(overrides: Partial<PullDeps> = {}) {
 	const written: { notePath: string; highlights: Highlight[] }[] = [];
@@ -27,8 +37,13 @@ function makeDeps(overrides: Partial<PullDeps> = {}) {
 		listDocumentHashes: () => Promise.resolve(new Map([["device-a", "hash-1"]])),
 		listDocumentFiles: () => Promise.resolve(files),
 		readFile: (file) =>
-			Promise.resolve(file.id.endsWith("p1.json") ? page("van pagina 1") : page("van pagina 2")),
-		readPageOrder: () => Promise.resolve(["p1", "p2"]),
+			Promise.resolve(
+				file.id.endsWith(".content")
+					? CONTENT
+					: file.id.endsWith("p1.json")
+						? page("van pagina 1")
+						: page("van pagina 2"),
+			),
 		writeAnnotations: (entry, highlights) => {
 			written.push({ notePath: entry.notePath, highlights });
 			return Promise.resolve();
@@ -41,7 +56,7 @@ function makeDeps(overrides: Partial<PullDeps> = {}) {
 describe("collectHighlights", () => {
 	it("reads only highlight files and orders them by page", async () => {
 		const { deps } = makeDeps();
-		const { highlights, scan } = await collectHighlights("device-a", "hash-1", deps);
+		const { highlights, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
 		expect(highlights.map((h) => h.text)).toEqual(["van pagina 1", "van pagina 2"]);
 		expect(highlights.map((h) => h.page)).toEqual([1, 2]);
 		expect(scan).toMatchObject({ totalFiles: 4, highlightFiles: 2, strokeFiles: 1 });
@@ -51,7 +66,7 @@ describe("collectHighlights", () => {
 		const { deps } = makeDeps({
 			listDocumentFiles: () => Promise.resolve([{ id: "device-a.content", hash: "h" }]),
 		});
-		const { highlights, scan } = await collectHighlights("device-a", "hash-1", deps);
+		const { highlights, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
 		expect(highlights).toEqual([]);
 		expect(scan).toMatchObject({ highlightFiles: 0, strokeFiles: 0, totalFiles: 1 });
 	});
@@ -63,16 +78,95 @@ describe("collectHighlights", () => {
 					? Promise.reject(new Error("stuk"))
 					: Promise.resolve(page("van pagina 2")),
 		});
-		const { highlights, scan } = await collectHighlights("device-a", "hash-1", deps);
+		const { highlights, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
 		expect(highlights.map((h) => h.text)).toEqual(["van pagina 2"]);
 		expect(scan.unreadableFiles).toBe(1);
 	});
 
 	it("still returns highlights when the page order is unavailable", async () => {
-		const { deps } = makeDeps({ readPageOrder: undefined });
-		const { highlights } = await collectHighlights("device-a", "hash-1", deps);
+		const { deps } = makeDeps({ readFile: () => Promise.resolve(page("zonder volgorde")) });
+		const { highlights } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
 		expect(highlights).toHaveLength(2);
 		expect(highlights.every((h) => h.page === undefined)).toBe(true);
+	});
+});
+
+describe("handwriting import", () => {
+	const realPage = new Uint8Array(
+		readFileSync(fileURLToPath(new URL("./fixtures/lines-v2.rm", import.meta.url))),
+	);
+	const layout: PdfLayout = {
+		pageWidth: 447,
+		pageHeight: 596,
+		pageCount: 1,
+		// The fixture's ink covers device y 86–171, which is PDF y 542–569.
+		lines: [{ page: 1, x: 40, y: 550, size: 11, text: "De zin waar de inkt bij hoort." }],
+	};
+
+	function handwritingDeps(overrides: Partial<PullDeps> = {}) {
+		const requests: StrokeRenderRequest[] = [];
+		const { deps, written } = makeDeps({
+			readBytes: () => Promise.resolve(realPage),
+			renderStrokes: (request) => {
+				requests.push(request);
+				return Promise.resolve(`img/${request.page}-${request.remark}.png`);
+			},
+			...overrides,
+		});
+		return { deps, requests, written };
+	}
+
+	it("numbers a remark by its page in the document, not by file order", async () => {
+		// The stroke file is p1.rm, but `.content` lists p1 first — so the
+		// number must come from there, which is what the beta got wrong.
+		const { deps, requests } = handwritingDeps();
+		const { images } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		expect(requests.every((request) => request.page === 1)).toBe(true);
+		expect(images.every((image) => image.page === 1)).toBe(true);
+	});
+
+	it("counts remarks and pages separately", async () => {
+		// One drawing on one page: the fixture's ten strokes belong together,
+		// so they must not come back as ten images. Splitting itself is
+		// covered in anchor.test.ts.
+		const { deps, requests } = handwritingDeps();
+		const { scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		expect(requests).toHaveLength(1);
+		expect(scan.renderedRemarks).toBe(1);
+		expect(scan.renderedPages).toBe(1);
+		expect(new Set(requests.map((r) => r.remark)).size).toBe(requests.length);
+	});
+
+	it("quotes the text a remark sits against when the layout is available", async () => {
+		const { deps } = handwritingDeps({ loadLayout: () => Promise.resolve(layout) });
+		const { images, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		expect(images.some((image) => image.quote?.includes("De zin waar de inkt"))).toBe(true);
+		expect(scan.anchoredRemarks).toBeGreaterThan(0);
+		expect(scan.anchorSkipped).toBeUndefined();
+	});
+
+	it("still returns the images when the layout cannot be reproduced", async () => {
+		const { deps } = handwritingDeps({ loadLayout: () => Promise.resolve(null) });
+		const { images, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		expect(images.length).toBeGreaterThan(0);
+		expect(images.every((image) => image.quote === undefined)).toBe(true);
+		expect(scan.anchorSkipped).toBe("no-layout");
+	});
+
+	it("survives a stroke file it cannot read", async () => {
+		const { deps } = handwritingDeps({
+			readBytes: () => Promise.reject(new Error("stuk")),
+		});
+		const { scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		expect(scan.renderedRemarks).toBe(0);
+		expect(scan.unreadableFiles).toBe(1);
+	});
+
+	it("does nothing at all when handwriting import is switched off", async () => {
+		const { deps } = makeDeps({ readBytes: () => Promise.resolve(realPage) });
+		const { images, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		expect(images).toEqual([]);
+		expect(scan.renderedPages).toBe(0);
 	});
 });
 

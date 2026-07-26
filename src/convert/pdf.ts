@@ -33,6 +33,29 @@ export interface PdfMetadata {
 /** Marker prefix used to carry the document ID inside PDF metadata. */
 export const DOCID_SUBJECT_PREFIX = "remarkable-round-trip:docid:";
 
+/** One piece of text as it was placed on the page (GP_E3_S8). */
+export interface LaidOutLine {
+	/** 1-based page number. */
+	page: number;
+	/** Baseline position in PDF points (origin bottom-left). */
+	x: number;
+	y: number;
+	size: number;
+	text: string;
+}
+
+/**
+ * Where every line ended up. This is what lets imported ink be quoted
+ * against the text it sits next to: the device gives strokes in page
+ * coordinates, and this map turns those coordinates back into sentences.
+ */
+export interface PdfLayout {
+	pageWidth: number;
+	pageHeight: number;
+	pageCount: number;
+	lines: LaidOutLine[];
+}
+
 // reMarkable 2 screen in PDF points (1404×1872 px at 226 DPI).
 export const PAGE_WIDTH = 447;
 export const PAGE_HEIGHT = 596;
@@ -42,6 +65,15 @@ const DEFAULTS: Required<PdfLayoutOptions> = {
 	lineHeight: 1.5,
 	margin: 40,
 };
+
+/**
+ * The typography actually used, defaults filled in. Recorded per upload so a
+ * later import can reproduce the same page layout even when the settings have
+ * changed in the meantime (GP_E3_S8).
+ */
+export function resolveLayoutOptions(options: PdfLayoutOptions = {}): Required<PdfLayoutOptions> {
+	return { ...DEFAULTS, ...options };
+}
 
 const HEADING_SIZES: Record<number, number> = { 1: 19, 2: 16, 3: 14, 4: 12, 5: 11, 6: 11 };
 
@@ -75,17 +107,39 @@ function isWinAnsiExtra(ch: string): boolean {
 interface Typesetter {
 	doc: PDFDocument;
 	page: PDFPage;
+	pageIndex: number;
 	y: number;
 	body: PDFFont;
 	bold: PDFFont;
 	italic: PDFFont;
 	mono: PDFFont;
 	opts: Required<PdfLayoutOptions>;
+	/** Every placed line, in reading order (GP_E3_S8). */
+	placed: LaidOutLine[];
 }
 
 function newPage(ts: Typesetter): void {
 	ts.page = ts.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+	ts.pageIndex++;
 	ts.y = PAGE_HEIGHT - ts.opts.margin;
+}
+
+/**
+ * Draw one line *and* remember where it landed. Every text placement goes
+ * through here, so the layout map cannot silently drift from the PDF.
+ */
+function put(
+	ts: Typesetter,
+	text: string,
+	x: number,
+	y: number,
+	size: number,
+	font: PDFFont,
+): void {
+	ts.page.drawText(text, { x, y, size, font, color: rgb(0, 0, 0) });
+	if (text.trim() !== "") {
+		ts.placed.push({ page: ts.pageIndex, x, y, size, text });
+	}
 }
 
 function ensureRoom(ts: Typesetter, needed: number): void {
@@ -128,13 +182,7 @@ function drawLines(
 	for (const line of lines) {
 		ensureRoom(ts, step);
 		ts.y -= step;
-		ts.page.drawText(line, {
-			x: ts.opts.margin + indent,
-			y: ts.y,
-			size,
-			font,
-			color: rgb(0, 0, 0),
-		});
+		put(ts, line, ts.opts.margin + indent, ts.y, size, font);
 	}
 	ts.y -= extraGapAfter;
 }
@@ -175,12 +223,12 @@ function drawList(ts: Typesetter, items: ListItem[]): void {
 		ts.y -= step;
 		ts.page.drawText(bullet, { x: ts.opts.margin + indent - 12, y: ts.y, size, font: ts.body });
 		if (lines.length > 0) {
-			ts.page.drawText(lines[0], { x: ts.opts.margin + indent, y: ts.y, size, font: ts.body });
+			put(ts, lines[0], ts.opts.margin + indent, ts.y, size, ts.body);
 		}
 		for (const line of lines.slice(1)) {
 			ensureRoom(ts, step);
 			ts.y -= step;
-			ts.page.drawText(line, { x: ts.opts.margin + indent, y: ts.y, size, font: ts.body });
+			put(ts, line, ts.opts.margin + indent, ts.y, size, ts.body);
 		}
 	}
 	ts.y -= size * 0.6;
@@ -196,7 +244,7 @@ function drawQuote(ts: Typesetter, quoteLines: string[]): void {
 		ensureRoom(ts, step);
 		ts.y -= step;
 		ts.page.drawText("|", { x: ts.opts.margin + 2, y: ts.y, size, font: ts.body });
-		ts.page.drawText(line, { x: ts.opts.margin + indent, y: ts.y, size, font: ts.italic });
+		put(ts, line, ts.opts.margin + indent, ts.y, size, ts.italic);
 	}
 	ts.y -= size * 0.6;
 }
@@ -212,7 +260,7 @@ function drawCode(ts: Typesetter, codeLines: string[]): void {
 		}
 		ensureRoom(ts, step);
 		ts.y -= step;
-		ts.page.drawText(line, { x: ts.opts.margin + 8, y: ts.y, size, font: ts.mono });
+		put(ts, line, ts.opts.margin + 8, ts.y, size, ts.mono);
 	}
 	ts.y -= size * 0.8;
 }
@@ -278,7 +326,7 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 			for (const line of cellLines[c]) {
 				y -= step;
 				if (y < ts.opts.margin) break;
-				ts.page.drawText(line, { x: ts.opts.margin + offsets[c], y, size, font });
+				put(ts, line, ts.opts.margin + offsets[c], y, size, font);
 			}
 			lowest = Math.min(lowest, y);
 		});
@@ -309,15 +357,24 @@ function drawHr(ts: Typesetter): void {
 	ts.y -= 6;
 }
 
+export interface PdfRender {
+	bytes: Uint8Array;
+	/** Where the text landed, for anchoring imported ink (GP_E3_S8). */
+	layout: PdfLayout;
+}
+
 /**
  * Render blocks to PDF bytes. The note title becomes an H1-style document
  * header; the document ID lands in the PDF Subject for round-trip detection.
+ *
+ * Returns the layout map alongside the bytes: rendering and measuring are the
+ * same pass, so the two can never disagree about where a sentence sits.
  */
 export async function renderPdf(
 	blocks: Block[],
 	meta: PdfMetadata,
 	options: PdfLayoutOptions = {},
-): Promise<Uint8Array> {
+): Promise<PdfRender> {
 	const opts = { ...DEFAULTS, ...options };
 	const doc = await PDFDocument.create();
 	doc.setTitle(meta.title);
@@ -327,6 +384,8 @@ export async function renderPdf(
 	const ts: Typesetter = {
 		doc,
 		page: undefined as unknown as PDFPage,
+		pageIndex: 0,
+		placed: [],
 		y: 0,
 		body: await doc.embedFont(StandardFonts.Helvetica),
 		bold: await doc.embedFont(StandardFonts.HelveticaBold),
@@ -365,5 +424,13 @@ export async function renderPdf(
 		}
 	}
 
-	return doc.save();
+	return {
+		bytes: await doc.save(),
+		layout: {
+			pageWidth: PAGE_WIDTH,
+			pageHeight: PAGE_HEIGHT,
+			pageCount: ts.pageIndex,
+			lines: ts.placed,
+		},
+	};
 }

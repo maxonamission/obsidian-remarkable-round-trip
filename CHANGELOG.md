@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.8.0] - 2026-07-26
+
+### Added
+
+- **Handwriting now comes back with the sentence it belongs to.** A remark
+  written next to a paragraph used to return as a cropped drawing with no
+  context. The plugin typesets your PDF itself, so it knows which line sits
+  at which height on which page — imported ink is projected back onto that
+  layout and quoted:
+
+  > the sentence you wrote next to
+  >
+  > ![your handwriting]
+
+- **One image per remark, not one per page.** Ink is grouped by where it sits
+  on the page, so a note beside the second paragraph and an underline in the
+  fifth come back as two images with their own quotes.
+
+### Fixed
+
+- **Page numbers were wrong.** Annotations were numbered by the order of the
+  files the device returned, and only annotated pages get a file — so a
+  remark on page 7 of a document reported as "page 1". Page numbers now come
+  from the document's own page order. This also restores the page headings
+  for text highlights, which had been missing entirely.
+
+### Note
+
+Quoting needs the note to still match what was sent; if you edited it since,
+the images come back without quotes rather than with the wrong ones, and the
+import report says so. Send the note again to restore the link. EPUB reflows
+on the device and has no fixed page layout, so it stays at page level.
+
 ## [0.7.1] - 2026-07-25
 
 ### Fixed

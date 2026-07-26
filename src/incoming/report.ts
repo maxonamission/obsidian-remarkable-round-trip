@@ -47,8 +47,12 @@ export function renderImportReport(input: ImportReportInput): string {
 			lines.push(`✓ ${result.notePath}: ${result.highlightCount} highlight(s)`);
 			continue;
 		}
+		const anchored =
+			scan.renderedRemarks > 0 ? `, ${scan.anchoredRemarks} anchored to text` : "";
 		const rendered =
-			scan.renderedPages > 0 ? `, ${scan.renderedPages} handwritten page(s)` : "";
+			scan.renderedPages > 0
+				? `, ${scan.renderedRemarks} remark(s) on ${scan.renderedPages} handwritten page(s)${anchored}`
+				: "";
 		lines.push(
 			`✓ ${result.notePath}: ${result.highlightCount} highlight(s)${rendered} ` +
 				`(${scan.totalFiles} files, ${scan.highlightFiles} highlight, ${scan.strokeFiles} stroke)`,
@@ -70,9 +74,20 @@ function diagnose(input: ImportReportInput): string {
 	const imported = successes.filter((r) => r.highlightCount > 0);
 	const failures = results.filter((r) => !r.ok);
 	const renderedPages = successes.reduce((total, r) => total + (r.scan?.renderedPages ?? 0), 0);
+	const anchored = successes.reduce((total, r) => total + (r.scan?.anchoredRemarks ?? 0), 0);
+	const unanchored = scanned.some((r) => r.scan?.anchorSkipped === "no-layout");
+	const anchoring =
+		anchored > 0
+			? ` ${anchored} of them quote the sentence they were written against.`
+			: unanchored
+				? " They could not be quoted against the source text: the note has changed since it " +
+					"was sent, or it went over as EPUB, which has no fixed page layout. Send the note " +
+					"again to restore the link."
+				: "";
 	const handwriting =
 		renderedPages > 0
-			? ` ${renderedPages} handwritten page(s) came back as images, embedded with the annotations.`
+			? ` ${renderedPages} handwritten page(s) came back as images, embedded with the ` +
+				`annotations.${anchoring}`
 			: "";
 
 	if (imported.length > 0) {
@@ -86,7 +101,7 @@ function diagnose(input: ImportReportInput): string {
 			`No text highlights were found, but ${renderedPages} handwritten page(s) came back ` +
 			"as images, embedded with the annotations. The reMarkable only writes a highlight " +
 			"file when you select text and highlight it on a text layer; freehand marks and " +
-			"handwriting are pen strokes, and those are rendered to pictures instead."
+			`handwriting are pen strokes, and those are rendered to pictures instead.${anchoring}`
 		);
 	}
 	if (failures.length === results.length && failures.length > 0) {

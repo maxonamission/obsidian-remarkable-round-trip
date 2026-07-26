@@ -11,6 +11,8 @@ const scan = (over: Partial<NonNullable<Extract<PullResult, { ok: true }>["scan"
 	parsedHighlights: 0,
 	unreadableFiles: 0,
 	renderedPages: 0,
+	renderedRemarks: 0,
+	anchoredRemarks: 0,
 	...over,
 });
 
@@ -57,11 +59,11 @@ describe("renderImportReport", () => {
 				docId: "a",
 				notePath: "Nota.md",
 				highlightCount: 0,
-				scan: scan({ strokeFiles: 1, renderedPages: 1 }),
+				scan: scan({ strokeFiles: 1, renderedPages: 1, renderedRemarks: 1, anchoredRemarks: 1 }),
 			},
 		];
 		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
-		expect(report).toContain("0 highlight(s), 1 handwritten page(s)");
+		expect(report).toContain("1 remark(s) on 1 handwritten page(s), 1 anchored to text");
 		expect(report).toContain("1 handwritten page(s) came back");
 		expect(report).not.toContain("not built yet");
 	});
@@ -73,12 +75,38 @@ describe("renderImportReport", () => {
 				docId: "a",
 				notePath: "Nota.md",
 				highlightCount: 2,
-				scan: scan({ highlightFiles: 1, parsedHighlights: 2, strokeFiles: 2, renderedPages: 2 }),
+				scan: scan({
+					highlightFiles: 1,
+					parsedHighlights: 2,
+					strokeFiles: 2,
+					renderedPages: 2,
+					renderedRemarks: 3,
+				}),
 			},
 		];
 		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
 		expect(report).toContain("Imported successfully");
 		expect(report).toContain("2 handwritten page(s) came back");
+	});
+
+	it("explains why the handwriting could not be quoted", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 0,
+				scan: scan({
+					strokeFiles: 1,
+					renderedPages: 1,
+					renderedRemarks: 1,
+					anchorSkipped: "no-layout",
+				}),
+			},
+		];
+		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		expect(report).toContain("could not be quoted against the source text");
+		expect(report).toContain("Send the note again");
 	});
 
 	it("points at an unrecognised format when highlight files yield nothing", () => {

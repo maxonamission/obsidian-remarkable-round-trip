@@ -33,10 +33,19 @@ import { describeDiagnosis, diagnoseCloud } from "./transport/diagnose";
 import { EmbedContent } from "./preprocess/preprocess";
 import { DOCID_FRONTMATTER_KEY } from "./id/docid";
 import { NoteInput, sendBatch, SendResult } from "./sync/send";
-import { DocumentFile, PullResult, pullAnnotations } from "./incoming/pull";
+import {
+	DocumentFile,
+	HandwritingImage,
+	PullResult,
+	StrokeRenderRequest,
+	pullAnnotations,
+} from "./incoming/pull";
 import { renderImportReport } from "./incoming/report";
-import { parseRmLines } from "./incoming/rmlines";
 import { paintPlan, planRender } from "./incoming/strokerender";
+import { parseBlocks } from "./convert/mdblocks";
+import { PdfLayout, renderPdf } from "./convert/pdf";
+import { MappingEntry, contentHash } from "./id/mapping";
+import { preprocess } from "./preprocess/preprocess";
 import {
 	companionPath,
 	renderAnnotationBlock,
@@ -471,9 +480,9 @@ export default class RoundTripPlugin extends Plugin {
 					readFile: (file) => api.raw.getText(file.id, file.hash),
 					readBytes: (file) => api.raw.getHash(file.id, file.hash),
 					renderStrokes: this.settings.importHandwriting
-						? (deviceDocId, pageIndex, bytes) =>
-								this.renderHandwriting(deviceDocId, pageIndex, bytes)
+						? (request) => this.renderHandwriting(request)
 						: undefined,
+					loadLayout: (entry) => this.reproduceLayout(entry),
 					writeAnnotations: (entry, highlights, images) =>
 						this.writeAnnotations(entry.notePath, highlights, images),
 				},
@@ -528,17 +537,46 @@ export default class RoundTripPlugin extends Plugin {
 	}
 
 	/**
-	 * Rasterise one handwritten page to PNG and store it in the vault (F12).
-	 * Canvas lives only here, at the edge; the geometry is planned by the
-	 * pure renderer. Returns the vault path to embed, or null for a page
-	 * without ink.
+	 * Reproduce the page layout of a sent document, so imported ink can be
+	 * quoted against the sentence it was written next to (GP_E3_S8).
+	 *
+	 * Not stored but recomputed: a layout map is far bigger than the note it
+	 * describes. That only works while the note still matches what was sent,
+	 * so the content hash decides — and the typography comes from the upload,
+	 * not from today's settings.
 	 */
-	private async renderHandwriting(
-		deviceDocId: string,
-		pageIndex: number,
-		bytes: Uint8Array,
-	): Promise<string | null> {
-		const plan = planRender(parseRmLines(bytes));
+	private async reproduceLayout(entry: MappingEntry): Promise<PdfLayout | null> {
+		const typography = entry.pdfLayout;
+		if (typography === undefined) return null; // EPUB, or sent before 0.8.0
+		const file = this.app.vault.getFileByPath(entry.notePath);
+		if (file === null) return null;
+
+		const embeds = await this.buildEmbedMap(file);
+		const pre = preprocess(await this.app.vault.cachedRead(file), {
+			resolveEmbed: (linkpath) => embeds.get(linkpath) ?? { kind: "missing" },
+			frontmatterAsTitleBlock: this.settings.frontmatterAsTitleBlock,
+		});
+		// A changed note means the geometry no longer matches the document on
+		// the device; quoting from it would put the wrong sentence under the
+		// ink, which is worse than no quote at all (N3).
+		if (contentHash(pre.markdown) !== entry.contentHash) return null;
+
+		const { layout } = await renderPdf(
+			parseBlocks(pre.markdown),
+			{ title: file.basename, docId: entry.docId },
+			typography,
+		);
+		return layout;
+	}
+
+	/**
+	 * Rasterise one handwritten remark to PNG and store it in the vault (F12).
+	 * Canvas lives only here, at the edge; the geometry is planned by the
+	 * pure renderer. Returns the vault path to embed, or null for ink that
+	 * turned out to be empty.
+	 */
+	private async renderHandwriting(request: StrokeRenderRequest): Promise<string | null> {
+		const plan = planRender(request.strokes);
 		if (plan === null) return null;
 
 		const canvas = document.createElement("canvas");
@@ -558,9 +596,10 @@ export default class RoundTripPlugin extends Plugin {
 		if (folder !== "" && !this.app.vault.getFolderByPath(folder)) {
 			await this.app.vault.createFolder(folder);
 		}
-		// Deterministic name: a re-import overwrites the page instead of
+		// Deterministic name: a re-import overwrites the remark instead of
 		// piling up copies next to it.
-		const name = `${deviceDocId}-p${String(pageIndex).padStart(2, "0")}.png`;
+		const page = String(request.page).padStart(2, "0");
+		const name = `${request.deviceDocId}-p${page}-${request.remark}.png`;
 		const path = folder === "" ? name : `${folder}/${name}`;
 		const existing = this.app.vault.getFileByPath(path);
 		if (existing) {
@@ -575,7 +614,7 @@ export default class RoundTripPlugin extends Plugin {
 	private async writeAnnotations(
 		notePath: string,
 		highlights: Parameters<typeof renderAnnotationBlock>[0]["highlights"],
-		images: string[] = [],
+		images: HandwritingImage[] = [],
 	): Promise<void> {
 		const sourceName = (notePath.split("/").pop() ?? notePath).replace(/\.md$/i, "");
 		const block = renderAnnotationBlock({

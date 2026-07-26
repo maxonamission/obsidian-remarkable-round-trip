@@ -72,9 +72,16 @@ your source note stays untouched; a setting switches to a section inside the
 source note. Either way the plugin only replaces its own marked block, so
 your own writing around it survives a re-import.
 
-Handwritten pages come back as images: strokes are rendered to PNG, cropped
-to the ink, and embedded alongside the highlights. You can turn that off, or
-point it at a different folder.
+Handwriting comes back as images: strokes are rendered to PNG, cropped to the
+ink, and embedded alongside the highlights — grouped per remark, so a note
+beside one paragraph and an underline in another arrive separately. Each one
+is quoted with the sentence it was written against, because the plugin
+typeset that page itself and can project the ink back onto its own layout.
+
+Quoting needs the note to still match what was sent. Edited it since? The
+images come back without quotes rather than with the wrong ones, and the
+import report tells you to send the note again. EPUB reflows on the device,
+so there the annotations stay at page level.
 
 ## Known limitations (beta)
 

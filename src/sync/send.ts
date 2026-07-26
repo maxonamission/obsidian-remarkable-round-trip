@@ -6,7 +6,7 @@
 
 import { preprocess, EmbedResolver } from "../preprocess/preprocess";
 import { parseBlocks } from "../convert/mdblocks";
-import { renderPdf, PdfLayoutOptions } from "../convert/pdf";
+import { renderPdf, resolveLayoutOptions, PdfLayoutOptions } from "../convert/pdf";
 import { renderEpub } from "../convert/epub";
 import { ensureDocId } from "../id/docid";
 import { MappingTable, contentHash, recordUpload } from "../id/mapping";
@@ -109,7 +109,7 @@ export async function sendNote(
 		const bytes =
 			format === "epub"
 				? await renderEpub(blocks, { title: note.basename, docId })
-				: await renderPdf(blocks, { title: note.basename, docId }, deps.layout);
+				: (await renderPdf(blocks, { title: note.basename, docId }, deps.layout)).bytes;
 		const parentId = deps.resolveParent
 			? await deps.resolveParent(note.path)
 			: undefined;
@@ -136,6 +136,9 @@ export async function sendNote(
 			notePath: note.path,
 			deviceDocId: upload.deviceDocId,
 			contentHash: hash,
+			// EPUB reflows on the device, so there is no page geometry to
+			// anchor imported ink against (GP_E3_S8).
+			pdfLayout: format === "pdf" ? resolveLayoutOptions(deps.layout) : undefined,
 		});
 		return {
 			result: {

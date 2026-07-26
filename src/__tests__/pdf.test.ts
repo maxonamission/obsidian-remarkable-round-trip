@@ -75,7 +75,7 @@ describe("computeColumnWidths", () => {
 
 describe("renderPdf", () => {
 	it("produces a valid PDF with reMarkable page size and docId metadata", async () => {
-		const bytes = await renderPdf(parseBlocks("Eén alinea."), META);
+		const { bytes } = await renderPdf(parseBlocks("Eén alinea."), META);
 		expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
 
 		const doc = await PDFDocument.load(bytes);
@@ -88,7 +88,7 @@ describe("renderPdf", () => {
 
 	it("breaks long content across multiple pages", async () => {
 		const longText = Array.from({ length: 120 }, (_, i) => `Alinea ${i} met wat tekst erbij.`).join("\n\n");
-		const bytes = await renderPdf(parseBlocks(longText), META);
+		const { bytes } = await renderPdf(parseBlocks(longText), META);
 		const doc = await PDFDocument.load(bytes);
 		expect(doc.getPageCount()).toBeGreaterThan(1);
 	});
@@ -99,7 +99,7 @@ describe("renderPdf", () => {
 			"|---|---|---|---|---|",
 			"| Leidinggevenden | Strategisch sturen op datakwaliteit | Begrijpen van definities | Kunnen beoordelen van rapportages | Bewust worden van risico's |",
 		].join("\n");
-		const bytes = await renderPdf(parseBlocks(md), META);
+		const { bytes } = await renderPdf(parseBlocks(md), META);
 		const doc = await PDFDocument.load(bytes);
 		expect(doc.getPageCount()).toBeGreaterThanOrEqual(1);
 		// Inflate the (Flate-compressed) content streams and check that the
@@ -120,7 +120,7 @@ describe("renderPdf", () => {
 			"| a | b |\n|---|---|\n| 1 | 2 |",
 			"---",
 		].join("\n\n");
-		const bytes = await renderPdf(parseBlocks(md), META);
+		const { bytes } = await renderPdf(parseBlocks(md), META);
 		expect(bytes.length).toBeGreaterThan(500);
 	});
 });

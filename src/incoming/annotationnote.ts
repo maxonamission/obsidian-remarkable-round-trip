@@ -8,6 +8,7 @@
  */
 
 import { Highlight, colorName } from "./highlights";
+import type { HandwritingImage } from "./pull";
 
 export const BEGIN_MARKER = "<!-- remarkable-round-trip:begin -->";
 export const END_MARKER = "<!-- remarkable-round-trip:end -->";
@@ -18,8 +19,8 @@ export interface AnnotationRenderInput {
 	/** Basename of the source note, used as link text. */
 	sourceName: string;
 	highlights: Highlight[];
-	/** Vault paths of rendered handwriting images, in page order (F12). */
-	images?: string[];
+	/** Rendered handwriting, in page order (F12, GP_E3_S8). */
+	images?: HandwritingImage[];
 	/** ISO timestamp of this import. */
 	importedAt: string;
 }
@@ -51,9 +52,19 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): string {
 
 	if (images.length > 0) {
 		lines.push("", "### Handwriting", "");
-		images.forEach((path, index) => {
-			lines.push(`Page ${index + 1}:`, `![[${path}]]`, "");
-		});
+		let currentPage: number | undefined;
+		let first = true;
+		for (const image of images) {
+			if (image.page !== currentPage || first) {
+				currentPage = image.page;
+				lines.push(image.page === undefined ? "**Page unknown**" : `**Page ${image.page}**`, "");
+				first = false;
+			}
+			// The quote is what turns a drawing into a remark: it says which
+			// sentence the ink was written against (GP_E3_S8).
+			if (image.quote !== undefined) lines.push(`> ${image.quote}`, "");
+			lines.push(`![[${image.path}]]`, "");
+		}
 	}
 
 	// Trailing blank line before the end marker keeps the block readable when
