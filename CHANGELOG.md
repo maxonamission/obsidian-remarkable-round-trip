@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.9.0] - 2026-07-26
+
+### Added
+
+- **Pen marks come back as text, not as pictures of ink.** A circle around a
+  phrase used to return as an empty oval; a strike-through as a stray line.
+  The plugin now reads what the mark *did* — from its shape and from where it
+  sits on the page — and writes that:
+
+  | On the tablet | In your vault |
+  |---|---|
+  | Line through words | ~~the struck words~~ — struck through |
+  | Line under words | the underlined words — underlined |
+  | Loop around a phrase | **the circled phrase** — circled |
+  | Bar in the margin | Marked in the margin, with those lines quoted |
+  | Arrow | Arrow: "from here" → "to here" |
+
+  Searchable, linkable markdown that names the exact words. No OCR and no
+  model involved: because the plugin typeset the page, it already knows where
+  every word is. Handwritten *words* still come back as an image with the
+  sentence they were written against — there the ink is the content.
+
+### Fixed
+
+- **Annotations arrived in the wrong order** (page 2, then 4, then 3, then 1):
+  they followed the order the cloud listed the files in rather than the order
+  of the document.
+
+### Note
+
+The import report now lists every file the cloud returned for a document.
+That is deliberate: if your text highlights do not come back, the report
+shows whether the device sent a highlight file at all.
+
 ## [0.8.0] - 2026-07-26
 
 ### Added

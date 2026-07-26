@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { PullResult } from "../incoming/pull";
 import { renderImportReport } from "../incoming/report";
 
-const base = { forced: false, startedAt: "2026-07-25 22:30", pluginVersion: "0.6.0" };
+const base = {
+	forced: false,
+	startedAt: "2026-07-25 22:30",
+	pluginVersion: "0.6.0",
+};
 
 const scan = (over: Partial<NonNullable<Extract<PullResult, { ok: true }>["scan"]>> = {}) => ({
 	totalFiles: 5,
@@ -13,6 +17,7 @@ const scan = (over: Partial<NonNullable<Extract<PullResult, { ok: true }>["scan"
 	renderedPages: 0,
 	renderedRemarks: 0,
 	anchoredRemarks: 0,
+	interpretedMarks: 0,
 	...over,
 });
 
@@ -31,7 +36,11 @@ describe("renderImportReport", () => {
 				scan: scan({ strokeFiles: 3 }),
 			},
 		];
-		const report = renderImportReport({ ...base, handwritingEnabled: false, results });
+		const report = renderImportReport({
+			...base,
+			handwritingEnabled: false,
+			results,
+		});
 		expect(report).toContain("pen strokes but no text highlights");
 		expect(report).toContain("switched off");
 		expect(report).toContain("5 files, 0 highlight, 3 stroke");
@@ -47,7 +56,11 @@ describe("renderImportReport", () => {
 				scan: scan({ strokeFiles: 3 }),
 			},
 		];
-		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		const report = renderImportReport({
+			...base,
+			handwritingEnabled: true,
+			results,
+		});
 		expect(report).not.toContain("not built yet");
 		expect(report).toContain("could not be rendered");
 	});
@@ -59,12 +72,21 @@ describe("renderImportReport", () => {
 				docId: "a",
 				notePath: "Nota.md",
 				highlightCount: 0,
-				scan: scan({ strokeFiles: 1, renderedPages: 1, renderedRemarks: 1, anchoredRemarks: 1 }),
+				scan: scan({
+					strokeFiles: 1,
+					renderedPages: 1,
+					renderedRemarks: 1,
+					anchoredRemarks: 1,
+				}),
 			},
 		];
-		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
-		expect(report).toContain("1 remark(s) on 1 handwritten page(s), 1 anchored to text");
-		expect(report).toContain("1 handwritten page(s) came back");
+		const report = renderImportReport({
+			...base,
+			handwritingEnabled: true,
+			results,
+		});
+		expect(report).toContain("1 pen mark(s) on 1 page(s), 1 tied to the source");
+		expect(report).toContain("1 page(s) with pen marks came back");
 		expect(report).not.toContain("not built yet");
 	});
 
@@ -84,9 +106,38 @@ describe("renderImportReport", () => {
 				}),
 			},
 		];
-		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		const report = renderImportReport({
+			...base,
+			handwritingEnabled: true,
+			results,
+		});
 		expect(report).toContain("Imported successfully");
-		expect(report).toContain("2 handwritten page(s) came back");
+		expect(report).toContain("2 page(s) with pen marks came back");
+	});
+
+	it("names the marks it could read as text", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 0,
+				scan: scan({
+					strokeFiles: 1,
+					renderedPages: 1,
+					renderedRemarks: 3,
+					interpretedMarks: 2,
+					anchoredRemarks: 3,
+				}),
+			},
+		];
+		const report = renderImportReport({
+			...base,
+			handwritingEnabled: true,
+			results,
+		});
+		expect(report).toContain("3 pen mark(s) on 1 page(s), 2 read as text");
+		expect(report).toContain("2 of them were read as text");
 	});
 
 	it("explains why the handwriting could not be quoted", () => {
@@ -104,7 +155,11 @@ describe("renderImportReport", () => {
 				}),
 			},
 		];
-		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		const report = renderImportReport({
+			...base,
+			handwritingEnabled: true,
+			results,
+		});
 		expect(report).toContain("could not be quoted against the source text");
 		expect(report).toContain("Send the note again");
 	});

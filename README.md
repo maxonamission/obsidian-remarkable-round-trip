@@ -72,11 +72,21 @@ your source note stays untouched; a setting switches to a section inside the
 source note. Either way the plugin only replaces its own marked block, so
 your own writing around it survives a re-import.
 
-Handwriting comes back as images: strokes are rendered to PNG, cropped to the
-ink, and embedded alongside the highlights — grouped per remark, so a note
-beside one paragraph and an underline in another arrive separately. Each one
-is quoted with the sentence it was written against, because the plugin
-typeset that page itself and can project the ink back onto its own layout.
+Pen marks come back as **text**. Because the plugin typeset the page, it knows
+where every word sits — so it can read what a mark did and name the words it
+points at:
+
+| On the tablet | In your vault |
+|---|---|
+| Line through words | ~~the struck words~~ — struck through |
+| Line under words | the underlined words — underlined |
+| Loop around a phrase | **the circled phrase** — circled |
+| Bar in the margin | Marked in the margin, with those lines quoted |
+| Arrow | Arrow: "from here" → "to here" |
+
+No OCR, no model: it is geometry over the plugin's own layout. Handwritten
+*words* stay images — there the ink is the content — rendered to PNG, cropped
+to the ink, and quoted with the sentence they were written against.
 
 Quoting needs the note to still match what was sent. Edited it since? The
 images come back without quotes rather than with the wrong ones, and the

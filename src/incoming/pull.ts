@@ -10,10 +10,10 @@
 
 import { PdfLayout } from "../convert/pdf";
 import { MappingEntry, MappingTable } from "../id/mapping";
-import { clusterStrokes, quoteForInk } from "./anchor";
 import { Highlight, isHighlightFile, parseHighlightPage } from "./highlights";
+import { MarkKind, readMarks } from "./marks";
 import { PageMap, parsePageOrder } from "./pagemap";
-import { parseRmLines } from "./rmlines";
+import { Stroke, parseRmLines } from "./rmlines";
 
 /** One file belonging to a device document. */
 export interface DocumentFile {
@@ -32,30 +32,37 @@ export interface DocumentScan {
 	parsedHighlights: number;
 	/** Files we could not read; they were skipped, not fatal. */
 	unreadableFiles: number;
-	/** Pages that yielded at least one handwriting image (F12). */
+	/** Pages that yielded at least one annotation (F12). */
 	renderedPages: number;
-	/** Individual remarks rendered; a page can hold several (GP_E3_S8). */
+	/** Individual remarks found; a page can hold several (GP_E3_S8). */
 	renderedRemarks: number;
-	/** Remarks that could be quoted against the source text (GP_E3_S8). */
+	/** Remarks that could be tied to the source text (GP_E3_S8). */
 	anchoredRemarks: number;
+	/** Marks read as strike-through, circle, margin bar or arrow (GP_E3_S9). */
+	interpretedMarks: number;
 	/** Why anchoring was unavailable, when it was. */
 	anchorSkipped?: "no-layout";
 }
 
-/** One rendered remark, ready to be written into the vault. */
-export interface HandwritingImage {
-	/** Vault path of the rendered image. */
-	path: string;
+/** One annotation as it will appear in the vault (GP_E3_S9). */
+export interface ImportedMark {
+	kind: MarkKind;
 	/** Page in the source document, when it could be determined. */
 	page?: number;
-	/** The text this ink sits against (GP_E3_S8). */
+	/** The words the mark points at. */
+	target?: string;
+	/** Where an arrow points to. */
+	targetEnd?: string;
+	/** The line the mark sits against, for context. */
 	quote?: string;
+	/** Vault path of the rendered ink; only kinds that need a picture have one. */
+	path?: string;
 }
 
 /** What the edge needs to paint one remark. */
 export interface StrokeRenderRequest {
 	deviceDocId: string;
-	strokes: import("./rmlines").Stroke[];
+	strokes: Stroke[];
 	/** Page number when known, else the ordinal of the stroke file. */
 	page: number;
 	/** 1-based index of this remark within its page. */
@@ -89,7 +96,7 @@ export interface PullDeps {
 	writeAnnotations: (
 		entry: MappingEntry,
 		highlights: Highlight[],
-		images: HandwritingImage[],
+		marks: ImportedMark[],
 	) => Promise<void>;
 	/** Re-import even when the device hash is unchanged. */
 	force?: boolean;
@@ -126,11 +133,18 @@ export async function collectHighlights(
 	entry: MappingEntry,
 	hash: string,
 	deps: PullDeps,
-): Promise<{ highlights: Highlight[]; scan: DocumentScan; images: HandwritingImage[] }> {
+): Promise<{
+	highlights: Highlight[];
+	scan: DocumentScan;
+	marks: ImportedMark[];
+}> {
 	const deviceDocId = entry.deviceDocId;
 	const allFiles = await deps.listDocumentFiles(deviceDocId, hash);
 	const files = allFiles.filter((file) => isHighlightFile(file.id));
 	const strokeFiles = allFiles.filter((file) => file.id.endsWith(".rm"));
+	// Names, not just counts: the beta showed highlights on the device that
+	// never arrived, and only the actual file list can settle why (GP_E3_S9).
+	deps.log?.(`  files: ${allFiles.map((file) => file.id).join(", ")}`);
 	const scan: DocumentScan = {
 		totalFiles: allFiles.length,
 		highlightFiles: files.length,
@@ -140,13 +154,14 @@ export async function collectHighlights(
 		renderedPages: 0,
 		renderedRemarks: 0,
 		anchoredRemarks: 0,
+		interpretedMarks: 0,
 	};
 	const pages = await readPageMap(deviceDocId, allFiles, deps, scan);
-	const images = await renderStrokePages(entry, strokeFiles, pages, deps, scan);
+	const marks = await readStrokePages(entry, strokeFiles, pages, deps, scan);
 	deps.log?.(
-		`  files: ${scan.totalFiles} total, ${scan.highlightFiles} highlight, ${scan.strokeFiles} stroke (.rm)`,
+		`  totals: ${scan.totalFiles} files, ${scan.highlightFiles} highlight, ${scan.strokeFiles} stroke (.rm)`,
 	);
-	if (files.length === 0) return { highlights: [], scan, images };
+	if (files.length === 0) return { highlights: [], scan, marks };
 
 	const perFile: { page: number; highlights: Highlight[] }[] = [];
 	for (const file of files) {
@@ -173,9 +188,9 @@ export async function collectHighlights(
 	}
 
 	perFile.sort((a, b) => a.page - b.page);
-	const highlights = perFile.flatMap((entry) => entry.highlights);
+	const highlights = perFile.flatMap((item) => item.highlights);
 	scan.parsedHighlights = highlights.length;
-	return { highlights, scan, images };
+	return { highlights, scan, marks };
 }
 
 /** Page order from the document's `.content`; empty map when unavailable. */
@@ -200,30 +215,35 @@ async function readPageMap(
 	}
 }
 
+/** Kinds the text says everything about; a picture of the ink adds nothing. */
+const TEXT_ONLY_KINDS = new Set<MarkKind>(["strikethrough", "underline", "circle", "margin"]);
+
 /**
- * Render each handwritten remark to an image, quoted against the text it sits
- * on where possible. Failures cost that page only (N3).
+ * Read every annotated page: marks come back as typed text, handwriting as an
+ * image with the line it sits against. Failures cost that page only (N3).
  */
-async function renderStrokePages(
+async function readStrokePages(
 	entry: MappingEntry,
 	strokeFiles: DocumentFile[],
 	pages: PageMap,
 	deps: PullDeps,
 	scan: DocumentScan,
-): Promise<HandwritingImage[]> {
+): Promise<ImportedMark[]> {
 	if (!deps.renderStrokes || !deps.readBytes || strokeFiles.length === 0) return [];
 
 	let layout: PdfLayout | null = null;
 	try {
 		layout = deps.loadLayout ? await deps.loadLayout(entry) : null;
 	} catch (error) {
-		deps.log?.(
-			`  no anchoring: ${error instanceof Error ? error.message : String(error)}`,
-		);
+		deps.log?.(`  no anchoring: ${error instanceof Error ? error.message : String(error)}`);
 	}
 	if (layout === null) scan.anchorSkipped = "no-layout";
 
-	const images: HandwritingImage[] = [];
+	const collected: {
+		page: number | undefined;
+		order: number;
+		mark: ImportedMark;
+	}[] = [];
 	for (const [index, file] of strokeFiles.entries()) {
 		// Falling back to the file's ordinal keeps a number on the image when
 		// `.content` was unreadable — flagged as such, never presented as the
@@ -231,43 +251,67 @@ async function renderStrokePages(
 		const page = pages.forFile(file.id);
 		try {
 			const bytes = await deps.readBytes(file);
-			const clusters = clusterStrokes(parseRmLines(bytes));
-			let renderedHere = 0;
-			for (const [remark, cluster] of clusters.entries()) {
-				const path = await deps.renderStrokes({
-					deviceDocId: entry.deviceDocId,
-					strokes: cluster.strokes,
-					page: page ?? index + 1,
-					remark: remark + 1,
+			const marks = readMarks(
+				parseRmLines(bytes),
+				page ?? 0,
+				page === undefined ? null : layout,
+			);
+			let onThisPage = 0;
+			for (const [position, mark] of marks.entries()) {
+				const needsImage = !TEXT_ONLY_KINDS.has(mark.kind);
+				let path: string | undefined;
+				if (needsImage) {
+					const rendered = await deps.renderStrokes({
+						deviceDocId: entry.deviceDocId,
+						strokes: mark.strokes,
+						page: page ?? index + 1,
+						remark: position + 1,
+					});
+					// Ink that renders to nothing is not worth a line in the note.
+					if (rendered === null) continue;
+					path = rendered;
+				} else {
+					scan.interpretedMarks++;
+				}
+				if (mark.target !== undefined || mark.quote !== undefined) scan.anchoredRemarks++;
+				collected.push({
+					page,
+					order: position,
+					mark: {
+						kind: mark.kind,
+						page,
+						target: mark.target,
+						targetEnd: mark.targetEnd,
+						quote: mark.quote,
+						path,
+					},
 				});
-				if (path === null) continue;
-				const quote =
-					layout !== null && page !== undefined
-						? quoteForInk(cluster.bounds, page, layout)
-						: undefined;
-				if (quote !== undefined) scan.anchoredRemarks++;
-				images.push({ path, page, quote });
-				renderedHere++;
+				onThisPage++;
 			}
-			if (renderedHere > 0) {
+			if (onThisPage > 0) {
 				scan.renderedPages++;
-				scan.renderedRemarks += renderedHere;
+				scan.renderedRemarks += onThisPage;
 			}
 			deps.log?.(
-				`  ${file.id}: page ${page ?? "?"}, ${clusters.length} remark(s), ${renderedHere} rendered`,
+				`  ${file.id}: page ${page ?? "?"}, ${marks.length} mark(s) — ` +
+					marks.map((mark) => mark.kind).join(", "),
 			);
 		} catch (error) {
 			scan.unreadableFiles++;
 			deps.log?.(
-				`  could not render ${file.id}: ${error instanceof Error ? error.message : String(error)}`,
+				`  could not read ${file.id}: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
 	}
+
+	// Document order, not the order the cloud happened to list the files in —
+	// the beta returned pages 2, 4, 3, 1 (GP_E3_S9).
+	collected.sort((a, b) => (a.page ?? Infinity) - (b.page ?? Infinity) || a.order - b.order);
 	deps.log?.(
-		`  rendered ${scan.renderedRemarks} remark(s) on ${scan.renderedPages} page(s), ` +
-			`${scan.anchoredRemarks} anchored to text`,
+		`  ${scan.renderedRemarks} mark(s) on ${scan.renderedPages} page(s), ` +
+			`${scan.interpretedMarks} read as text, ${scan.anchoredRemarks} tied to the source`,
 	);
-	return images;
+	return collected.map((item) => item.mark);
 }
 
 /**
@@ -331,9 +375,12 @@ export async function pullAnnotations(
 					skipReason: "unchanged",
 				};
 			} else {
-				const { highlights, scan, images } = await collectHighlights(entry, hash, deps);
-				await deps.writeAnnotations(entry, highlights, images);
-				updated = { ...updated, [entry.docId]: { ...entry, importedHash: hash } };
+				const { highlights, scan, marks } = await collectHighlights(entry, hash, deps);
+				await deps.writeAnnotations(entry, highlights, marks);
+				updated = {
+					...updated,
+					[entry.docId]: { ...entry, importedHash: hash },
+				};
 				result = {
 					ok: true,
 					docId: entry.docId,
@@ -343,9 +390,7 @@ export async function pullAnnotations(
 				};
 			}
 		} catch (error) {
-			deps.log?.(
-				`  failed: ${error instanceof Error ? error.message : String(error)}`,
-			);
+			deps.log?.(`  failed: ${error instanceof Error ? error.message : String(error)}`);
 			result = {
 				ok: false,
 				docId: entry.docId,

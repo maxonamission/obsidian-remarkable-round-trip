@@ -8,7 +8,7 @@
  */
 
 import { Highlight, colorName } from "./highlights";
-import type { HandwritingImage } from "./pull";
+import type { ImportedMark } from "./pull";
 
 export const BEGIN_MARKER = "<!-- remarkable-round-trip:begin -->";
 export const END_MARKER = "<!-- remarkable-round-trip:end -->";
@@ -19,8 +19,8 @@ export interface AnnotationRenderInput {
 	/** Basename of the source note, used as link text. */
 	sourceName: string;
 	highlights: Highlight[];
-	/** Rendered handwriting, in page order (F12, GP_E3_S8). */
-	images?: HandwritingImage[];
+	/** Pen annotations, in document order (F12, GP_E3_S8/S9). */
+	marks?: ImportedMark[];
 	/** ISO timestamp of this import. */
 	importedAt: string;
 }
@@ -31,12 +31,12 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): string {
 	lines.push(`Annotations from [[${input.sourceName}]], imported ${input.importedAt}.`);
 	lines.push("");
 
-	const images = input.images ?? [];
+	const marks = input.marks ?? [];
 
-	if (input.highlights.length === 0 && images.length === 0) {
-		lines.push("_No text highlights or handwriting found in this document._");
+	if (input.highlights.length === 0 && marks.length === 0) {
+		lines.push("_No text highlights or pen marks found in this document._");
 	} else if (input.highlights.length === 0) {
-		lines.push("_No text highlights; handwriting is shown below._");
+		lines.push("_No text highlights; the pen marks are below._");
 	} else {
 		let currentPage: number | undefined;
 		for (const highlight of input.highlights) {
@@ -50,20 +50,17 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): string {
 		}
 	}
 
-	if (images.length > 0) {
-		lines.push("", "### Handwriting", "");
+	if (marks.length > 0) {
+		lines.push("", "### Pen marks", "");
 		let currentPage: number | undefined;
 		let first = true;
-		for (const image of images) {
-			if (image.page !== currentPage || first) {
-				currentPage = image.page;
-				lines.push(image.page === undefined ? "**Page unknown**" : `**Page ${image.page}**`, "");
+		for (const mark of marks) {
+			if (mark.page !== currentPage || first) {
+				currentPage = mark.page;
+				lines.push(mark.page === undefined ? "**Page unknown**" : `**Page ${mark.page}**`, "");
 				first = false;
 			}
-			// The quote is what turns a drawing into a remark: it says which
-			// sentence the ink was written against (GP_E3_S8).
-			if (image.quote !== undefined) lines.push(`> ${image.quote}`, "");
-			lines.push(`![[${image.path}]]`, "");
+			lines.push(...renderMark(mark), "");
 		}
 	}
 
@@ -72,6 +69,34 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): string {
 	if (lines[lines.length - 1] !== "") lines.push("");
 	lines.push(END_MARKER);
 	return lines.join("\n");
+}
+
+/**
+ * One annotation as markdown. A recognised mark becomes text you can search
+ * and link; only ink whose meaning lives in the ink itself stays a picture
+ * (GP_E3_S9).
+ */
+function renderMark(mark: ImportedMark): string[] {
+	const image = mark.path === undefined ? [] : [`![[${mark.path}]]`];
+	switch (mark.kind) {
+		case "strikethrough":
+			return [`~~${mark.target}~~ — struck through`, ...image];
+		case "underline":
+			return [`<u>${mark.target}</u> — underlined`, ...image];
+		case "circle":
+			return [`**${mark.target}** — circled`, ...image];
+		case "margin":
+			return ["Marked in the margin:", `> ${mark.quote}`, ...image];
+		case "arrow":
+			return [
+				mark.targetEnd === undefined
+					? `Arrow at: “${mark.target ?? mark.quote ?? ""}”`
+					: `Arrow: “${mark.target}” → “${mark.targetEnd}”`,
+				...image,
+			];
+		default:
+			return [...(mark.quote === undefined ? [] : [`Note at: “${mark.quote}”`]), ...image];
+	}
 }
 
 /**

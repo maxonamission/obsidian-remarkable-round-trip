@@ -33,6 +33,13 @@ export interface PdfMetadata {
 /** Marker prefix used to carry the document ID inside PDF metadata. */
 export const DOCID_SUBJECT_PREFIX = "remarkable-round-trip:docid:";
 
+/** A single word and where it starts, for word-level anchoring (GP_E3_S9). */
+export interface PlacedWord {
+	text: string;
+	x: number;
+	width: number;
+}
+
 /** One piece of text as it was placed on the page (GP_E3_S8). */
 export interface LaidOutLine {
 	/** 1-based page number. */
@@ -42,6 +49,11 @@ export interface LaidOutLine {
 	y: number;
 	size: number;
 	text: string;
+	/**
+	 * The line's words with their own positions. This is what lets a
+	 * strike-through report *which* words were struck (GP_E3_S9).
+	 */
+	words: PlacedWord[];
 }
 
 /**
@@ -71,20 +83,42 @@ const DEFAULTS: Required<PdfLayoutOptions> = {
  * later import can reproduce the same page layout even when the settings have
  * changed in the meantime (GP_E3_S8).
  */
-export function resolveLayoutOptions(options: PdfLayoutOptions = {}): Required<PdfLayoutOptions> {
+export function resolveLayoutOptions(
+	options: PdfLayoutOptions = {},
+): Required<PdfLayoutOptions> {
 	return { ...DEFAULTS, ...options };
 }
 
-const HEADING_SIZES: Record<number, number> = { 1: 19, 2: 16, 3: 14, 4: 12, 5: 11, 6: 11 };
+const HEADING_SIZES: Record<number, number> = {
+	1: 19,
+	2: 16,
+	3: 14,
+	4: 12,
+	5: 11,
+	6: 11,
+};
 
 /** Replace characters WinAnsi cannot encode with a readable ASCII fallback. */
 export function toWinAnsi(text: string): string {
 	const replacements: Record<string, string> = {
-		"→": "->", "←": "<-", "↔": "<->",
-		"–": "-", "—": "--",
-		"‘": "'", "’": "'", "“": '"', "”": '"',
-		"…": "...", " ": " ", "•": "-", "′": "'", "″": '"',
-		"≤": "<=", "≥": ">=", "≠": "!=", "≈": "~",
+		"→": "->",
+		"←": "<-",
+		"↔": "<->",
+		"–": "-",
+		"—": "--",
+		"‘": "'",
+		"’": "'",
+		"“": '"',
+		"”": '"',
+		"…": "...",
+		" ": " ",
+		"•": "-",
+		"′": "'",
+		"″": '"',
+		"≤": "<=",
+		"≥": ">=",
+		"≠": "!=",
+		"≈": "~",
 	};
 	let out = "";
 	for (const ch of text.normalize("NFC")) {
@@ -138,8 +172,35 @@ function put(
 ): void {
 	ts.page.drawText(text, { x, y, size, font, color: rgb(0, 0, 0) });
 	if (text.trim() !== "") {
-		ts.placed.push({ page: ts.pageIndex, x, y, size, text });
+		ts.placed.push({
+			page: ts.pageIndex,
+			x,
+			y,
+			size,
+			text,
+			words: placeWords(text, x, font, size),
+		});
 	}
+}
+
+/**
+ * Walk a drawn line word by word, advancing exactly as the renderer does, so
+ * a word's recorded position is the position it occupies on the page.
+ */
+function placeWords(text: string, x: number, font: PDFFont, size: number): PlacedWord[] {
+	const spaceWidth = font.widthOfTextAtSize(" ", size);
+	const words: PlacedWord[] = [];
+	let cursor = x;
+	for (const part of text.split(" ")) {
+		if (part === "") {
+			cursor += spaceWidth;
+			continue;
+		}
+		const width = font.widthOfTextAtSize(part, size);
+		words.push({ text: part, x: cursor, width });
+		cursor += width + spaceWidth;
+	}
+	return words;
 }
 
 function ensureRoom(ts: Typesetter, needed: number): void {
@@ -221,7 +282,12 @@ function drawList(ts: Typesetter, items: ListItem[]): void {
 		ensureRoom(ts, step);
 		// Bullet on the first line, hanging indent for wrapped lines.
 		ts.y -= step;
-		ts.page.drawText(bullet, { x: ts.opts.margin + indent - 12, y: ts.y, size, font: ts.body });
+		ts.page.drawText(bullet, {
+			x: ts.opts.margin + indent - 12,
+			y: ts.y,
+			size,
+			font: ts.body,
+		});
 		if (lines.length > 0) {
 			put(ts, lines[0], ts.opts.margin + indent, ts.y, size, ts.body);
 		}
@@ -243,7 +309,12 @@ function drawQuote(ts: Typesetter, quoteLines: string[]): void {
 	for (const line of lines) {
 		ensureRoom(ts, step);
 		ts.y -= step;
-		ts.page.drawText("|", { x: ts.opts.margin + 2, y: ts.y, size, font: ts.body });
+		ts.page.drawText("|", {
+			x: ts.opts.margin + 2,
+			y: ts.y,
+			size,
+			font: ts.body,
+		});
 		put(ts, line, ts.opts.margin + indent, ts.y, size, ts.italic);
 	}
 	ts.y -= size * 0.6;

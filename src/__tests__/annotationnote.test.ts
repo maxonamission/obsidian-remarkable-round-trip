@@ -32,20 +32,29 @@ describe("renderAnnotationBlock", () => {
 
 	it("says so plainly when a document holds neither highlights nor handwriting", () => {
 		const block = renderAnnotationBlock({ ...INPUT, highlights: [] });
-		expect(block).toContain("_No text highlights or handwriting found");
+		expect(block).toContain("_No text highlights or pen marks found");
 	});
 
 	it("embeds handwriting images per page", () => {
 		const block = renderAnnotationBlock({
 			...INPUT,
-			images: [
-				{ path: "reMarkable-in/handwriting/dev-p01.png", page: 1, quote: "de zin ernaast" },
-				{ path: "reMarkable-in/handwriting/dev-p02.png", page: 2 },
+			marks: [
+				{
+					kind: "note",
+					path: "reMarkable-in/handwriting/dev-p01.png",
+					page: 1,
+					quote: "de zin ernaast",
+				},
+				{
+					kind: "note",
+					path: "reMarkable-in/handwriting/dev-p02.png",
+					page: 2,
+				},
 			],
 		});
-		expect(block).toContain("### Handwriting");
+		expect(block).toContain("### Pen marks");
 		expect(block).toContain("**Page 1**");
-		expect(block).toContain("> de zin ernaast");
+		expect(block).toContain("Note at: \u201Cde zin ernaast\u201D");
 		expect(block).toContain("![[reMarkable-in/handwriting/dev-p01.png]]");
 		expect(block).toContain("![[reMarkable-in/handwriting/dev-p02.png]]");
 	});
@@ -54,9 +63,9 @@ describe("renderAnnotationBlock", () => {
 		const block = renderAnnotationBlock({
 			...INPUT,
 			highlights: [],
-			images: [{ path: "a.png" }],
+			marks: [{ kind: "note", path: "a.png" }],
 		});
-		expect(block).toContain("_No text highlights; handwriting is shown below._");
+		expect(block).toContain("_No text highlights; the pen marks are below._");
 		expect(block).toContain("![[a.png]]");
 	});
 });

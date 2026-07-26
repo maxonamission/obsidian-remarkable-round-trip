@@ -47,11 +47,12 @@ export function renderImportReport(input: ImportReportInput): string {
 			lines.push(`✓ ${result.notePath}: ${result.highlightCount} highlight(s)`);
 			continue;
 		}
+		const read = scan.interpretedMarks > 0 ? `, ${scan.interpretedMarks} read as text` : "";
 		const anchored =
-			scan.renderedRemarks > 0 ? `, ${scan.anchoredRemarks} anchored to text` : "";
+			scan.renderedRemarks > 0 ? `, ${scan.anchoredRemarks} tied to the source` : "";
 		const rendered =
 			scan.renderedPages > 0
-				? `, ${scan.renderedRemarks} remark(s) on ${scan.renderedPages} handwritten page(s)${anchored}`
+				? `, ${scan.renderedRemarks} pen mark(s) on ${scan.renderedPages} page(s)${read}${anchored}`
 				: "";
 		lines.push(
 			`✓ ${result.notePath}: ${result.highlightCount} highlight(s)${rendered} ` +
@@ -78,16 +79,24 @@ function diagnose(input: ImportReportInput): string {
 	const unanchored = scanned.some((r) => r.scan?.anchorSkipped === "no-layout");
 	const anchoring =
 		anchored > 0
-			? ` ${anchored} of them quote the sentence they were written against.`
+			? ` ${anchored} are tied to the sentence they were written against.`
 			: unanchored
 				? " They could not be quoted against the source text: the note has changed since it " +
 					"was sent, or it went over as EPUB, which has no fixed page layout. Send the note " +
 					"again to restore the link."
 				: "";
+	const interpreted = successes.reduce(
+		(total, r) => total + (r.scan?.interpretedMarks ?? 0),
+		0,
+	);
+	const reading =
+		interpreted > 0
+			? ` ${interpreted} of them were read as text — struck through, circled, underlined or ` +
+				"marked in the margin — and name the words they point at."
+			: "";
 	const handwriting =
 		renderedPages > 0
-			? ` ${renderedPages} handwritten page(s) came back as images, embedded with the ` +
-				`annotations.${anchoring}`
+			? ` ${renderedPages} page(s) with pen marks came back.${reading}${anchoring}`
 			: "";
 
 	if (imported.length > 0) {
@@ -98,10 +107,10 @@ function diagnose(input: ImportReportInput): string {
 	}
 	if (renderedPages > 0) {
 		return (
-			`No text highlights were found, but ${renderedPages} handwritten page(s) came back ` +
-			"as images, embedded with the annotations. The reMarkable only writes a highlight " +
-			"file when you select text and highlight it on a text layer; freehand marks and " +
-			`handwriting are pen strokes, and those are rendered to pictures instead.${anchoring}`
+			`No text highlights were found, but ${renderedPages} page(s) with pen marks came ` +
+			`back.${reading} The reMarkable only writes a highlight file when you select text ` +
+			"and highlight it on a text layer; freehand marks and handwriting are pen strokes, " +
+			`which this plugin reads separately.${anchoring}`
 		);
 	}
 	if (failures.length === results.length && failures.length > 0) {

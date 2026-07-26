@@ -6,20 +6,9 @@
  * pipeline (preprocess → PDF → upload → mapping) is pure and lives in src/.
  */
 
-import {
-	Menu,
-	Plugin,
-	TAbstractFile,
-	TFile,
-	TFolder,
-	requestUrl,
-} from "obsidian";
+import { Menu, Plugin, TAbstractFile, TFile, TFolder, requestUrl } from "obsidian";
 import { notify, progressNotice, updateProgress } from "./notify";
-import {
-	DEFAULT_SETTINGS,
-	RoundTripSettings,
-	RoundTripSettingTab,
-} from "./settings";
+import { DEFAULT_SETTINGS, RoundTripSettings, RoundTripSettingTab } from "./settings";
 import { remarkable } from "rmapi-js";
 import { HttpClient } from "./transport/http";
 import {
@@ -35,7 +24,7 @@ import { DOCID_FRONTMATTER_KEY } from "./id/docid";
 import { NoteInput, sendBatch, SendResult } from "./sync/send";
 import {
 	DocumentFile,
-	HandwritingImage,
+	ImportedMark,
 	PullResult,
 	StrokeRenderRequest,
 	pullAnnotations,
@@ -483,8 +472,8 @@ export default class RoundTripPlugin extends Plugin {
 						? (request) => this.renderHandwriting(request)
 						: undefined,
 					loadLayout: (entry) => this.reproduceLayout(entry),
-					writeAnnotations: (entry, highlights, images) =>
-						this.writeAnnotations(entry.notePath, highlights, images),
+					writeAnnotations: (entry, highlights, marks) =>
+						this.writeAnnotations(entry.notePath, highlights, marks),
 				},
 				(done, total) => updateProgress(notice, `Checking ${done}/${total} for annotations…`),
 			);
@@ -614,14 +603,14 @@ export default class RoundTripPlugin extends Plugin {
 	private async writeAnnotations(
 		notePath: string,
 		highlights: Parameters<typeof renderAnnotationBlock>[0]["highlights"],
-		images: HandwritingImage[] = [],
+		marks: ImportedMark[] = [],
 	): Promise<void> {
 		const sourceName = (notePath.split("/").pop() ?? notePath).replace(/\.md$/i, "");
 		const block = renderAnnotationBlock({
 			sourcePath: notePath,
 			sourceName,
 			highlights,
-			images,
+			marks,
 			importedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
 		});
 
@@ -662,9 +651,7 @@ function reportPullResults(results: PullResult[]): void {
 		notify("No new annotations — everything is already up to date.");
 		return;
 	}
-	notify(
-		`Imported ${total} highlight(s) from ${imported.length} document(s).`,
-	);
+	notify(`Imported ${total} highlight(s) from ${imported.length} document(s).`);
 }
 
 function getFrontmatterValue(
@@ -674,7 +661,10 @@ function getFrontmatterValue(
 	return frontmatter?.[key];
 }
 
-function scanEmbeds(content: string, fromPath: string): { linkpath: string; fromPath: string }[] {
+function scanEmbeds(
+	content: string,
+	fromPath: string,
+): { linkpath: string; fromPath: string }[] {
 	const found: { linkpath: string; fromPath: string }[] = [];
 	for (const match of content.matchAll(EMBED_SCAN_RE)) {
 		found.push({ linkpath: match[1].trim(), fromPath });
