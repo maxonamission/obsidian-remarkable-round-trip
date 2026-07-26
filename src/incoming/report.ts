@@ -55,8 +55,10 @@ export function renderImportReport(input: ImportReportInput): string {
 			scan.renderedPages > 0
 				? `, ${scan.renderedRemarks} pen mark(s) on ${scan.renderedPages} page(s)${read}${anchored}`
 				: "";
+		const source =
+			scan.highlightsInStrokes > 0 && scan.highlightFiles === 0 ? " (from the pen layer)" : "";
 		lines.push(
-			`✓ ${result.notePath}: ${result.highlightCount} highlight(s)${rendered} ` +
+			`✓ ${result.notePath}: ${result.highlightCount} highlight(s)${source}${rendered} ` +
 				`(${scan.totalFiles} files, ${scan.highlightFiles} highlight, ${scan.strokeFiles} stroke)`,
 		);
 		if (scan.unreadableFiles > 0) {

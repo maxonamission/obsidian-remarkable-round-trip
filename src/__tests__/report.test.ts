@@ -18,6 +18,7 @@ const scan = (over: Partial<NonNullable<Extract<PullResult, { ok: true }>["scan"
 	renderedRemarks: 0,
 	anchoredRemarks: 0,
 	interpretedMarks: 0,
+	highlightsInStrokes: 0,
 	...over,
 });
 
@@ -113,6 +114,19 @@ describe("renderImportReport", () => {
 		});
 		expect(report).toContain("Imported successfully");
 		expect(report).toContain("2 page(s) with pen marks came back");
+	});
+
+	it("says when the highlights came from the pen layer", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 3,
+				scan: scan({ strokeFiles: 2, parsedHighlights: 3, highlightsInStrokes: 3 }),
+			},
+		];
+		expect(renderImportReport({ ...base, results })).toContain("3 highlight(s) (from the pen layer)");
 	});
 
 	it("names the marks it could read as text", () => {

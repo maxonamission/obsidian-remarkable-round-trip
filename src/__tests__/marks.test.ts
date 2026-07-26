@@ -177,6 +177,46 @@ describe("readMarks", () => {
 		expect(marks[0].kind).toBe("arrow");
 	});
 
+	it("does not mistake an arrow in the margin for a margin bar", () => {
+		// Beta 2026-07-26: an arrow drawn down the right margin is tall,
+		// narrow and near enough to straight — it was reported as "marked in
+		// the margin". The arrowhead is the difference.
+		const line = layout.lines.find((candidate) => candidate.text.includes("Hierbij kun je"));
+		if (line === undefined) throw new Error("line not laid out");
+		const x = layout.pageWidth - 18;
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x, y: line.y + line.size * 2 },
+					{ x, y: line.y - line.size * 0.5 },
+					{ x: x - 5, y: line.y + line.size * 0.3 },
+				]),
+			],
+			line.page,
+			layout,
+		);
+
+		expect(marks[0].kind).toBe("arrow");
+	});
+
+	it("still reads a plain bar in the right margin as a margin mark", () => {
+		const line = layout.lines.find((candidate) => candidate.text.includes("Hierbij kun je"));
+		if (line === undefined) throw new Error("line not laid out");
+		const x = layout.pageWidth - 18;
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x, y: line.y + line.size },
+					{ x, y: line.y - line.size * 0.4 },
+				]),
+			],
+			line.page,
+			layout,
+		);
+
+		expect(marks[0].kind).toBe("margin");
+	});
+
 	it("keeps unrecognised ink as a note, with the line it sits against", () => {
 		const line = layout.lines.find((candidate) => candidate.text.includes("Erik:"));
 		if (line === undefined) throw new Error("line not laid out");

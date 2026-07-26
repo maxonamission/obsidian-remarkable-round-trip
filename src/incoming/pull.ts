@@ -13,7 +13,7 @@ import { MappingEntry, MappingTable } from "../id/mapping";
 import { Highlight, isHighlightFile, parseHighlightPage } from "./highlights";
 import { MarkKind, readMarks } from "./marks";
 import { PageMap, parsePageOrder } from "./pagemap";
-import { Stroke, parseRmLines } from "./rmlines";
+import { Stroke, parseRmPage } from "./rmlines";
 
 /** One file belonging to a device document. */
 export interface DocumentFile {
@@ -40,6 +40,8 @@ export interface DocumentScan {
 	anchoredRemarks: number;
 	/** Marks read as strike-through, circle, margin bar or arrow (GP_E3_S9). */
 	interpretedMarks: number;
+	/** Text highlights found inside the `.rm` pen layer (GP_E3_S11). */
+	highlightsInStrokes: number;
 	/** Why anchoring was unavailable, when it was. */
 	anchorSkipped?: "no-layout";
 }
@@ -155,13 +157,23 @@ export async function collectHighlights(
 		renderedRemarks: 0,
 		anchoredRemarks: 0,
 		interpretedMarks: 0,
+		highlightsInStrokes: 0,
 	};
 	const pages = await readPageMap(deviceDocId, allFiles, deps, scan);
-	const marks = await readStrokePages(entry, strokeFiles, pages, deps, scan);
+	const { marks, highlights: inkHighlights } = await readStrokePages(
+		entry,
+		strokeFiles,
+		pages,
+		deps,
+		scan,
+	);
 	deps.log?.(
 		`  totals: ${scan.totalFiles} files, ${scan.highlightFiles} highlight, ${scan.strokeFiles} stroke (.rm)`,
 	);
-	if (files.length === 0) return { highlights: [], scan, marks };
+	if (files.length === 0) {
+		scan.parsedHighlights = inkHighlights.length;
+		return { highlights: inkHighlights, scan, marks };
+	}
 
 	const perFile: { page: number; highlights: Highlight[] }[] = [];
 	for (const file of files) {
@@ -188,7 +200,9 @@ export async function collectHighlights(
 	}
 
 	perFile.sort((a, b) => a.page - b.page);
-	const highlights = perFile.flatMap((item) => item.highlights);
+	// Highlights from the pen layer first: they carry a page number too, and
+	// the two sources never describe the same mark.
+	const highlights = [...inkHighlights, ...perFile.flatMap((item) => item.highlights)];
 	scan.parsedHighlights = highlights.length;
 	return { highlights, scan, marks };
 }
@@ -228,8 +242,11 @@ async function readStrokePages(
 	pages: PageMap,
 	deps: PullDeps,
 	scan: DocumentScan,
-): Promise<ImportedMark[]> {
-	if (!deps.renderStrokes || !deps.readBytes || strokeFiles.length === 0) return [];
+): Promise<{ marks: ImportedMark[]; highlights: Highlight[] }> {
+	const empty = { marks: [], highlights: [] };
+	// Only the byte reader is essential: the pen layer also carries the text
+	// highlights, so it must be read even when handwriting import is off.
+	if (!deps.readBytes || strokeFiles.length === 0) return empty;
 
 	let layout: PdfLayout | null = null;
 	try {
@@ -244,6 +261,7 @@ async function readStrokePages(
 		order: number;
 		mark: ImportedMark;
 	}[] = [];
+	const highlights: Highlight[] = [];
 	for (const [index, file] of strokeFiles.entries()) {
 		// Falling back to the file's ordinal keeps a number on the image when
 		// `.content` was unreadable — flagged as such, never presented as the
@@ -251,16 +269,22 @@ async function readStrokePages(
 		const page = pages.forFile(file.id);
 		try {
 			const bytes = await deps.readBytes(file);
-			const marks = readMarks(
-				parseRmLines(bytes),
-				page ?? 0,
-				page === undefined ? null : layout,
-			);
+			const rm = parseRmPage(bytes);
+			// The "smart" highlighter writes its text into the same page file
+			// as the strokes on this firmware (GP_E3_S11).
+			for (const found of rm.highlights) {
+				highlights.push({ text: found.text, color: found.color, page });
+				scan.highlightsInStrokes++;
+			}
+			const marks = readMarks(rm.strokes, page ?? 0, page === undefined ? null : layout);
 			let onThisPage = 0;
 			for (const [position, mark] of marks.entries()) {
 				const needsImage = !TEXT_ONLY_KINDS.has(mark.kind);
 				let path: string | undefined;
-				if (needsImage) {
+				if (needsImage && deps.renderStrokes === undefined) {
+					continue; // handwriting import is off; nothing to show
+				}
+				if (needsImage && deps.renderStrokes !== undefined) {
 					const rendered = await deps.renderStrokes({
 						deviceDocId: entry.deviceDocId,
 						strokes: mark.strokes,
@@ -294,7 +318,11 @@ async function readStrokePages(
 			}
 			deps.log?.(
 				`  ${file.id}: page ${page ?? "?"}, ${marks.length} mark(s) — ` +
-					marks.map((mark) => mark.kind).join(", "),
+					`${marks.map((mark) => mark.kind).join(", ")}; ` +
+					`${rm.highlights.length} highlight(s); ` +
+					`blocks ${Object.entries(rm.blockTypes)
+						.map(([type, count]) => `0x0${type}×${count}`)
+						.join(" ")}`,
 			);
 		} catch (error) {
 			scan.unreadableFiles++;
@@ -309,9 +337,10 @@ async function readStrokePages(
 	collected.sort((a, b) => (a.page ?? Infinity) - (b.page ?? Infinity) || a.order - b.order);
 	deps.log?.(
 		`  ${scan.renderedRemarks} mark(s) on ${scan.renderedPages} page(s), ` +
-			`${scan.interpretedMarks} read as text, ${scan.anchoredRemarks} tied to the source`,
+			`${scan.interpretedMarks} read as text, ${scan.anchoredRemarks} tied to the source, ` +
+			`${scan.highlightsInStrokes} highlight(s) from the pen layer`,
 	);
-	return collected.map((item) => item.mark);
+	return { marks: collected.map((item) => item.mark), highlights };
 }
 
 /**

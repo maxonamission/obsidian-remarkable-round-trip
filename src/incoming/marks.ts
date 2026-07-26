@@ -260,13 +260,15 @@ function classify(
 	// Smaller than a line: that is a pen stroke inside a letter, not a mark.
 	if (Math.hypot(width, height) < step * 0.8) return null;
 
-	// A bar in the margin: tall, narrow, straight, outside the text column.
-	// Straightness is what separates a deliberate bar from a capital letter
-	// written in that same margin.
+	// A bar in the margin: tall, narrow, straight, outside the text column,
+	// and without a corner. The corner test matters: an arrow drawn down the
+	// margin is tall, narrow and near enough to straight, and used to be
+	// reported as a plain margin mark (beta, 2026-07-26).
 	if (
 		height >= step * 0.8 &&
 		width <= step * 0.8 &&
 		straightness(stroke, length) < 1.4 &&
+		sharpTurns(stroke).length === 0 &&
 		(pdf.maxX < textLeft || pdf.minX > textRight)
 	) {
 		const beside = rowsBeside(rows, pdf);

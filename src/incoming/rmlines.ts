@@ -45,6 +45,23 @@ const ERASER_TOOLS = new Set([6, 8, 38]);
 const TAG_LENGTH4 = 0xc;
 const ITEM_TYPE_LINE = 3;
 const BLOCK_TYPE_SCENE_ITEM = 0x05;
+/**
+ * Text highlights made with the "smart" highlighter on a PDF text layer.
+ * Beta finding 2026-07-26: the account held no `.highlights/*.json` at all,
+ * yet the tablet clearly showed highlights — on this firmware they live in
+ * the page's own `.rm` file as a glyph range, next to the pen strokes.
+ */
+const BLOCK_TYPE_GLYPH_ITEM = 0x03;
+/** Tag byte for field 5 as a length-prefixed block: the highlighted text. */
+const TAG_TEXT = 0x5c;
+/** Tag byte for field 4 as a uint32: the highlight colour. */
+const TAG_COLOR = 0x44;
+
+/** A stretch of PDF text the reader marked with the highlighter. */
+export interface RmHighlight {
+	text: string;
+	color?: number;
+}
 
 class Cursor {
 	offset: number;
@@ -170,6 +187,73 @@ function readSceneItem(cursor: Cursor, version: number): Stroke | null {
 	return { tool, color, thicknessScale, points: readPoints(cursor, pointsBytes, version) };
 }
 
+/**
+ * Read the highlighted text out of a glyph block.
+ *
+ * Deliberately a validated scan rather than a strict field walk: the field
+ * order around the text has varied across firmware, while the text field
+ * itself is unmistakable — a length-prefixed block whose declared size must
+ * match its varint length plus the flag byte plus the bytes, and whose bytes
+ * must be valid UTF-8. Anything that fails those two checks is not the text.
+ */
+function readGlyphHighlight(
+	view: DataView,
+	bytes: Uint8Array,
+	start: number,
+	end: number,
+): RmHighlight | null {
+	for (let at = start; at + 6 < end; at++) {
+		if (bytes[at] !== TAG_TEXT) continue;
+		const blockLength = view.getUint32(at + 1, true);
+		if (blockLength <= 1 || at + 5 + blockLength > end) continue;
+
+		let length = 0;
+		let shift = 0;
+		let varBytes = 0;
+		let valid = true;
+		for (;;) {
+			const byte = bytes[at + 5 + varBytes];
+			length |= (byte & 0x7f) << shift;
+			varBytes++;
+			if ((byte & 0x80) === 0) break;
+			shift += 7;
+			if (varBytes > 4) {
+				valid = false;
+				break;
+			}
+		}
+		// varint + the is-ascii flag + the characters fill the block exactly.
+		if (!valid || length <= 0 || varBytes + 1 + length !== blockLength) continue;
+
+		const from = at + 5 + varBytes + 1;
+		try {
+			const text = new TextDecoder("utf-8", { fatal: true }).decode(
+				bytes.subarray(from, from + length),
+			);
+			if (text.trim() === "") continue;
+			return { text, color: readGlyphColor(view, bytes, start, at) };
+		} catch {
+			continue; // not text after all; keep looking
+		}
+	}
+	return null;
+}
+
+/** The colour field sits before the text; take the nearest plausible one. */
+function readGlyphColor(
+	view: DataView,
+	bytes: Uint8Array,
+	start: number,
+	before: number,
+): number | undefined {
+	for (let at = before - 5; at >= start; at--) {
+		if (bytes[at] !== TAG_COLOR) continue;
+		const value = view.getUint32(at + 1, true);
+		if (value < 32) return value;
+	}
+	return undefined;
+}
+
 export function isRmV6(bytes: Uint8Array): boolean {
 	if (bytes.length < RM_V6_HEADER.length) return false;
 	let header = "";
@@ -183,9 +267,26 @@ export function isRmV6(bytes: Uint8Array): boolean {
  * have no v6 header.
  */
 export function parseRmLines(bytes: Uint8Array): Stroke[] {
-	if (!isRmV6(bytes)) return [];
+	return parseRmPage(bytes).strokes;
+}
+
+/** Everything a page holds, plus what block types were seen (diagnostics). */
+export interface RmPage {
+	strokes: Stroke[];
+	highlights: RmHighlight[];
+	/** Block type → count, so an unread page can still be explained. */
+	blockTypes: Record<number, number>;
+}
+
+/**
+ * Walk a `.rm` v6 page once and take both what was drawn and what was
+ * highlighted. Returns empty for anything it cannot read — including older
+ * format versions, which simply have no v6 header.
+ */
+export function parseRmPage(bytes: Uint8Array): RmPage {
+	const page: RmPage = { strokes: [], highlights: [], blockTypes: {} };
+	if (!isRmV6(bytes)) return page;
 	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-	const strokes: Stroke[] = [];
 	let offset = RM_V6_HEADER.length;
 
 	while (offset + 8 <= bytes.length) {
@@ -196,17 +297,21 @@ export function parseRmLines(bytes: Uint8Array): Stroke[] {
 		const end = start + length;
 		if (end > bytes.length) break; // truncated file: keep what we have
 
-		if (blockType === BLOCK_TYPE_SCENE_ITEM) {
-			try {
+		page.blockTypes[blockType] = (page.blockTypes[blockType] ?? 0) + 1;
+		try {
+			if (blockType === BLOCK_TYPE_SCENE_ITEM) {
 				const stroke = readSceneItem(new Cursor(view, start, end), currentVersion);
 				if (stroke && stroke.points.length > 0 && !ERASER_TOOLS.has(stroke.tool)) {
-					strokes.push(stroke);
+					page.strokes.push(stroke);
 				}
-			} catch {
-				// An unreadable block costs us that stroke, not the page.
+			} else if (blockType === BLOCK_TYPE_GLYPH_ITEM) {
+				const highlight = readGlyphHighlight(view, bytes, start, end);
+				if (highlight !== null) page.highlights.push(highlight);
 			}
+		} catch {
+			// An unreadable block costs us that item, not the page.
 		}
 		offset = end;
 	}
-	return strokes;
+	return page;
 }

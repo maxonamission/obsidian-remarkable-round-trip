@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { PdfLayout } from "../convert/pdf";
+import { RM_V6_HEADER } from "../incoming/rmlines";
 import { MappingTable } from "../id/mapping";
 import { Highlight } from "../incoming/highlights";
 import {
@@ -23,6 +24,27 @@ const TABLE: MappingTable = {
 };
 
 const page = (text: string) => JSON.stringify({ highlights: [[{ text, color: 3 }]] });
+
+/** A `.rm` v6 page holding one glyph block — a text highlight (GP_E3_S11). */
+function glyphPage(text: string, color: number): Uint8Array {
+	const encoded = new TextEncoder().encode(text);
+	const body: number[] = [];
+	for (let i = 1; i <= 4; i++) body.push((i << 4) | 0xf, 1, 0);
+	body.push(0x5f, 0, 0, 0, 0);
+	body.push(0x44, color, 0, 0, 0);
+	const blockLength = 2 + encoded.length;
+	body.push(0x5c, blockLength & 0xff, (blockLength >> 8) & 0xff, 0, 0);
+	body.push(encoded.length, 1, ...encoded);
+
+	const header = new TextEncoder().encode(RM_V6_HEADER);
+	const out = new Uint8Array(header.length + 8 + body.length);
+	out.set(header, 0);
+	new DataView(out.buffer).setUint32(header.length, body.length, true);
+	out[header.length + 6] = 2;
+	out[header.length + 7] = 0x03;
+	out.set(body, header.length + 8);
+	return out;
+}
 const CONTENT = JSON.stringify({
 	cPages: { pages: [{ id: "p1" }, { id: "p2" }] },
 });
@@ -189,11 +211,34 @@ describe("pen mark import", () => {
 		expect(scan.unreadableFiles).toBe(1);
 	});
 
-	it("does nothing at all when handwriting import is switched off", async () => {
+	it("renders no images when handwriting import is switched off", async () => {
 		const { deps } = makeDeps({ readBytes: () => Promise.resolve(realPage) });
 		const { marks, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
-		expect(marks).toEqual([]);
+		expect(marks.every((mark) => mark.path === undefined)).toBe(true);
 		expect(scan.renderedPages).toBe(0);
+	});
+
+	it("takes the text highlights out of the pen layer, even without rendering", async () => {
+		// The beta account held no `.highlights/*.json` at all; the highlights
+		// sat inside the page's own `.rm` file (GP_E3_S11).
+		const withGlyph = glyphPage("Maar is er altijd zekerheid uit data?", 2);
+		const { deps } = makeDeps({
+			listDocumentFiles: () =>
+				Promise.resolve([
+					{ id: "device-a.content", hash: "h-content" },
+					{ id: "device-a/p1.rm", hash: "h-rm" },
+				]),
+			readFile: () => Promise.resolve(CONTENT),
+			readBytes: () => Promise.resolve(withGlyph),
+		});
+		const { highlights, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+
+		expect(highlights).toEqual([
+			{ text: "Maar is er altijd zekerheid uit data?", color: 2, page: 1 },
+		]);
+		expect(scan.highlightsInStrokes).toBe(1);
+		expect(scan.highlightFiles).toBe(0);
+		expect(scan.parsedHighlights).toBe(1);
 	});
 });
 

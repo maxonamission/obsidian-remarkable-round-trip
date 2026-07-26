@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.10.0] - 2026-07-26
+
+### Added
+
+- **Text highlights come back at last.** They were never missing from your
+  tablet — they were hiding somewhere this plugin did not look. On current
+  firmware the "smart" highlighter does not write a separate highlight file;
+  the highlighted text lives inside the page's own pen-stroke file, right
+  next to your handwriting. The plugin now reads it there, with its colour
+  and page number.
+
+### Fixed
+
+- **An arrow drawn down the margin was reported as a margin mark.** It is
+  tall, narrow and nearly straight, so it looked like a bar. A bar has no
+  corner and an arrow does — that is now the test.
+
+### Note
+
+The import report lists the block types found in each page file. If a
+highlight still does not come back, that line says whether the page contained
+one at all.
+
 ## [0.9.1] - 2026-07-26
 
 ### Fixed
