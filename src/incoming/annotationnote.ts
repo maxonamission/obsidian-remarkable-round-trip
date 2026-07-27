@@ -7,6 +7,8 @@
  * survives — the in-file counterpart of N5.
  */
 
+import type { PdfLayout } from "../convert/pdf";
+import { renderAnnotatedCopy } from "./annotatedcopy";
 import { Highlight, colorName } from "./highlights";
 import type { ImportedMark } from "./pull";
 
@@ -23,6 +25,17 @@ export interface AnnotationRenderInput {
 	marks?: ImportedMark[];
 	/** ISO timestamp of this import. */
 	importedAt: string;
+	/**
+	 * Page layout of the document as it was sent. With it the block becomes an
+	 * annotated copy of the whole text; without it, a list of annotations
+	 * (GP_E3_S12).
+	 */
+	layout?: PdfLayout | null;
+	/**
+	 * Writing into the source note itself must stay a summary — a full copy
+	 * there would double the note.
+	 */
+	inSourceNote?: boolean;
 }
 
 /** Render the generated block (markers included). */
@@ -32,6 +45,17 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): string {
 	lines.push("");
 
 	const marks = input.marks ?? [];
+
+	const copy =
+		input.layout && input.inSourceNote !== true
+			? renderAnnotatedCopy({ layout: input.layout, highlights: input.highlights, marks })
+			: null;
+	if (copy !== null) {
+		lines.push(copy, "");
+		if (lines[lines.length - 1] !== "") lines.push("");
+		lines.push(END_MARKER);
+		return lines.join("\n");
+	}
 
 	if (input.highlights.length === 0 && marks.length === 0) {
 		lines.push("_No text highlights or pen marks found in this document._");
@@ -87,13 +111,6 @@ function renderMark(mark: ImportedMark): string[] {
 			return [`**${mark.target}** — circled`, ...image];
 		case "margin":
 			return ["Marked in the margin:", `> ${mark.quote}`, ...image];
-		case "arrow":
-			return [
-				mark.targetEnd === undefined
-					? `Arrow at: “${mark.target ?? mark.quote ?? ""}”`
-					: `Arrow: “${mark.target}” → “${mark.targetEnd}”`,
-				...image,
-			];
 		default:
 			return [...(mark.quote === undefined ? [] : [`Note at: “${mark.quote}”`]), ...image];
 	}

@@ -159,9 +159,11 @@ describe("readMarks", () => {
 		expect(marks[0].quote).toContain("Hierbij kun je");
 	});
 
-	it("reads a stroke that doubles back on itself as an arrow", () => {
+	it("treats an arrow as a remark, not as a shape of its own", () => {
+		// Owner decision 2026-07-26: only four shapes are read. Arrows fired
+		// far too often on handwriting, so they are remarks at that spot now.
 		const { line, from, to } = spanOf("applicatiebouw en de");
-		const y = line.y + line.size * 1.6; // above the line, pointing down at it
+		const y = line.y + line.size * 1.6;
 		const marks = readMarks(
 			[
 				strokeThrough([
@@ -174,13 +176,14 @@ describe("readMarks", () => {
 			layout,
 		);
 
-		expect(marks[0].kind).toBe("arrow");
+		expect(marks[0].kind).toBe("note");
+		expect(marks[0].quote).toContain("applicatiebouw");
 	});
 
 	it("does not mistake an arrow in the margin for a margin bar", () => {
 		// Beta 2026-07-26: an arrow drawn down the right margin is tall,
 		// narrow and near enough to straight — it was reported as "marked in
-		// the margin". The arrowhead is the difference.
+		// the margin". A bar has no corner; an arrow does, so it is a remark.
 		const line = layout.lines.find((candidate) => candidate.text.includes("Hierbij kun je"));
 		if (line === undefined) throw new Error("line not laid out");
 		const x = layout.pageWidth - 18;
@@ -196,7 +199,7 @@ describe("readMarks", () => {
 			layout,
 		);
 
-		expect(marks[0].kind).toBe("arrow");
+		expect(marks[0].kind).toBe("note");
 	});
 
 	it("still reads a plain bar in the right margin as a margin mark", () => {

@@ -53,8 +53,10 @@ export interface ImportedMark {
 	page?: number;
 	/** The words the mark points at. */
 	target?: string;
-	/** Where an arrow points to. */
-	targetEnd?: string;
+	/** Ids of the covered words, for the annotated copy (GP_E3_S12). */
+	words?: number[];
+	/** Source blocks a margin bar spans. */
+	blocks?: number[];
 	/** The line the mark sits against, for context. */
 	quote?: string;
 	/** Vault path of the rendered ink; only kinds that need a picture have one. */
@@ -200,9 +202,10 @@ export async function collectHighlights(
 	}
 
 	perFile.sort((a, b) => a.page - b.page);
-	// Highlights from the pen layer first: they carry a page number too, and
-	// the two sources never describe the same mark.
-	const highlights = [...inkHighlights, ...perFile.flatMap((item) => item.highlights)];
+	// Both sources carry a page number, so merge and order by page.
+	const highlights = [...inkHighlights, ...perFile.flatMap((item) => item.highlights)].sort(
+		(a, b) => (a.page ?? Number.MAX_SAFE_INTEGER) - (b.page ?? Number.MAX_SAFE_INTEGER),
+	);
 	scan.parsedHighlights = highlights.length;
 	return { highlights, scan, marks };
 }
@@ -276,6 +279,15 @@ async function readStrokePages(
 				highlights.push({ text: found.text, color: found.color, page });
 				scan.highlightsInStrokes++;
 			}
+			if (rm.highlights.length > 0) {
+				// Raw colour values: the mapping to names is a guess until a
+				// real device confirms it (GP_E3_S12).
+				deps.log?.(
+					`  ${file.id}: highlight colours ${rm.highlights
+						.map((found) => found.color ?? "?")
+						.join(", ")}`,
+				);
+			}
 			const marks = readMarks(rm.strokes, page ?? 0, page === undefined ? null : layout);
 			let onThisPage = 0;
 			for (const [position, mark] of marks.entries()) {
@@ -305,7 +317,8 @@ async function readStrokePages(
 						kind: mark.kind,
 						page,
 						target: mark.target,
-						targetEnd: mark.targetEnd,
+						words: mark.words,
+						blocks: mark.blocks,
 						quote: mark.quote,
 						path,
 					},
@@ -333,8 +346,10 @@ async function readStrokePages(
 	}
 
 	// Document order, not the order the cloud happened to list the files in —
-	// the beta returned pages 2, 4, 3, 1 (GP_E3_S9).
+	// the beta returned pages 2, 4, 3, 1 (GP_E3_S9). Highlights need the same
+	// treatment: they came out in stroke-file order (GP_E3_S12).
 	collected.sort((a, b) => (a.page ?? Infinity) - (b.page ?? Infinity) || a.order - b.order);
+	highlights.sort((a, b) => (a.page ?? Infinity) - (b.page ?? Infinity));
 	deps.log?.(
 		`  ${scan.renderedRemarks} mark(s) on ${scan.renderedPages} page(s), ` +
 			`${scan.interpretedMarks} read as text, ${scan.anchoredRemarks} tied to the source, ` +

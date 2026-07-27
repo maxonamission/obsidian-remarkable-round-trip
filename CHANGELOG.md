@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.11.0] - 2026-07-26
+
+### Changed
+
+- **Annotations now come back as an annotated copy of the document**, instead
+  of a list of fragments. You get the whole text — headings, lists, quotes —
+  with your marks in place:
+
+  | On the tablet | In your vault |
+  |---|---|
+  | Highlight | `==text==`, or an inline `<mark>` in the colour you used |
+  | Line through words | `~~text~~` |
+  | Line under words | `<u>text</u>` |
+  | Loop around words | `**text**` |
+  | Bar in the margin | that paragraph becomes a `>` quote |
+  | Anything else | a remark callout at that spot, with the ink |
+
+  A list of fragments makes you rebuild the argument in your head; the text
+  with the marks in it *is* the reading. Writing into the source note itself
+  keeps the old summary form — a full copy there would double the note.
+
+- **Only four shapes are read now**: strike-through, underline, circle and a
+  bar in the margin. Arrows were guessed far too eagerly — plain handwriting
+  kept coming back as "Arrow at …" — so anything that is not clearly one of
+  the four is a remark at that spot.
+
+### Fixed
+
+- **Highlights are ordered by page**, not by the order the cloud happened to
+  return the page files in.
+- Highlight colours are carried through to the copy.
+
 ## [0.10.0] - 2026-07-26
 
 ### Added

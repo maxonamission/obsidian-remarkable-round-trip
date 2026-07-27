@@ -56,6 +56,8 @@ export default class RoundTripPlugin extends Plugin {
 	settings: RoundTripSettings = { ...DEFAULT_SETTINGS };
 	private watchQueue: WatchQueue | null = null;
 	private fetchShim: { restore: () => void } | null = null;
+	/** Layouts rebuilt during one import run, by document id (GP_E3_S12). */
+	private readonly layoutCache = new Map<string, PdfLayout | null>();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -442,6 +444,7 @@ export default class RoundTripPlugin extends Plugin {
 		}
 
 		const log: string[] = [];
+		this.layoutCache.clear();
 		const startedAt = new Date().toISOString().slice(0, 16).replace("T", " ");
 		const notice = progressNotice(`Checking ${mappings} document(s) for annotations…`);
 		try {
@@ -472,8 +475,13 @@ export default class RoundTripPlugin extends Plugin {
 						? (request) => this.renderHandwriting(request)
 						: undefined,
 					loadLayout: (entry) => this.reproduceLayout(entry),
-					writeAnnotations: (entry, highlights, marks) =>
-						this.writeAnnotations(entry.notePath, highlights, marks),
+					writeAnnotations: async (entry, highlights, marks) =>
+						this.writeAnnotations(
+							entry.notePath,
+							highlights,
+							marks,
+							await this.reproduceLayout(entry).catch(() => null),
+						),
 				},
 				(done, total) => updateProgress(notice, `Checking ${done}/${total} for annotations…`),
 			);
@@ -535,6 +543,16 @@ export default class RoundTripPlugin extends Plugin {
 	 * not from today's settings.
 	 */
 	private async reproduceLayout(entry: MappingEntry): Promise<PdfLayout | null> {
+		// Rebuilding means typesetting the note again; one import asks for the
+		// same layout twice (marks, then the annotated copy).
+		const cached = this.layoutCache.get(entry.docId);
+		if (cached !== undefined) return cached;
+		const layout = await this.buildLayout(entry);
+		this.layoutCache.set(entry.docId, layout);
+		return layout;
+	}
+
+	private async buildLayout(entry: MappingEntry): Promise<PdfLayout | null> {
 		const typography = entry.pdfLayout;
 		if (typography === undefined) return null; // EPUB, or sent before 0.8.0
 		const file = this.app.vault.getFileByPath(entry.notePath);
@@ -604,6 +622,7 @@ export default class RoundTripPlugin extends Plugin {
 		notePath: string,
 		highlights: Parameters<typeof renderAnnotationBlock>[0]["highlights"],
 		marks: ImportedMark[] = [],
+		layout: PdfLayout | null = null,
 	): Promise<void> {
 		const sourceName = (notePath.split("/").pop() ?? notePath).replace(/\.md$/i, "");
 		const block = renderAnnotationBlock({
@@ -611,6 +630,8 @@ export default class RoundTripPlugin extends Plugin {
 			sourceName,
 			highlights,
 			marks,
+			layout,
+			inSourceNote: this.settings.annotationTarget === "source",
 			importedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
 		});
 

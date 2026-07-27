@@ -17,14 +17,21 @@ import { LaidOutLine, PdfLayout } from "../convert/pdf";
 import { Bounds, deviceBoundsToPdf, strokeBounds } from "./anchor";
 import { Stroke } from "./rmlines";
 
-export type MarkKind = "strikethrough" | "underline" | "circle" | "margin" | "arrow" | "note";
+/**
+ * Owner decision 2026-07-26: only four shapes are read. Anything else — an
+ * arrow, a scribble, a written word — is a remark at that spot. Guessing at
+ * more kinds produced more wrong answers than useful ones.
+ */
+export type MarkKind = "strikethrough" | "underline" | "circle" | "margin" | "note";
 
 export interface Mark {
 	kind: MarkKind;
 	/** The words the mark points at. */
 	target?: string;
-	/** Where an arrow points to, when that differs from its tail. */
-	targetEnd?: string;
+	/** Ids of the words it covers, for weaving into an annotated copy. */
+	words?: number[];
+	/** Source blocks a margin bar spans. */
+	blocks?: number[];
 	/** The line(s) around the mark, for context. */
 	quote?: string;
 	/** Strokes making up this mark, for the kinds that stay an image. */
@@ -123,20 +130,6 @@ function sharpTurns(stroke: Stroke): number[] {
 	return turns;
 }
 
-/**
- * An arrowhead: the pen doubles back on itself, once, near an end. A zigzag
- * strike-through also turns sharply, but it does so over and over and in the
- * middle — hence both the count and the position matter.
- */
-function hasArrowHead(stroke: Stroke): boolean {
-	const points = stroke.points;
-	if (points.length < 10) return false;
-	const turns = sharpTurns(stroke);
-	if (turns.length === 0 || turns.length > 2) return false;
-	const outer = points.length * 0.45;
-	return turns.every((index) => index <= outer || index >= points.length - outer);
-}
-
 /** How far a stroke strays from the straight line between its endpoints. */
 function straightness(stroke: Stroke, length: number): number {
 	const first = stroke.points[0];
@@ -168,9 +161,9 @@ function rowFor(rows: Row[], ink: Bounds): Row | undefined {
 	return best?.row;
 }
 
-/** Words of a row whose span the ink covers, joined in reading order. */
-function wordsUnder(row: Row, minX: number, maxX: number): string {
-	const covered = row.lines
+/** Words of a row whose span the ink covers, in reading order. */
+function wordsUnder(row: Row, minX: number, maxX: number) {
+	return row.lines
 		.flatMap((line) => line.words)
 		.filter((word) => {
 			const overlap = Math.min(maxX, word.x + word.width) - Math.max(minX, word.x);
@@ -179,7 +172,6 @@ function wordsUnder(row: Row, minX: number, maxX: number): string {
 			return overlap > 0 && overlap >= word.width * 0.4;
 		})
 		.sort((a, b) => a.x - b.x);
-	return covered.map((word) => word.text).join(" ");
 }
 
 /** Rows a mark spans vertically, for a margin bar. */
@@ -287,14 +279,15 @@ function classify(
 	if (height <= step * 0.55 && width >= step * 2) {
 		const row = rowFor(rows, pdf);
 		if (row !== undefined) {
-			const target = wordsUnder(row, pdf.minX, pdf.maxX);
-			if (target !== "") {
+			const covered = wordsUnder(row, pdf.minX, pdf.maxX);
+			if (covered.length > 0) {
 				const middle = (pdf.minY + pdf.maxY) / 2;
 				const throughText = middle > row.y + row.size * 0.15;
 				return {
 					...base,
 					kind: throughText ? "strikethrough" : "underline",
-					target,
+					target: covered.map((word) => word.text).join(" "),
+					words: covered.map((word) => word.id),
 					quote: row.text,
 				};
 			}
@@ -305,41 +298,20 @@ function classify(
 	if (isClosed(stroke, device) && width >= step && height >= step * 0.6) {
 		const row = rowFor(rows, pdf);
 		if (row !== undefined) {
-			const target = wordsUnder(row, pdf.minX, pdf.maxX);
-			if (target !== "") return { ...base, kind: "circle", target, quote: row.text };
-		}
-	}
-
-	// An arrow: it says something about order, so both ends matter.
-	if (length >= step * 1.5 && hasArrowHead(stroke)) {
-		const first = stroke.points[0];
-		const last = stroke.points[stroke.points.length - 1];
-		const tail = rowFor(rows, pointBounds(first, device, pdf));
-		const head = rowFor(rows, pointBounds(last, device, pdf));
-		if (tail !== undefined || head !== undefined) {
-			return {
-				...base,
-				kind: "arrow",
-				target: tail?.text ?? head?.text,
-				targetEnd:
-					head !== undefined && tail !== undefined && head !== tail ? head.text : undefined,
-				quote: (head ?? tail)?.text,
-			};
+			const covered = wordsUnder(row, pdf.minX, pdf.maxX);
+			if (covered.length > 0) {
+				return {
+					...base,
+					kind: "circle",
+					target: covered.map((word) => word.text).join(" "),
+					words: covered.map((word) => word.id),
+					quote: row.text,
+				};
+			}
 		}
 	}
 
 	return null;
-}
-
-/** Bounds of a single stroke point, mapped with the stroke's own transform. */
-function pointBounds(point: { x: number; y: number }, device: Bounds, pdf: Bounds): Bounds {
-	// Linear interpolation within the stroke's own box avoids re-deriving the
-	// page transform here; the y axis flips, hence maxY paired with minY.
-	const spanX = device.maxX - device.minX || 1;
-	const spanY = device.maxY - device.minY || 1;
-	const x = pdf.minX + ((point.x - device.minX) / spanX) * (pdf.maxX - pdf.minX);
-	const y = pdf.maxY - ((point.y - device.minY) / spanY) * (pdf.maxY - pdf.minY);
-	return { minX: x, maxX: x, minY: y, maxY: y };
 }
 
 /** Unclassified ink is handwriting: group it per remark and keep the image. */

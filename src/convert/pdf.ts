@@ -35,10 +35,22 @@ export const DOCID_SUBJECT_PREFIX = "remarkable-round-trip:docid:";
 
 /** A single word and where it starts, for word-level anchoring (GP_E3_S9). */
 export interface PlacedWord {
+	/** Sequence number across the whole document, in reading order. */
+	id: number;
 	text: string;
 	x: number;
 	width: number;
 }
+
+/** What kind of source block a line came from (GP_E3_S12). */
+export type LineRole =
+	| "title"
+	| "heading"
+	| "paragraph"
+	| "list"
+	| "quote"
+	| "code"
+	| "table";
 
 /** One piece of text as it was placed on the page (GP_E3_S8). */
 export interface LaidOutLine {
@@ -54,6 +66,13 @@ export interface LaidOutLine {
 	 * strike-through report *which* words were struck (GP_E3_S9).
 	 */
 	words: PlacedWord[];
+	/** The source block this line belongs to; wrapped lines share it. */
+	block: number;
+	role: LineRole;
+	/** Heading level, list depth, or table column — role-dependent. */
+	level?: number;
+	/** Numbered list marker, when the item had one. */
+	ordered?: number;
 }
 
 /**
@@ -150,6 +169,13 @@ interface Typesetter {
 	opts: Required<PdfLayoutOptions>;
 	/** Every placed line, in reading order (GP_E3_S8). */
 	placed: LaidOutLine[];
+	/** Source-block counter; wrapped lines of one block share its number. */
+	block: number;
+	role: LineRole;
+	level?: number;
+	ordered?: number;
+	/** Running word counter, so a mark can name the exact words it covers. */
+	wordId: number;
 }
 
 function newPage(ts: Typesetter): void {
@@ -178,16 +204,34 @@ function put(
 			y,
 			size,
 			text,
-			words: placeWords(text, x, font, size),
+			words: placeWords(ts, text, x, font, size),
+			block: ts.block,
+			role: ts.role,
+			level: ts.level,
+			ordered: ts.ordered,
 		});
 	}
+}
+
+/** Start a new source block; every line drawn after this shares its number. */
+function beginBlock(ts: Typesetter, role: LineRole, level?: number, ordered?: number): void {
+	ts.block++;
+	ts.role = role;
+	ts.level = level;
+	ts.ordered = ordered;
 }
 
 /**
  * Walk a drawn line word by word, advancing exactly as the renderer does, so
  * a word's recorded position is the position it occupies on the page.
  */
-function placeWords(text: string, x: number, font: PDFFont, size: number): PlacedWord[] {
+function placeWords(
+	ts: Typesetter,
+	text: string,
+	x: number,
+	font: PDFFont,
+	size: number,
+): PlacedWord[] {
 	const spaceWidth = font.widthOfTextAtSize(" ", size);
 	const words: PlacedWord[] = [];
 	let cursor = x;
@@ -197,7 +241,7 @@ function placeWords(text: string, x: number, font: PDFFont, size: number): Place
 			continue;
 		}
 		const width = font.widthOfTextAtSize(part, size);
-		words.push({ text: part, x: cursor, width });
+		words.push({ id: ts.wordId++, text: part, x: cursor, width });
 		cursor += width + spaceWidth;
 	}
 	return words;
@@ -253,6 +297,7 @@ function contentWidth(ts: Typesetter, indent = 0): number {
 }
 
 function drawHeading(ts: Typesetter, level: number, text: string): void {
+	beginBlock(ts, level === 0 ? "title" : "heading", Math.max(level, 1));
 	const size = HEADING_SIZES[level] ?? 11;
 	const gapBefore = size * 0.8;
 	ensureRoom(ts, gapBefore + size * ts.opts.lineHeight);
@@ -262,6 +307,7 @@ function drawHeading(ts: Typesetter, level: number, text: string): void {
 }
 
 function drawParagraph(ts: Typesetter, text: string): void {
+	beginBlock(ts, "paragraph");
 	const lines = wrapText(toWinAnsi(text), ts.body, ts.opts.fontSize, contentWidth(ts));
 	drawLines(ts, lines, ts.body, ts.opts.fontSize, 0, ts.opts.fontSize * 0.6);
 }
@@ -274,6 +320,9 @@ function drawList(ts: Typesetter, items: ListItem[]): void {
 		if (item.depth > prevDepth) counters[item.depth] = 0;
 		if (item.ordered) counters[item.depth] = (counters[item.depth] ?? 0) + 1;
 		prevDepth = item.depth;
+		// Each item is its own block: a wrapped item keeps one number, the
+		// next item gets a new one.
+		beginBlock(ts, "list", item.depth, item.ordered ? counters[item.depth] : undefined);
 
 		const indent = 14 + item.depth * 14;
 		const bullet = item.ordered ? `${counters[item.depth]}.` : "-";
@@ -301,6 +350,7 @@ function drawList(ts: Typesetter, items: ListItem[]): void {
 }
 
 function drawQuote(ts: Typesetter, quoteLines: string[]): void {
+	beginBlock(ts, "quote");
 	const size = ts.opts.fontSize;
 	const indent = 14;
 	const text = quoteLines.join(" ").trim();
@@ -321,6 +371,7 @@ function drawQuote(ts: Typesetter, quoteLines: string[]): void {
 }
 
 function drawCode(ts: Typesetter, codeLines: string[]): void {
+	beginBlock(ts, "code");
 	const size = ts.opts.fontSize - 1.5;
 	const step = size * 1.3;
 	for (const raw of codeLines) {
@@ -382,6 +433,7 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 	const offsets = widths.map((_, c) => widths.slice(0, c).reduce((a, b) => a + b, 0));
 
 	rows.forEach((row, rowIndex) => {
+		beginBlock(ts, "table", rowIndex);
 		const font = rowIndex === 0 ? ts.bold : ts.body;
 		const cellLines = row.map((cell, c) =>
 			wrapText(toWinAnsi(cell), font, size, Math.max(widths[c] - pad, 24)),
@@ -457,6 +509,9 @@ export async function renderPdf(
 		page: undefined as unknown as PDFPage,
 		pageIndex: 0,
 		placed: [],
+		block: 0,
+		role: "paragraph",
+		wordId: 0,
 		y: 0,
 		body: await doc.embedFont(StandardFonts.Helvetica),
 		bold: await doc.embedFont(StandardFonts.HelveticaBold),
@@ -466,7 +521,7 @@ export async function renderPdf(
 	};
 	newPage(ts);
 
-	drawHeading(ts, 1, meta.title);
+	drawHeading(ts, 0, meta.title);
 	ts.y -= 4;
 
 	for (const block of blocks) {
