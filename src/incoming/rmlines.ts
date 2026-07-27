@@ -74,6 +74,16 @@ export interface RmHighlight {
 	 * another round of guessing.
 	 */
 	tail?: string;
+	/** The bytes before the text, as hex — the colour may sit there instead. */
+	head?: string;
+	/**
+	 * Float32 values in the block that look like device coordinates. A glyph
+	 * item has to record *where* the highlighted text sits, and those
+	 * rectangles are worth far more than the colour: a highlight whose text we
+	 * know and whose height we can read calibrates the vertical placement of
+	 * every pen mark on the page (GP_E3_S15).
+	 */
+	coords?: number[];
 }
 
 class Cursor {
@@ -249,6 +259,8 @@ function readGlyphHighlight(
 				color: readGlyphColor(view, bytes, start, at),
 				fields: readTaggedInts(view, bytes, start, end),
 				tail: hexOf(bytes, from + length, Math.min(end, from + length + 48)),
+				head: hexOf(bytes, start, Math.min(at + 5, start + 48)),
+				coords: readCoordinates(view, start, end),
 			};
 		} catch {
 			continue; // not text after all; keep looking
@@ -281,6 +293,27 @@ function readTaggedInts(
 		if (fields[key] === undefined) fields[key] = value;
 	}
 	return fields;
+}
+
+/**
+ * Float32 values that fall inside the device's own coordinate range. A glyph
+ * item stores the rectangles of the text it covers; those are the only
+ * geometry a text highlight carries, and they are what a page needs to
+ * calibrate where its ink really sits (GP_E3_S15).
+ *
+ * Deliberately a filter and not a parse: the exact record layout is unknown,
+ * and a plausible-range sweep reports the numbers without pretending to know
+ * which is which.
+ */
+function readCoordinates(view: DataView, start: number, end: number): number[] {
+	const found: number[] = [];
+	for (let at = start; at + 4 <= end && found.length < 24; at++) {
+		const value = view.getFloat32(at, true);
+		if (!Number.isFinite(value) || value === 0) continue;
+		if (Math.abs(value) < 1 || Math.abs(value) > 2200) continue;
+		found.push(Math.round(value * 10) / 10);
+	}
+	return found;
 }
 
 /** Bytes as hex, for reporting a stretch this reader cannot yet name. */

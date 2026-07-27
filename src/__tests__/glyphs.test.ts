@@ -50,6 +50,16 @@ describe("parseRmPage on glyph blocks", () => {
 		expect(page.strokes).toEqual([]);
 	});
 
+	it("reports the bytes and coordinates around the text, for diagnosis", () => {
+		// GP_E3_S15: the colour is in none of the named fields, and the glyph
+		// rectangles — if they are in there — would calibrate where the page's
+		// ink really sits. Both questions are settled by looking, not guessing.
+		const page = parseRmPage(glyphFile("iets", 2));
+		expect(page.highlights[0].head).toMatch(/^[0-9a-f]+$/);
+		expect(page.highlights[0].tail).toBeDefined();
+		expect(Array.isArray(page.highlights[0].coords)).toBe(true);
+	});
+
 	it("keeps non-ASCII text intact", () => {
 		const page = parseRmPage(glyphFile("Ze vertellen niet wáárom mensen — lid worden"));
 		expect(page.highlights[0].text).toBe("Ze vertellen niet wáárom mensen — lid worden");

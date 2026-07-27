@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.15.0] - 2026-07-27
+
+### Changed
+
+- **Diagnosis for pen marks that land on the wrong line.** Comparing the
+  annotated PDF with the copy in the vault showed every pen mark sitting about
+  three text rows too low, while its horizontal position was exact and text
+  highlights — which are placed by their own text rather than by geometry —
+  were perfect. Re-typesetting the note put a number on it: a constant 55.5 pt
+  downward, the same at the top of the page as two thirds down. Constant and
+  not proportional means the scale is right and the origin is not.
+- The import report now records what is needed to fix that rather than guess
+  at it: the raw ink bounds of every mark and where they land on the page, the
+  view settings the device stores in `.content` (zoom mode, custom zoom,
+  transform, and any unrecognised view field), and — around each highlight —
+  the bytes before the text plus any float values inside the device's
+  coordinate range. If a highlight carries its own rectangles, they are what
+  will calibrate the pen marks on that page.
+
+### Known
+
+- Pen marks are still placed too low; this release measures the cause, it does
+  not yet correct it.
+- Highlight colours still come back as one colour. The field that carries them
+  is not one of the ones read so far.
+
 ## [0.14.0] - 2026-07-27
 
 ### Added

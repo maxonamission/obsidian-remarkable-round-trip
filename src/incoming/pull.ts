@@ -13,7 +13,9 @@ import { MappingEntry, MappingTable } from "../id/mapping";
 import type { AnnotationOutcome } from "./annotationnote";
 import { Highlight, isHighlightFile, parseHighlightPage } from "./highlights";
 import { MarkKind, readMarks } from "./marks";
+import { deviceBoundsToPdf } from "./anchor";
 import { PageMap, parsePageOrder } from "./pagemap";
+import { describePageView, parsePageView } from "./pageview";
 import { Stroke, parseRmPage } from "./rmlines";
 
 /** One file belonging to a device document. */
@@ -264,8 +266,13 @@ async function readPageMap(
 	const content = allFiles.find((file) => file.id === `${deviceDocId}.content`);
 	if (content === undefined) return new PageMap([]);
 	try {
-		const order = parsePageOrder(await deps.readFile(content));
+		const json = await deps.readFile(content);
+		const order = parsePageOrder(json);
 		deps.log?.(`  page order: ${order.length} page(s) listed in .content`);
+		// How the device was showing the page: the prime suspect behind ink
+		// that lands on the wrong line (GP_E3_S15).
+		const view = describePageView(parsePageView(json));
+		deps.log?.(`  page view: ${view === "" ? "(nothing recorded)" : view}`);
 		return new PageMap(order);
 	} catch (error) {
 		scan.unreadableFiles++;
@@ -330,11 +337,32 @@ async function readStrokePages(
 					deps.log?.(
 						`    highlight fields ${Object.entries(found.fields ?? {})
 							.map(([tag, value]) => `${tag}=${value}`)
-							.join(",")} tail ${found.tail ?? ""}`,
+							.join(",")} coords ${(found.coords ?? []).join(" ")} ` +
+							`head ${found.head ?? ""} tail ${found.tail ?? ""}`,
 					);
 				}
 			}
 			const marks = readMarks(rm.strokes, page ?? 0, page === undefined ? null : layout);
+			// Raw ink geometry, so a mark that lands on the wrong line can be
+			// measured instead of guessed at (GP_E3_S15). Device units in,
+			// distance from the top of the page out — the two numbers that say
+			// whether the origin or the scale is wrong.
+			for (const mark of marks) {
+				const band =
+					layout === null
+						? ""
+						: (() => {
+								const pdf = deviceBoundsToPdf(mark.bounds, layout);
+								return ` → page top ${(layout.pageHeight - pdf.maxY).toFixed(1)}–${(
+									layout.pageHeight - pdf.minY
+								).toFixed(1)}`;
+							})();
+				deps.log?.(
+					`    ${mark.kind} ink x ${mark.bounds.minX.toFixed(0)}–${mark.bounds.maxX.toFixed(0)}, ` +
+						`y ${mark.bounds.minY.toFixed(0)}–${mark.bounds.maxY.toFixed(0)}${band}` +
+						`${mark.target === undefined ? "" : ` on “${mark.target}”`}`,
+				);
+			}
 			let onThisPage = 0;
 			for (const [position, mark] of marks.entries()) {
 				const needsImage = !TEXT_ONLY_KINDS.has(mark.kind);
