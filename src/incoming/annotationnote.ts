@@ -38,6 +38,12 @@ export interface AnnotationRenderInput {
 	 * there would double the note.
 	 */
 	inSourceNote?: boolean;
+	/**
+	 * The note was edited after this document was sent, so these annotations
+	 * belong to the earlier version. Said out loud in the block instead of
+	 * assumed away (F14, N5).
+	 */
+	sourceChanged?: boolean;
 }
 
 /** How the block came out, so the report can say so (GP_E3_S14). */
@@ -59,6 +65,14 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): RenderedAnn
 	const lines: string[] = [BEGIN_MARKER, ""];
 	lines.push(`Annotations from [[${input.sourceName}]], imported ${input.importedAt}.`);
 	lines.push("");
+	if (input.sourceChanged === true) {
+		lines.push(
+			"> [!warning] The note changed after this document was sent",
+			"> These annotations belong to the version that went to the reMarkable, not to the",
+			"> note as it reads now. Send the note again to annotate the current version.",
+			"",
+		);
+	}
 
 	const marks = input.marks ?? [];
 
@@ -116,7 +130,10 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): RenderedAnn
 	// a user writes directly underneath it.
 	if (lines[lines.length - 1] !== "") lines.push("");
 	lines.push(END_MARKER);
-	return { text: lines.join("\n"), outcome: { form: "summary", reason: fallbackReason(input) } };
+	return {
+		text: lines.join("\n"),
+		outcome: { form: "summary", reason: fallbackReason(input) },
+	};
 }
 
 /** Why the annotated copy was not possible — the report says this out loud. */

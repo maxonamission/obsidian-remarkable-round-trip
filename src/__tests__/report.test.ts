@@ -161,6 +161,71 @@ describe("renderImportReport", () => {
 		);
 	});
 
+	it("names a note that changed after it was sent (F14)", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 2,
+				scan: scan({
+					sourceState: "changed",
+					written: { form: "summary", reason: "no-layout" },
+				}),
+			},
+		];
+		const report = renderImportReport({ ...base, results });
+		expect(report).toContain("source note: changed since it was sent");
+		expect(report).toContain("Send it again");
+	});
+
+	it("says a moved note was found again, and stays quiet about an unchanged one", () => {
+		const moved: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Map/Nota.md",
+				highlightCount: 1,
+				scan: scan({ sourceState: "moved" }),
+			},
+		];
+		expect(renderImportReport({ ...base, results: moved })).toContain(
+			"found again by its document id",
+		);
+
+		const same: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 1,
+				scan: scan({ sourceState: "match" }),
+			},
+		];
+		expect(renderImportReport({ ...base, results: same })).not.toContain("source note:");
+	});
+
+	it("blames the edit, not EPUB, when the source check knows the note changed", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 0,
+				scan: scan({
+					strokeFiles: 1,
+					renderedPages: 1,
+					renderedRemarks: 2,
+					anchorSkipped: "no-layout",
+					sourceState: "changed",
+				}),
+			},
+		];
+		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		expect(report).toContain("has been edited since it was sent");
+		expect(report).not.toContain("or it went over as EPUB");
+	});
+
 	it("says when the highlights came from the pen layer", () => {
 		const results: PullResult[] = [
 			{
@@ -171,7 +236,9 @@ describe("renderImportReport", () => {
 				scan: scan({ strokeFiles: 2, parsedHighlights: 3, highlightsInStrokes: 3 }),
 			},
 		];
-		expect(renderImportReport({ ...base, results })).toContain("3 highlight(s) (from the pen layer)");
+		expect(renderImportReport({ ...base, results })).toContain(
+			"3 highlight(s) (from the pen layer)",
+		);
 	});
 
 	it("names the marks it could read as text", () => {

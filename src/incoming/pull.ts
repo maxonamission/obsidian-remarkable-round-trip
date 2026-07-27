@@ -47,10 +47,25 @@ export interface DocumentScan {
 	anchorSkipped?: "no-layout";
 	/** How the vault block came out: annotated copy or summary (GP_E3_S14). */
 	written?: WriteOutcome;
+	/** How the note relates to what was sent (F14, GP_E3_S3). */
+	sourceState?: SourceState;
 }
 
 /** What the vault writer made of one document's annotations (GP_E3_S14). */
 export type WriteOutcome = AnnotationOutcome;
+
+/**
+ * How the note in the vault relates to the document that was sent (F14,
+ * GP_E3_S3).
+ *
+ * - `match` — unchanged; annotations land where they belong.
+ * - `changed` — edited since it was sent, so the page geometry no longer
+ *   describes this text. Annotations still come back, but unanchored.
+ * - `moved` — found again elsewhere in the vault by its document id.
+ * - `missing` — no note in the vault carries this document id any more.
+ * - `no-snapshot` — sent before the plugin recorded typography (or as EPUB).
+ */
+export type SourceState = "match" | "changed" | "moved" | "missing" | "no-snapshot";
 
 /** One annotation as it will appear in the vault (GP_E3_S9). */
 export interface ImportedMark {
@@ -103,6 +118,12 @@ export interface PullDeps {
 	 */
 	loadLayout?: (entry: MappingEntry) => Promise<PdfLayout | null>;
 	/**
+	 * Whether the note still matches the document that was sent (F14). A
+	 * changed note is not an error — the annotations are real — but the reader
+	 * has to know that they describe an older version.
+	 */
+	checkSource?: (entry: MappingEntry) => Promise<SourceState>;
+	/**
 	 * Persist the rendered annotations for one source note. The outcome says
 	 * whether it became an annotated copy or fell back to a summary — a silent
 	 * fallback cost the owner two test rounds (GP_E3_S14).
@@ -111,6 +132,8 @@ export interface PullDeps {
 		entry: MappingEntry,
 		highlights: Highlight[],
 		marks: ImportedMark[],
+		/** How the note relates to what was sent, so the block can say so (F14). */
+		sourceState?: SourceState,
 	) => Promise<WriteOutcome | void>;
 	/** Re-import even when the device hash is unchanged. */
 	force?: boolean;
@@ -171,6 +194,17 @@ export async function collectHighlights(
 		interpretedMarks: 0,
 		highlightsInStrokes: 0,
 	};
+	if (deps.checkSource) {
+		// Diagnosis, not a precondition: if the vault cannot answer, the
+		// annotations still come back — one unreadable note must not cost them.
+		scan.sourceState = await deps.checkSource(entry).catch((error: unknown) => {
+			deps.log?.(`  source check failed: ${String(error)}`);
+			return undefined;
+		});
+		if (scan.sourceState !== undefined && scan.sourceState !== "match") {
+			deps.log?.(`  source note: ${scan.sourceState}`);
+		}
+	}
 	const pages = await readPageMap(deviceDocId, allFiles, deps, scan);
 	const { marks, highlights: inkHighlights } = await readStrokePages(
 		entry,
@@ -432,7 +466,7 @@ export async function pullAnnotations(
 				};
 			} else {
 				const { highlights, scan, marks } = await collectHighlights(entry, hash, deps);
-				const written = await deps.writeAnnotations(entry, highlights, marks);
+				const written = await deps.writeAnnotations(entry, highlights, marks, scan.sourceState);
 				if (written) scan.written = written;
 				updated = {
 					...updated,

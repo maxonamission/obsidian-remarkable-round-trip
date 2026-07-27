@@ -26,6 +26,7 @@ import {
 	DocumentFile,
 	ImportedMark,
 	PullResult,
+	SourceState,
 	StrokeRenderRequest,
 	pullAnnotations,
 } from "./incoming/pull";
@@ -446,6 +447,7 @@ export default class RoundTripPlugin extends Plugin {
 
 		const log: string[] = [];
 		this.layoutCache.clear();
+		await this.reconcileNotePaths((line) => log.push(line));
 		const startedAt = new Date().toISOString().slice(0, 16).replace("T", " ");
 		const notice = progressNotice(`Checking ${mappings} document(s) for annotations…`);
 		try {
@@ -476,13 +478,16 @@ export default class RoundTripPlugin extends Plugin {
 						? (request) => this.renderHandwriting(request)
 						: undefined,
 					loadLayout: (entry) => this.reproduceLayout(entry),
-					writeAnnotations: async (entry, highlights, marks) =>
+					checkSource: (entry) => this.checkSource(entry),
+					writeAnnotations: async (entry, highlights, marks, sourceState) =>
 						this.writeAnnotations(
 							entry.notePath,
 							highlights,
 							marks,
 							await this.reproduceLayout(entry).catch(() => null),
 							await this.readSourceBody(entry).catch(() => null),
+							this.resolveNote(entry)?.path ?? entry.notePath,
+							sourceState,
 						),
 				},
 				(done, total) => updateProgress(notice, `Checking ${done}/${total} for annotations…`),
@@ -555,12 +560,67 @@ export default class RoundTripPlugin extends Plugin {
 	}
 
 	/**
+	 * The note a mapping points at. Obsidian lets you move and rename freely,
+	 * so the path recorded at send time is a hint, not an identity — the
+	 * `remarkable-id` in the frontmatter is (K3). Looking it up that way keeps
+	 * a moved note working instead of quietly losing its annotations
+	 * (GP_E3_S3).
+	 */
+	private resolveNote(entry: MappingEntry): TFile | null {
+		const atPath = this.app.vault.getFileByPath(entry.notePath);
+		if (atPath !== null) return atPath;
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+			if (frontmatter?.[DOCID_FRONTMATTER_KEY] === entry.docId) return file;
+		}
+		return null;
+	}
+
+	/**
+	 * Bring the recorded paths back in line with the vault before a run, so a
+	 * moved note keeps its annotations — and its companion note stays next to
+	 * it rather than at the old address.
+	 */
+	private async reconcileNotePaths(log: (line: string) => void): Promise<void> {
+		let changed = false;
+		for (const entry of Object.values(this.settings.mappings)) {
+			if (this.app.vault.getFileByPath(entry.notePath) !== null) continue;
+			const found = this.resolveNote(entry);
+			if (found === null || found.path === entry.notePath) continue;
+			log(`note moved: ${entry.notePath} → ${found.path}`);
+			this.settings.mappings = {
+				...this.settings.mappings,
+				[entry.docId]: { ...entry, notePath: found.path },
+			};
+			changed = true;
+		}
+		if (changed) await this.saveSettings();
+	}
+
+	/** Does the note still match the document that was sent? (F14) */
+	private async checkSource(entry: MappingEntry): Promise<SourceState> {
+		if (entry.pdfLayout === undefined) return "no-snapshot";
+		const file = this.resolveNote(entry);
+		if (file === null) return "missing";
+		const moved = file.path !== entry.notePath;
+		// Preprocess exactly as the layout rebuild does, or the two would
+		// disagree about whether the note changed.
+		const embeds = await this.buildEmbedMap(file);
+		const pre = preprocess(await this.app.vault.cachedRead(file), {
+			resolveEmbed: (linkpath) => embeds.get(linkpath) ?? { kind: "missing" },
+			frontmatterAsTitleBlock: this.settings.frontmatterAsTitleBlock,
+		});
+		if (contentHash(pre.markdown) !== entry.contentHash) return "changed";
+		return moved ? "moved" : "match";
+	}
+
+	/**
 	 * The note's own markdown, frontmatter removed — what the marks get
 	 * projected onto (GP_E3_S13).
 	 */
 	private async readSourceBody(entry: MappingEntry): Promise<string | null> {
 		if (entry.pdfLayout === undefined) return null;
-		const file = this.app.vault.getFileByPath(entry.notePath);
+		const file = this.resolveNote(entry);
 		if (file === null) return null;
 		const raw = await this.app.vault.cachedRead(file);
 		// Frontmatter belongs to the source note, not to a copy of its body.
@@ -570,7 +630,7 @@ export default class RoundTripPlugin extends Plugin {
 	private async buildLayout(entry: MappingEntry): Promise<PdfLayout | null> {
 		const typography = entry.pdfLayout;
 		if (typography === undefined) return null; // EPUB, or sent before 0.8.0
-		const file = this.app.vault.getFileByPath(entry.notePath);
+		const file = this.resolveNote(entry);
 		if (file === null) return null;
 
 		const embeds = await this.buildEmbedMap(file);
@@ -639,23 +699,27 @@ export default class RoundTripPlugin extends Plugin {
 		marks: ImportedMark[] = [],
 		layout: PdfLayout | null = null,
 		source: string | null = null,
+		currentPath: string = notePath,
+		sourceState?: SourceState,
 	): Promise<AnnotationOutcome> {
-		const sourceName = (notePath.split("/").pop() ?? notePath).replace(/\.md$/i, "");
+		// A moved note keeps its annotations beside it, not at the old address.
+		const sourceName = (currentPath.split("/").pop() ?? currentPath).replace(/\.md$/i, "");
 		const rendered = renderAnnotationBlock({
-			sourcePath: notePath,
+			sourcePath: currentPath,
 			sourceName,
 			highlights,
 			marks,
 			layout,
 			source,
 			inSourceNote: this.settings.annotationTarget === "source",
+			sourceChanged: sourceState === "changed",
 			importedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
 		});
 
 		const targetPath =
 			this.settings.annotationTarget === "source"
-				? notePath
-				: companionPath(notePath, this.settings.annotationFolder);
+				? currentPath
+				: companionPath(currentPath, this.settings.annotationFolder);
 
 		const existing = this.app.vault.getFileByPath(targetPath);
 		if (existing) {
@@ -690,7 +754,18 @@ function reportPullResults(results: PullResult[]): void {
 		notify("No new annotations — everything is already up to date.");
 		return;
 	}
-	notify(`Imported ${total} highlight(s) from ${imported.length} document(s).`);
+	// A note edited after it was sent still yields annotations, but unplaced
+	// ones — say so here rather than only in the report (F14).
+	const changed = imported.filter((r) => r.ok && r.scan?.sourceState === "changed").length;
+	const conflict =
+		changed > 0
+			? `\n${changed} note(s) changed since they were sent, so their marks could not be ` +
+				"placed in the text. Send them again."
+			: "";
+	notify(
+		`Imported ${total} highlight(s) from ${imported.length} document(s).${conflict}`,
+		changed > 0 ? 10000 : undefined,
+	);
 }
 
 function getFrontmatterValue(

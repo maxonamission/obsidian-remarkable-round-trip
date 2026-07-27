@@ -7,7 +7,7 @@
  */
 
 import { adviseFailure, classifyFailure } from "../transport/failure";
-import { PullResult } from "./pull";
+import { PullResult, SourceState } from "./pull";
 
 export interface ImportReportInput {
 	results: PullResult[];
@@ -65,6 +65,8 @@ export function renderImportReport(input: ImportReportInput): string {
 			lines.push(`    ${scan.unreadableFiles} file(s) could not be read`);
 		}
 		lines.push(`    ${describeWrite(scan)}`);
+		const state = describeSource(scan.sourceState);
+		if (state !== "") lines.push(`    ${state}`);
 	}
 
 	lines.push("", diagnose(input));
@@ -104,6 +106,29 @@ function describeWrite(scan: NonNullable<Extract<PullResult, { ok: true }>["scan
 	}
 }
 
+/**
+ * How the note relates to the document that was annotated (F14). Silence
+ * means "unchanged" — only a mismatch is worth a line.
+ */
+function describeSource(state: SourceState | undefined): string {
+	switch (state) {
+		case "changed":
+			return (
+				"source note: changed since it was sent — the marks cannot be placed in the " +
+				"text. Send it again to restore the link."
+			);
+		case "moved":
+			return "source note: moved in the vault; found again by its document id";
+		case "missing":
+			return (
+				"source note: no note in the vault carries this document id any more. " +
+				"The annotations were kept, but they have nothing to attach to."
+			);
+		default:
+			return "";
+	}
+}
+
 /** The most useful next sentence, given what the run found. */
 function diagnose(input: ImportReportInput): string {
 	const results = input.results;
@@ -114,13 +139,18 @@ function diagnose(input: ImportReportInput): string {
 	const renderedPages = successes.reduce((total, r) => total + (r.scan?.renderedPages ?? 0), 0);
 	const anchored = successes.reduce((total, r) => total + (r.scan?.anchoredRemarks ?? 0), 0);
 	const unanchored = scanned.some((r) => r.scan?.anchorSkipped === "no-layout");
+	// With a source check available (F14) we know which of the two causes it
+	// was, instead of naming both and leaving the choice to the reader.
+	const why = scanned.some((r) => r.scan?.sourceState === "changed")
+		? "the note has been edited since it was sent, so its page layout no longer describes " +
+			"this text. Send the note again to restore the link."
+		: "the note has changed since it was sent, or it went over as EPUB, which has no fixed " +
+			"page layout. Send the note again to restore the link.";
 	const anchoring =
 		anchored > 0
 			? ` ${anchored} are tied to the sentence they were written against.`
 			: unanchored
-				? " They could not be quoted against the source text: the note has changed since it " +
-					"was sent, or it went over as EPUB, which has no fixed page layout. Send the note " +
-					"again to restore the link."
+				? ` They could not be quoted against the source text: ${why}`
 				: "";
 	const interpreted = successes.reduce(
 		(total, r) => total + (r.scan?.interpretedMarks ?? 0),

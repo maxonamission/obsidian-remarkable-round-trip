@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.14.0] - 2026-07-27
+
+### Added
+
+- **Your notes are found by their id, not by where they sit.** Move or rename
+  an annotated note in Obsidian and the link to the reMarkable survives: the
+  plugin looks the note up by the `remarkable-id` in its frontmatter, updates
+  the recorded path, and writes the annotation note next to the note's new
+  location instead of the old one.
+- **A note that changed after you sent it now says so.** The annotation block
+  opens with a warning, the import report names it per note, and the closing
+  notice counts them. Marks from an earlier version are still imported — they
+  are real — but you can see that they describe the text as it was.
+- The report also distinguishes a note that moved (found again by its id) from
+  one that has disappeared from the vault entirely.
+
+### Changed
+
+- When the source check knows a note was edited, the report says that plainly
+  instead of offering "changed, or sent as EPUB" and leaving you to guess.
+
 ## [0.13.0] - 2026-07-27
 
 ### Added

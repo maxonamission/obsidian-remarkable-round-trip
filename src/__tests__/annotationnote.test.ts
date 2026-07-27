@@ -30,6 +30,14 @@ describe("renderAnnotationBlock", () => {
 		expect(block).toContain("> op pagina twee");
 	});
 
+	it("warns in the block itself when the note changed after it was sent (F14)", () => {
+		const block = renderAnnotationBlock({ ...INPUT, sourceChanged: true }).text;
+		expect(block).toContain("[!warning] The note changed after this document was sent");
+		expect(block).toContain("Send the note again");
+		// Silent by default: no warning where there is nothing to warn about.
+		expect(renderAnnotationBlock(INPUT).text).not.toContain("[!warning]");
+	});
+
 	it("says so plainly when a document holds neither highlights nor handwriting", () => {
 		const block = renderAnnotationBlock({ ...INPUT, highlights: [] }).text;
 		expect(block).toContain("_No text highlights or pen marks found");

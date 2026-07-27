@@ -312,6 +312,41 @@ describe("pullAnnotations", () => {
 		expect(updated["doc-b"].importedHash).toBeUndefined();
 	});
 
+	it("records how the source note relates to what was sent (F14)", async () => {
+		const { deps } = makeDeps({ checkSource: () => Promise.resolve("changed" as const) });
+		const { results } = await pullAnnotations(TABLE, deps);
+		expect(results[0]).toMatchObject({ ok: true, scan: { sourceState: "changed" } });
+	});
+
+	it("still imports when the source check itself fails — it is a diagnosis, not a gate", async () => {
+		const table: MappingTable = {
+			...TABLE,
+			"doc-b": {
+				...TABLE["doc-a"],
+				docId: "doc-b",
+				deviceDocId: "device-b",
+				notePath: "b.md",
+			},
+		};
+		const { deps, written } = makeDeps({
+			listDocumentHashes: () =>
+				Promise.resolve(
+					new Map([
+						["device-a", "hash-1"],
+						["device-b", "hash-2"],
+					]),
+				),
+			checkSource: (entry) =>
+				entry.docId === "doc-b"
+					? Promise.reject(new Error("vault weigert"))
+					: Promise.resolve("match" as const),
+		});
+		const { results } = await pullAnnotations(table, deps);
+		expect(results.map((r) => r.ok)).toEqual([true, true]);
+		expect(results[1]).toMatchObject({ scan: { sourceState: undefined } });
+		expect(written).toHaveLength(2);
+	});
+
 	it("reports every mapping as failed when the device is unreachable", async () => {
 		const { deps } = makeDeps({
 			listDocumentHashes: () => Promise.reject(new Error("geen verbinding")),
