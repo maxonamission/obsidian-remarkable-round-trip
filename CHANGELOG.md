@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.1] - 2026-07-27
+
+### Fixed
+
+- **The annotated copy never appeared.** 0.12.0 gave up on lining the note up
+  with the marks and fell back to the old summary without saying so, which
+  looked like an import that did nothing. The cause: the document sent to the
+  tablet opens with a title the note itself does not carry, and a word from
+  that title matched somewhere further down the note — dragging the alignment
+  past everything above it. Matching is now bounded to the immediate
+  neighbourhood, and it first looks for the point where the two texts really
+  meet.
+
 ## [0.12.0] - 2026-07-27
 
 ### Changed

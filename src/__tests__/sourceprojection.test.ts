@@ -132,6 +132,28 @@ describe("projectOntoSource", () => {
 		expect(result?.markdown).toContain("could not be placed");
 	});
 
+	it("is not thrown off by the title the plugin puts on the document", async () => {
+		// Beta 2026-07-27: the typeset document opens with a title the note
+		// itself does not carry. Its words ("blik", "analyse") occur further
+		// down the note, so a title word matched there and dragged the cursor
+		// past everything above it — after which nothing lined up and the
+		// projection refused, silently falling back to the old summary.
+		const pre = preprocess(SOURCE, { resolveEmbed: () => ({ kind: "missing" }) });
+		const titled = await renderPdf(parseBlocks(pre.markdown), {
+			title: "Analyse van de beperkte blik",
+			docId: "d",
+		});
+
+		const result = projectOntoSource({
+			source: SOURCE,
+			layout: titled.layout,
+			marks: [],
+			highlights: [],
+		});
+		expect(result).not.toBeNull();
+		expect(result?.markdown).toBe(SOURCE.trimEnd());
+	});
+
 	it("refuses to project onto a note that is not the same document", () => {
 		expect(
 			projectOntoSource({

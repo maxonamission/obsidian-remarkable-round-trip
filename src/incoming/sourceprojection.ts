@@ -100,14 +100,49 @@ function matchAt(source: string, from: number, word: string): number | null {
 	return at;
 }
 
+/**
+ * How far past the cursor a word may be found. Consecutive words sit a few
+ * characters apart; the slack is for skipped markup — a link URL, an embed.
+ *
+ * A *tight* bound is the whole point. Searching the rest of the document
+ * (beta, 2026-07-27) let a word that is not in the note at all — the title
+ * line the plugin adds — match somewhere far below and drag the cursor with
+ * it, after which nothing lined up and the projection gave up entirely.
+ */
+const WINDOW = 200;
+
 /** Where a word sits in the source, searching forward from `from`. */
-function findWord(source: string, from: number, word: string): Range | null {
-	for (let at = from; at < source.length; at++) {
+function findWord(source: string, from: number, word: string, window = WINDOW): Range | null {
+	const limit = Math.min(source.length, from + window);
+	for (let at = from; at < limit; at++) {
 		if (SYNTAX.has(source[at])) continue;
 		const end = matchAt(source, at, word);
 		if (end !== null) return { start: at, end };
 	}
 	return null;
+}
+
+/**
+ * Where the note's own text begins in the layout. The typeset document opens
+ * with a title, and optionally with the frontmatter as a title block; neither
+ * is part of the note body. Rather than special-casing them, look for the
+ * first word that starts a run of three consecutive matches near the top of
+ * the note — that is where the two texts genuinely meet.
+ */
+function syncPoint(source: string, words: { text: string }[]): number {
+	const head = Math.min(words.length, 60);
+	for (let index = 0; index < head; index++) {
+		let cursor = 0;
+		let run = 0;
+		for (let step = 0; step < 3 && index + step < words.length; step++) {
+			const hit = findWord(source, cursor, words[index + step].text, cursor === 0 ? 400 : 40);
+			if (hit === null) break;
+			cursor = hit.end;
+			run++;
+		}
+		if (run === 3) return index;
+	}
+	return 0;
 }
 
 export interface ProjectionInput {
@@ -140,16 +175,17 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 	// the note does not carry, an inlined embed) costs its own mark, and the
 	// cursor stays put so the next word can still line up.
 	const ranges = new Map<number, Range>();
+	const start = syncPoint(input.source, words);
 	let cursor = 0;
 	let found = 0;
-	for (const word of words) {
+	for (const word of words.slice(start)) {
 		const hit = findWord(input.source, cursor, word.text);
 		if (hit === null) continue;
 		ranges.set(word.id, hit);
 		cursor = hit.end;
 		found++;
 	}
-	if (found < words.length / 4) return null; // not the same document
+	if (found < (words.length - start) / 4) return null; // not the same document
 
 	const spans: { kind: string; color?: number; start: number; end: number }[] = [];
 	let placed = 0;
