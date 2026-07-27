@@ -10,6 +10,7 @@
 
 import { PdfLayout } from "../convert/pdf";
 import { MappingEntry, MappingTable } from "../id/mapping";
+import type { AnnotationOutcome } from "./annotationnote";
 import { Highlight, isHighlightFile, parseHighlightPage } from "./highlights";
 import { MarkKind, readMarks } from "./marks";
 import { PageMap, parsePageOrder } from "./pagemap";
@@ -44,7 +45,12 @@ export interface DocumentScan {
 	highlightsInStrokes: number;
 	/** Why anchoring was unavailable, when it was. */
 	anchorSkipped?: "no-layout";
+	/** How the vault block came out: annotated copy or summary (GP_E3_S14). */
+	written?: WriteOutcome;
 }
+
+/** What the vault writer made of one document's annotations (GP_E3_S14). */
+export type WriteOutcome = AnnotationOutcome;
 
 /** One annotation as it will appear in the vault (GP_E3_S9). */
 export interface ImportedMark {
@@ -96,12 +102,16 @@ export interface PullDeps {
 	 * and nothing else.
 	 */
 	loadLayout?: (entry: MappingEntry) => Promise<PdfLayout | null>;
-	/** Persist the rendered annotations for one source note. */
+	/**
+	 * Persist the rendered annotations for one source note. The outcome says
+	 * whether it became an annotated copy or fell back to a summary — a silent
+	 * fallback cost the owner two test rounds (GP_E3_S14).
+	 */
 	writeAnnotations: (
 		entry: MappingEntry,
 		highlights: Highlight[],
 		marks: ImportedMark[],
-	) => Promise<void>;
+	) => Promise<WriteOutcome | void>;
 	/** Re-import even when the device hash is unchanged. */
 	force?: boolean;
 }
@@ -282,15 +292,13 @@ async function readStrokePages(
 			if (rm.highlights.length > 0) {
 				// Raw colour values: the mapping to names is a guess until a
 				// real device confirms it (GP_E3_S12).
-				deps.log?.(
-					`  ${file.id}: highlight fields ${rm.highlights
-						.map((found) =>
-							Object.entries(found.fields ?? {})
-								.map(([tag, value]) => `${tag}=${value}`)
-								.join(","),
-						)
-						.join(" | ")}`,
-				);
+				for (const found of rm.highlights) {
+					deps.log?.(
+						`    highlight fields ${Object.entries(found.fields ?? {})
+							.map(([tag, value]) => `${tag}=${value}`)
+							.join(",")} tail ${found.tail ?? ""}`,
+					);
+				}
 			}
 			const marks = readMarks(rm.strokes, page ?? 0, page === undefined ? null : layout);
 			let onThisPage = 0;
@@ -424,7 +432,8 @@ export async function pullAnnotations(
 				};
 			} else {
 				const { highlights, scan, marks } = await collectHighlights(entry, hash, deps);
-				await deps.writeAnnotations(entry, highlights, marks);
+				const written = await deps.writeAnnotations(entry, highlights, marks);
+				if (written) scan.written = written;
 				updated = {
 					...updated,
 					[entry.docId]: { ...entry, importedHash: hash },

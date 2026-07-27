@@ -20,7 +20,7 @@ const INPUT = {
 
 describe("renderAnnotationBlock", () => {
 	it("renders highlights as quotes grouped per page, with a backlink", () => {
-		const block = renderAnnotationBlock(INPUT);
+		const block = renderAnnotationBlock(INPUT).text;
 		expect(block.startsWith(BEGIN_MARKER)).toBe(true);
 		expect(block.trimEnd().endsWith(END_MARKER)).toBe(true);
 		expect(block).toContain("[[Nota]]");
@@ -31,7 +31,7 @@ describe("renderAnnotationBlock", () => {
 	});
 
 	it("says so plainly when a document holds neither highlights nor handwriting", () => {
-		const block = renderAnnotationBlock({ ...INPUT, highlights: [] });
+		const block = renderAnnotationBlock({ ...INPUT, highlights: [] }).text;
 		expect(block).toContain("_No text highlights or pen marks found");
 	});
 
@@ -51,7 +51,7 @@ describe("renderAnnotationBlock", () => {
 					page: 2,
 				},
 			],
-		});
+		}).text;
 		expect(block).toContain("### Pen marks");
 		expect(block).toContain("**Page 1**");
 		expect(block).toContain("Note at: \u201Cde zin ernaast\u201D");
@@ -64,14 +64,14 @@ describe("renderAnnotationBlock", () => {
 			...INPUT,
 			highlights: [],
 			marks: [{ kind: "note", path: "a.png" }],
-		});
+		}).text;
 		expect(block).toContain("_No text highlights; the pen marks are below._");
 		expect(block).toContain("![[a.png]]");
 	});
 });
 
 describe("upsertAnnotationBlock", () => {
-	const block = renderAnnotationBlock(INPUT);
+	const block = renderAnnotationBlock(INPUT).text;
 
 	it("appends the block to a note that has none yet", () => {
 		const result = upsertAnnotationBlock("Mijn eigen aantekening.\n", block);

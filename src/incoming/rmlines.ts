@@ -62,12 +62,18 @@ export interface RmHighlight {
 	text: string;
 	color?: number;
 	/**
-	 * Every small tagged integer in the glyph block, by tag index — raw, for
+	 * Every tagged number in the glyph block, keyed `index:type` — raw, for
 	 * diagnosis. Beta 2026-07-27: the field we took for the colour reads 9 for
-	 * yellow, blue *and* pink, so it is the tool, not the colour. Logging the
-	 * lot is how the real colour field gets identified without guessing.
+	 * yellow, blue *and* pink, so it is the tool, not the colour.
 	 */
-	fields?: Record<number, number>;
+	fields?: Record<string, number>;
+	/**
+	 * The bytes just after the text, as hex. The colour is in none of the
+	 * fields before it, so it has to live here — among the rectangles or in a
+	 * field this reader does not recognise yet. Hex settles that without
+	 * another round of guessing.
+	 */
+	tail?: string;
 }
 
 class Cursor {
@@ -242,6 +248,7 @@ function readGlyphHighlight(
 				text,
 				color: readGlyphColor(view, bytes, start, at),
 				fields: readTaggedInts(view, bytes, start, end),
+				tail: hexOf(bytes, from + length, Math.min(end, from + length + 48)),
 			};
 		} catch {
 			continue; // not text after all; keep looking
@@ -250,22 +257,39 @@ function readGlyphHighlight(
 	return null;
 }
 
-/** Small tagged uint32 fields anywhere in the block, for diagnosis only. */
+/**
+ * Tagged numbers anywhere in the block, for diagnosis only. Both widths are
+ * scanned: a colour may well be a single byte rather than a uint32, and the
+ * previous pass only looked at the wide form (beta, 2026-07-27).
+ */
 function readTaggedInts(
 	view: DataView,
 	bytes: Uint8Array,
 	start: number,
 	end: number,
-): Record<number, number> {
-	const fields: Record<number, number> = {};
-	for (let at = start; at + 5 <= end; at++) {
-		if ((bytes[at] & 0x0f) !== 0x4) continue;
+): Record<string, number> {
+	const fields: Record<string, number> = {};
+	for (let at = start; at + 2 <= end; at++) {
 		const index = bytes[at] >> 4;
+		const type = bytes[at] & 0x0f;
 		if (index === 0) continue;
-		const value = view.getUint32(at + 1, true);
-		if (value < 4096 && fields[index] === undefined) fields[index] = value;
+		let value: number | undefined;
+		if (type === 0x4 && at + 5 <= end) value = view.getUint32(at + 1, true);
+		else if (type === 0x1) value = bytes[at + 1];
+		if (value === undefined || value >= 4096) continue;
+		const key = `${index}:${type}`;
+		if (fields[key] === undefined) fields[key] = value;
 	}
 	return fields;
+}
+
+/** Bytes as hex, for reporting a stretch this reader cannot yet name. */
+function hexOf(bytes: Uint8Array, from: number, to: number): string {
+	let out = "";
+	for (let at = from; at < to && at < bytes.length; at++) {
+		out += bytes[at].toString(16).padStart(2, "0");
+	}
+	return out;
 }
 
 /** The colour field sits before the text; take the nearest plausible one. */

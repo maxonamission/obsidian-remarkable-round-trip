@@ -36,6 +36,7 @@ import { PdfLayout, renderPdf } from "./convert/pdf";
 import { MappingEntry, contentHash } from "./id/mapping";
 import { preprocess } from "./preprocess/preprocess";
 import {
+	AnnotationOutcome,
 	companionPath,
 	renderAnnotationBlock,
 	upsertAnnotationBlock,
@@ -638,9 +639,9 @@ export default class RoundTripPlugin extends Plugin {
 		marks: ImportedMark[] = [],
 		layout: PdfLayout | null = null,
 		source: string | null = null,
-	): Promise<void> {
+	): Promise<AnnotationOutcome> {
 		const sourceName = (notePath.split("/").pop() ?? notePath).replace(/\.md$/i, "");
-		const block = renderAnnotationBlock({
+		const rendered = renderAnnotationBlock({
 			sourcePath: notePath,
 			sourceName,
 			highlights,
@@ -659,15 +660,16 @@ export default class RoundTripPlugin extends Plugin {
 		const existing = this.app.vault.getFileByPath(targetPath);
 		if (existing) {
 			const current = await this.app.vault.read(existing);
-			await this.app.vault.modify(existing, upsertAnnotationBlock(current, block));
-			return;
+			await this.app.vault.modify(existing, upsertAnnotationBlock(current, rendered.text));
+			return rendered.outcome;
 		}
 		// A companion note may need its folder created first.
 		const folder = targetPath.split("/").slice(0, -1).join("/");
 		if (folder !== "" && !this.app.vault.getFolderByPath(folder)) {
 			await this.app.vault.createFolder(folder);
 		}
-		await this.app.vault.create(targetPath, `${block}\n`);
+		await this.app.vault.create(targetPath, `${rendered.text}\n`);
+		return rendered.outcome;
 	}
 }
 

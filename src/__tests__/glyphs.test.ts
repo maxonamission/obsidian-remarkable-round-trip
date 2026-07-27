@@ -46,7 +46,7 @@ describe("parseRmPage on glyph blocks", () => {
 		});
 		// Every small tagged integer comes along, so the real colour field can
 		// be identified from a device report (GP_E3_S13).
-		expect(page.highlights[0].fields).toMatchObject({ 4: 2 });
+		expect(page.highlights[0].fields).toMatchObject({ "4:4": 2 });
 		expect(page.strokes).toEqual([]);
 	});
 

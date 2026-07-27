@@ -64,10 +64,44 @@ export function renderImportReport(input: ImportReportInput): string {
 		if (scan.unreadableFiles > 0) {
 			lines.push(`    ${scan.unreadableFiles} file(s) could not be read`);
 		}
+		lines.push(`    ${describeWrite(scan)}`);
 	}
 
 	lines.push("", diagnose(input));
 	return lines.join("\n");
+}
+
+/**
+ * What ended up in the vault. Until now the report only described the
+ * *reading* side, so a failed projection looked like a successful import that
+ * did nothing (beta, 2026-07-27).
+ */
+function describeWrite(scan: NonNullable<Extract<PullResult, { ok: true }>["scan"]>): string {
+	const written = scan.written;
+	if (written === undefined) return "written as: (not recorded)";
+	if (written.form === "copy") {
+		const missed =
+			written.unplaced === undefined || written.unplaced === 0
+				? ""
+				: `, ${written.unplaced} highlight(s) listed separately`;
+		return `written as: annotated copy of the note${missed}`;
+	}
+	switch (written.reason) {
+		case "in-source-note":
+			return "written as: summary (annotations go into the source note itself)";
+		case "no-layout":
+			return (
+				"written as: summary — the note changed since it was sent, or it went " +
+				"over as EPUB. Send it again for an annotated copy."
+			);
+		case "no-source":
+			return "written as: summary — the source note could not be read";
+		default:
+			return (
+				"written as: summary — the marks could not be lined up with the note. " +
+				"Worth reporting with this report attached."
+			);
+	}
 }
 
 /** The most useful next sentence, given what the run found. */

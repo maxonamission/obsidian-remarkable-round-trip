@@ -40,8 +40,22 @@ export interface AnnotationRenderInput {
 	inSourceNote?: boolean;
 }
 
+/** How the block came out, so the report can say so (GP_E3_S14). */
+export interface AnnotationOutcome {
+	form: "copy" | "summary";
+	/** Why a copy was not possible. */
+	reason?: "no-layout" | "no-source" | "in-source-note" | "no-alignment";
+	/** Highlights whose text could not be located in the note. */
+	unplaced?: number;
+}
+
+export interface RenderedAnnotations {
+	text: string;
+	outcome: AnnotationOutcome;
+}
+
 /** Render the generated block (markers included). */
-export function renderAnnotationBlock(input: AnnotationRenderInput): string {
+export function renderAnnotationBlock(input: AnnotationRenderInput): RenderedAnnotations {
 	const lines: string[] = [BEGIN_MARKER, ""];
 	lines.push(`Annotations from [[${input.sourceName}]], imported ${input.importedAt}.`);
 	lines.push("");
@@ -61,7 +75,10 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): string {
 		lines.push(copy.markdown, "");
 		if (lines[lines.length - 1] !== "") lines.push("");
 		lines.push(END_MARKER);
-		return lines.join("\n");
+		return {
+			text: lines.join("\n"),
+			outcome: { form: "copy", unplaced: copy.unplaced.length },
+		};
 	}
 
 	if (input.highlights.length === 0 && marks.length === 0) {
@@ -99,7 +116,15 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): string {
 	// a user writes directly underneath it.
 	if (lines[lines.length - 1] !== "") lines.push("");
 	lines.push(END_MARKER);
-	return lines.join("\n");
+	return { text: lines.join("\n"), outcome: { form: "summary", reason: fallbackReason(input) } };
+}
+
+/** Why the annotated copy was not possible — the report says this out loud. */
+function fallbackReason(input: AnnotationRenderInput): AnnotationOutcome["reason"] {
+	if (input.inSourceNote === true) return "in-source-note";
+	if (!input.layout) return "no-layout";
+	if (!input.source) return "no-source";
+	return "no-alignment";
 }
 
 /**

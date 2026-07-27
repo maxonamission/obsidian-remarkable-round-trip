@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.13.0] - 2026-07-27
+
+### Added
+
+- **The import report now says what ended up in your vault**, not just what
+  was read from the tablet. Per note: whether it became an annotated copy of
+  your text or fell back to a summary — and if it fell back, why. The previous
+  version could quietly write a summary while reporting a successful import,
+  which is exactly how a broken alignment stayed hidden for two test rounds.
+
+### Changed
+
+- More detail on highlights in the report, aimed at pinning down the colour:
+  every tagged number in the highlight record, both widths, plus the bytes
+  following the highlighted text. The colour is in none of the fields read so
+  far, so it has to be in there.
+
 ## [0.12.1] - 2026-07-27
 
 ### Fixed

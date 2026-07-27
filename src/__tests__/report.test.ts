@@ -116,6 +116,51 @@ describe("renderImportReport", () => {
 		expect(report).toContain("2 page(s) with pen marks came back");
 	});
 
+	it("says what ended up in the vault, copy or summary", () => {
+		// Beta 2026-07-27: the projection fell back silently, so a run that
+		// wrote a summary read as a successful import that did nothing.
+		const copy: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 1,
+				scan: scan({ written: { form: "copy", unplaced: 0 } }),
+			},
+		];
+		expect(renderImportReport({ ...base, results: copy })).toContain(
+			"written as: annotated copy of the note",
+		);
+
+		const fell: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 1,
+				scan: scan({ written: { form: "summary", reason: "no-alignment" } }),
+			},
+		];
+		const report = renderImportReport({ ...base, results: fell });
+		expect(report).toContain("written as: summary");
+		expect(report).toContain("could not be lined up with the note");
+	});
+
+	it("names the reason a summary was written", () => {
+		const changed: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 1,
+				scan: scan({ written: { form: "summary", reason: "no-layout" } }),
+			},
+		];
+		expect(renderImportReport({ ...base, results: changed })).toContain(
+			"the note changed since it was sent",
+		);
+	});
+
 	it("says when the highlights came from the pen layer", () => {
 		const results: PullResult[] = [
 			{
