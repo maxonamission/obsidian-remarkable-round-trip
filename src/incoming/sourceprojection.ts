@@ -13,7 +13,7 @@
  */
 
 import { PdfLayout, toWinAnsi } from "../convert/pdf";
-import { Highlight, colorName } from "./highlights";
+import { Highlight, colorName, rgbName } from "./highlights";
 import type { ImportedMark } from "./pull";
 
 /** Markdown punctuation that carries no text and may sit between words. */
@@ -48,7 +48,7 @@ const HIGHLIGHT_CSS: Record<string, string> = {
 	grey: "#dee2e6",
 };
 
-function wrapperFor(kind: string, color?: number): [string, string] {
+function wrapperFor(kind: string, color?: number, rgb?: string): [string, string] {
 	switch (kind) {
 		case "strikethrough":
 			return ["~~", "~~"];
@@ -57,8 +57,12 @@ function wrapperFor(kind: string, color?: number): [string, string] {
 		case "circle":
 			return ["**", "**"];
 		case "highlight": {
-			const css = HIGHLIGHT_CSS[colorName(color) ?? ""];
-			return css === undefined ? ["==", "=="] : [`<mark style="background: ${css}">`, "</mark>"];
+			// The device sends its own RGB, so use it verbatim rather than
+			// rounding to a palette name (GP_E3_S16).
+			const css = rgb ?? HIGHLIGHT_CSS[colorName(color) ?? ""];
+			return css === undefined
+				? ["==", "=="]
+				: [`<mark style="background: ${css}">`, "</mark>"];
 		}
 		default:
 			return ["", ""];
@@ -187,7 +191,8 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 	}
 	if (found < (words.length - start) / 4) return null; // not the same document
 
-	const spans: { kind: string; color?: number; start: number; end: number }[] = [];
+	const spans: { kind: string; color?: number; rgb?: string; start: number; end: number }[] =
+		[];
 	let placed = 0;
 
 	for (const mark of input.marks) {
@@ -212,6 +217,7 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 		spans.push({
 			kind: "highlight",
 			color: highlight.color,
+			rgb: highlight.rgb,
 			start: Math.min(...covered.map((range) => range.start)),
 			end: Math.max(...covered.map((range) => range.end)),
 		});
@@ -224,7 +230,7 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 	if (unplaced.length > 0) {
 		markdown += "\n\n**Highlights that could not be placed in the text**\n\n";
 		for (const highlight of unplaced) {
-			const color = colorName(highlight.color);
+			const color = rgbName(highlight.rgb) ?? colorName(highlight.color);
 			markdown += `- ==${highlight.text}==${color === undefined ? "" : ` ^[${color}]`}\n`;
 		}
 	}
@@ -257,7 +263,7 @@ function wordIdsOf(
  */
 function applySpans(
 	source: string,
-	spans: { kind: string; color?: number; start: number; end: number }[],
+	spans: { kind: string; color?: number; rgb?: string; start: number; end: number }[],
 ): string {
 	const merged: typeof spans = [];
 	for (const kind of KIND_ORDER) {
@@ -274,7 +280,7 @@ function applySpans(
 
 	const edits: { at: number; text: string; rank: number }[] = [];
 	for (const span of merged) {
-		const [open, close] = wrapperFor(span.kind, span.color);
+		const [open, close] = wrapperFor(span.kind, span.color, span.rgb);
 		if (open === "") continue;
 		const depth = KIND_ORDER.indexOf(span.kind);
 		edits.push({ at: span.start, text: open, rank: depth });

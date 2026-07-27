@@ -327,7 +327,7 @@ async function readStrokePages(
 			// The "smart" highlighter writes its text into the same page file
 			// as the strokes on this firmware (GP_E3_S11).
 			for (const found of rm.highlights) {
-				highlights.push({ text: found.text, color: found.color, page });
+				highlights.push({ text: found.text, color: found.color, rgb: found.rgb, page });
 				scan.highlightsInStrokes++;
 			}
 			if (rm.highlights.length > 0) {

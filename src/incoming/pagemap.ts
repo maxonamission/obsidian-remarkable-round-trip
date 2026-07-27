@@ -28,15 +28,18 @@ export function parsePageOrder(contentJson: string): string[] {
 	if (typeof cPages === "object" && cPages !== null) {
 		const pages = (cPages as Record<string, unknown>).pages;
 		if (Array.isArray(pages)) {
-			return pages
-				.filter((page): page is Record<string, unknown> =>
-					typeof page === "object" && page !== null,
-				)
-				// A deleted page keeps its slot in the array but is not shown on
-				// the device, so counting it would shift every later page.
-				.filter((page) => page.deleted === undefined)
-				.map((page) => page.id)
-				.filter((id): id is string => typeof id === "string");
+			return (
+				pages
+					.filter(
+						(page): page is Record<string, unknown> =>
+							typeof page === "object" && page !== null,
+					)
+					// A deleted page keeps its slot in the array but is not shown on
+					// the device, so counting it would shift every later page.
+					.filter((page) => page.deleted === undefined)
+					.map((page) => page.id)
+					.filter((id): id is string => typeof id === "string")
+			);
 		}
 	}
 

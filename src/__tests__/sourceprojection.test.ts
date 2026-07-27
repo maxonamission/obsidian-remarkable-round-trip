@@ -18,7 +18,7 @@ const SOURCE = [
 	"- **Grote financiële beslissingen** – waar je inschatting jaren doorwerkt",
 	"- **Strategische koerswijzigingen** – die de hele organisatie raken",
 	"",
-	"*Reactie: \"Precies. Daarom combineren we cijfers met gesprekken.\"*",
+	'*Reactie: "Precies. Daarom combineren we cijfers met gesprekken."*',
 ].join("\n");
 
 let layout: PdfLayout;
@@ -60,8 +60,9 @@ describe("projectOntoSource", () => {
 	});
 
 	it("keeps bold, italics, heading levels and en dashes", () => {
-		const out = project([{ kind: "circle", page: 1, words: idsOf("groeiende ledencijfers.") }])
-			?.markdown;
+		const out = project([
+			{ kind: "circle", page: 1, words: idsOf("groeiende ledencijfers.") },
+		])?.markdown;
 		expect(out).toContain("**Data belooft zekerheid in een onzekere wereld.**");
 		expect(out).toContain("## De beperkte blik");
 		expect(out).toContain("– waar je inschatting jaren doorwerkt");
@@ -77,8 +78,9 @@ describe("projectOntoSource", () => {
 
 	it("reaches words that sit inside bold markup", () => {
 		// The layout word is "Grote"; the source has "**Grote financiële …**".
-		const out = project([{ kind: "underline", page: 1, words: idsOf("Grote financiële") }])
-			?.markdown;
+		const out = project([
+			{ kind: "underline", page: 1, words: idsOf("Grote financiële") },
+		])?.markdown;
 		expect(out).toContain("<u>Grote financiële</u>");
 		expect(out).toContain("**<u>Grote financiële</u> beslissingen**");
 	});
@@ -95,11 +97,24 @@ describe("projectOntoSource", () => {
 	});
 
 	it("gives a highlight its colour", () => {
-		const out = project([], [
-			{ text: "Ze vertellen niet waarom mensen", color: 1, page: 1 },
-		])?.markdown;
+		const out = project(
+			[],
+			[{ text: "Ze vertellen niet waarom mensen", color: 1, page: 1 }],
+		)?.markdown;
 		expect(out).toContain(
 			'<mark style="background: #a5d8ff">Ze vertellen niet waarom mensen</mark>',
+		);
+	});
+
+	it("uses the exact colour the device sent, not a palette approximation", () => {
+		// The device sends real RGB (GP_E3_S16), so the vault can show the same
+		// shade the tablet did instead of the nearest name.
+		const out = project(
+			[],
+			[{ text: "Ze vertellen niet waarom mensen", color: 9, rgb: "#beeafe", page: 1 }],
+		)?.markdown;
+		expect(out).toContain(
+			'<mark style="background: #beeafe">Ze vertellen niet waarom mensen</mark>',
 		);
 	});
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.16.0] - 2026-07-27
+
+### Fixed
+
+- **Highlight colours come back as the colours you used.** Until now every
+  highlight arrived in the same shade, because the field being read was the
+  highlighter *tool*, not its colour. The device report settled it: the colour
+  trails the highlighted text as a 32-bit BGRA value, and it is real RGB
+  rather than an index into a palette — so the copy in your vault now shows
+  the exact tint the tablet did. Confirmed against yellow, pink and light
+  blue from a real account.
+
+### Known
+
+- Pen marks can still land on the wrong line. The explanation offered in
+  0.15.0 — a shifted page view — is ruled out by the same report: the device
+  records no zoom or pan at all. Every mark now names the words it landed on,
+  so the next check needs no screenshots, only that list.
+
 ## [0.15.0] - 2026-07-27
 
 ### Changed

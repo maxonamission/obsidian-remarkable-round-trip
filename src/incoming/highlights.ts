@@ -16,6 +16,12 @@ export interface Highlight {
 	color?: number;
 	/** Page this highlight belongs to, in document order (1-based). */
 	page?: number;
+	/**
+	 * The highlighter colour as `#rrggbb`, straight off the device. Preferred
+	 * over `color`: that index turned out to name the *tool*, not the colour
+	 * (GP_E3_S16).
+	 */
+	rgb?: string;
 }
 
 /** reMarkable colour indices seen in the wild, mapped to readable names. */
@@ -33,6 +39,31 @@ const COLOR_NAMES: Record<number, string> = {
 
 export function colorName(color: number | undefined): string | undefined {
 	return color === undefined ? undefined : COLOR_NAMES[color];
+}
+
+/** The device colours seen so far, so a highlight can still be named. */
+const RGB_NAMES: Record<string, string> = {
+	"#ffed75": "yellow",
+	"#f29eff": "pink",
+	"#beeafe": "blue",
+};
+
+/**
+ * A readable name for a device colour, nearest match. The device sends real
+ * RGB, so an unseen shade still gets the closest name rather than none.
+ */
+export function rgbName(rgb: string | undefined): string | undefined {
+	if (rgb === undefined || !/^#[0-9a-f]{6}$/i.test(rgb)) return undefined;
+	const value = parseInt(rgb.slice(1), 16);
+	const channels = (n: number) => [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+	const [r, g, b] = channels(value);
+	let best: { name: string; distance: number } | undefined;
+	for (const [known, name] of Object.entries(RGB_NAMES)) {
+		const [kr, kg, kb] = channels(parseInt(known.slice(1), 16));
+		const distance = (r - kr) ** 2 + (g - kg) ** 2 + (b - kb) ** 2;
+		if (best === undefined || distance < best.distance) best = { name, distance };
+	}
+	return best?.name;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

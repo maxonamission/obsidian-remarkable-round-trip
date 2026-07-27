@@ -9,7 +9,7 @@
 
 import type { PdfLayout } from "../convert/pdf";
 import { projectOntoSource } from "./sourceprojection";
-import { Highlight, colorName } from "./highlights";
+import { Highlight, colorName, rgbName } from "./highlights";
 import type { ImportedMark } from "./pull";
 
 export const BEGIN_MARKER = "<!-- remarkable-round-trip:begin -->";
@@ -106,7 +106,7 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): RenderedAnn
 				currentPage = highlight.page;
 				lines.push(`### Page ${currentPage}`, "");
 			}
-			const color = colorName(highlight.color);
+			const color = rgbName(highlight.rgb) ?? colorName(highlight.color);
 			const suffix = color === undefined ? "" : ` ^[${color}]`;
 			lines.push(`> ${highlight.text}${suffix}`, "");
 		}

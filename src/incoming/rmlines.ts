@@ -54,8 +54,15 @@ const BLOCK_TYPE_SCENE_ITEM = 0x05;
 const BLOCK_TYPE_GLYPH_ITEM = 0x03;
 /** Tag byte for field 5 as a length-prefixed block: the highlighted text. */
 const TAG_TEXT = 0x5c;
-/** Tag byte for field 4 as a uint32: the highlight colour. */
+/** Tag byte for field 4 as a uint32: the highlighter *tool*, always 9. */
 const TAG_COLOR = 0x44;
+/**
+ * The highlight colour, found at last (device report 2026-07-27): tag byte
+ * 0xa4 followed by 0x01 and a 32-bit BGRA value. Three device colours came
+ * back as 0xFFED75 (yellow), 0xF29EFF (pink) and 0xBEEAFE (blue) — real RGB,
+ * not an index into a palette, so the vault can carry the exact colour.
+ */
+const TAG_RGB = 0xa4;
 
 /** A stretch of PDF text the reader marked with the highlighter. */
 export interface RmHighlight {
@@ -74,6 +81,8 @@ export interface RmHighlight {
 	 * another round of guessing.
 	 */
 	tail?: string;
+	/** The highlighter colour as `#rrggbb`, when the block carries one. */
+	rgb?: string;
 	/** The bytes before the text, as hex — the colour may sit there instead. */
 	head?: string;
 	/**
@@ -257,6 +266,7 @@ function readGlyphHighlight(
 			return {
 				text,
 				color: readGlyphColor(view, bytes, start, at),
+				rgb: readGlyphRgb(view, bytes, start, end) ?? undefined,
 				fields: readTaggedInts(view, bytes, start, end),
 				tail: hexOf(bytes, from + length, Math.min(end, from + length + 48)),
 				head: hexOf(bytes, start, Math.min(at + 5, start + 48)),
@@ -293,6 +303,29 @@ function readTaggedInts(
 		if (fields[key] === undefined) fields[key] = value;
 	}
 	return fields;
+}
+
+/**
+ * The highlighter colour of a glyph block, as `#rrggbb`.
+ *
+ * Scanned rather than walked to, for the same reason as the text: the fields
+ * around it move between firmware versions. Two checks keep a chance match
+ * out — the marker byte pair, and an alpha channel of 0xff, which every
+ * observed highlight carries.
+ */
+function readGlyphRgb(
+	view: DataView,
+	bytes: Uint8Array,
+	start: number,
+	end: number,
+): string | null {
+	for (let at = end - 6; at >= start; at--) {
+		if (bytes[at] !== TAG_RGB || bytes[at + 1] !== 0x01) continue;
+		const value = view.getUint32(at + 2, true);
+		if (value >>> 24 !== 0xff) continue;
+		return `#${(value & 0xffffff).toString(16).padStart(6, "0")}`;
+	}
+	return null;
 }
 
 /**

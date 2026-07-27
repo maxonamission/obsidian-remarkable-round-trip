@@ -7,7 +7,7 @@ import { RM_V6_HEADER, parseRmPage } from "../incoming/rmlines";
  * account carried no `.highlights/*.json` at all, so this is where the
  * highlights were hiding.
  */
-function glyphFile(text: string, color?: number, blockType = 0x03): Uint8Array {
+function glyphFile(text: string, color?: number, blockType = 0x03, rgb?: number[]): Uint8Array {
 	const encoded = new TextEncoder().encode(text);
 	const body: number[] = [];
 
@@ -23,6 +23,8 @@ function glyphFile(text: string, color?: number, blockType = 0x03): Uint8Array {
 	const blockLength = 1 + 1 + encoded.length;
 	body.push(0x5c, blockLength & 0xff, (blockLength >> 8) & 0xff, 0, 0);
 	body.push(encoded.length, 1, ...encoded);
+	// The real colour trails the text: 0xa4 0x01 then the BGRA bytes.
+	if (rgb !== undefined) body.push(0xa4, 0x01, ...rgb);
 
 	const header = new TextEncoder().encode(RM_V6_HEADER);
 	const out = new Uint8Array(header.length + 8 + body.length);
@@ -48,6 +50,28 @@ describe("parseRmPage on glyph blocks", () => {
 		// be identified from a device report (GP_E3_S13).
 		expect(page.highlights[0].fields).toMatchObject({ "4:4": 2 });
 		expect(page.strokes).toEqual([]);
+	});
+
+	it("reads the highlighter colour the device really sends", () => {
+		// Device report 2026-07-27: the colour is tag 0xa4, 0x01, then BGRA.
+		// These three values came back from a real account and match what the
+		// tablet showed — yellow, pink and light blue (GP_E3_S16).
+		const cases: [number[], string][] = [
+			[[0x75, 0xed, 0xff, 0xff], "#ffed75"],
+			[[0xff, 0x9e, 0xf2, 0xff], "#f29eff"],
+			[[0xfe, 0xea, 0xbe, 0xff], "#beeafe"],
+		];
+		for (const [bgra, expected] of cases) {
+			const page = parseRmPage(glyphFile("gemarkeerde tekst", 9, 0x03, bgra));
+			expect(page.highlights[0].rgb).toBe(expected);
+		}
+	});
+
+	it("leaves the colour undefined rather than guessing at a stray 0xa4", () => {
+		// Alpha must be 0xff; anything else is a byte pair that happens to look
+		// like the marker.
+		const page = parseRmPage(glyphFile("iets", 9, 0x03, [0x10, 0x20, 0x30, 0x00]));
+		expect(page.highlights[0].rgb).toBeUndefined();
 	});
 
 	it("reports the bytes and coordinates around the text, for diagnosis", () => {
