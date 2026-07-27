@@ -61,6 +61,13 @@ const TAG_COLOR = 0x44;
 export interface RmHighlight {
 	text: string;
 	color?: number;
+	/**
+	 * Every small tagged integer in the glyph block, by tag index — raw, for
+	 * diagnosis. Beta 2026-07-27: the field we took for the colour reads 9 for
+	 * yellow, blue *and* pink, so it is the tool, not the colour. Logging the
+	 * lot is how the real colour field gets identified without guessing.
+	 */
+	fields?: Record<number, number>;
 }
 
 class Cursor {
@@ -231,12 +238,34 @@ function readGlyphHighlight(
 				bytes.subarray(from, from + length),
 			);
 			if (text.trim() === "") continue;
-			return { text, color: readGlyphColor(view, bytes, start, at) };
+			return {
+				text,
+				color: readGlyphColor(view, bytes, start, at),
+				fields: readTaggedInts(view, bytes, start, end),
+			};
 		} catch {
 			continue; // not text after all; keep looking
 		}
 	}
 	return null;
+}
+
+/** Small tagged uint32 fields anywhere in the block, for diagnosis only. */
+function readTaggedInts(
+	view: DataView,
+	bytes: Uint8Array,
+	start: number,
+	end: number,
+): Record<number, number> {
+	const fields: Record<number, number> = {};
+	for (let at = start; at + 5 <= end; at++) {
+		if ((bytes[at] & 0x0f) !== 0x4) continue;
+		const index = bytes[at] >> 4;
+		if (index === 0) continue;
+		const value = view.getUint32(at + 1, true);
+		if (value < 4096 && fields[index] === undefined) fields[index] = value;
+	}
+	return fields;
 }
 
 /** The colour field sits before the text; take the nearest plausible one. */

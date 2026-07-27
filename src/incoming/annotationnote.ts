@@ -8,7 +8,7 @@
  */
 
 import type { PdfLayout } from "../convert/pdf";
-import { renderAnnotatedCopy } from "./annotatedcopy";
+import { projectOntoSource } from "./sourceprojection";
 import { Highlight, colorName } from "./highlights";
 import type { ImportedMark } from "./pull";
 
@@ -31,6 +31,8 @@ export interface AnnotationRenderInput {
 	 * (GP_E3_S12).
 	 */
 	layout?: PdfLayout | null;
+	/** The note as it is on disk, frontmatter removed (GP_E3_S13). */
+	source?: string | null;
 	/**
 	 * Writing into the source note itself must stay a summary — a full copy
 	 * there would double the note.
@@ -47,11 +49,16 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): string {
 	const marks = input.marks ?? [];
 
 	const copy =
-		input.layout && input.inSourceNote !== true
-			? renderAnnotatedCopy({ layout: input.layout, highlights: input.highlights, marks })
+		input.layout && input.source && input.inSourceNote !== true
+			? projectOntoSource({
+					source: input.source,
+					layout: input.layout,
+					highlights: input.highlights,
+					marks,
+				})
 			: null;
 	if (copy !== null) {
-		lines.push(copy, "");
+		lines.push(copy.markdown, "");
 		if (lines[lines.length - 1] !== "") lines.push("");
 		lines.push(END_MARKER);
 		return lines.join("\n");

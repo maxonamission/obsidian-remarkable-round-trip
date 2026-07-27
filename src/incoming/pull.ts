@@ -283,9 +283,13 @@ async function readStrokePages(
 				// Raw colour values: the mapping to names is a guess until a
 				// real device confirms it (GP_E3_S12).
 				deps.log?.(
-					`  ${file.id}: highlight colours ${rm.highlights
-						.map((found) => found.color ?? "?")
-						.join(", ")}`,
+					`  ${file.id}: highlight fields ${rm.highlights
+						.map((found) =>
+							Object.entries(found.fields ?? {})
+								.map(([tag, value]) => `${tag}=${value}`)
+								.join(","),
+						)
+						.join(" | ")}`,
 				);
 			}
 			const marks = readMarks(rm.strokes, page ?? 0, page === undefined ? null : layout);

@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.12.0] - 2026-07-27
+
+### Changed
+
+- **The annotated copy is now your note, marked up — not a rebuild of it.**
+  The previous version reassembled the text from the PDF layout, and so
+  inherited everything the typesetter throws away: bold, italics, links, en
+  dashes, heading levels. Now the plugin takes the note exactly as it is and
+  only *inserts* markup where the pen touched. Your formatting is untouched,
+  because it is never rewritten.
+
+### Fixed
+
+- **Overlapping marks of the same kind produced `~~~~`**, which markdown reads
+  as nothing at all. Ranges of one kind are merged before the markup goes in.
+- Headings kept their own level instead of being pushed one deeper.
+- Frontmatter stays frontmatter instead of coming back as a bullet list.
+- Lists keep their spacing and their numbering.
+
+### Note
+
+Highlight colours still come back as plain `==highlights==` on this firmware:
+the field that looked like the colour reads the same value for yellow, blue
+and pink, so it is the highlighter tool, not the colour. The import report
+now lists every numeric field in the highlight record, which is what will
+identify the real one.
+
 ## [0.11.0] - 2026-07-26
 
 ### Changed

@@ -40,9 +40,13 @@ function glyphFile(text: string, color?: number, blockType = 0x03): Uint8Array {
 describe("parseRmPage on glyph blocks", () => {
 	it("reads the highlighted text out of the pen layer", () => {
 		const page = parseRmPage(glyphFile("Maar is er altijd zekerheid uit data?", 2));
-		expect(page.highlights).toEqual([
-			{ text: "Maar is er altijd zekerheid uit data?", color: 2 },
-		]);
+		expect(page.highlights[0]).toMatchObject({
+			text: "Maar is er altijd zekerheid uit data?",
+			color: 2,
+		});
+		// Every small tagged integer comes along, so the real colour field can
+		// be identified from a device report (GP_E3_S13).
+		expect(page.highlights[0].fields).toMatchObject({ 4: 2 });
 		expect(page.strokes).toEqual([]);
 	});
 

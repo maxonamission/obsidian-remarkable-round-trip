@@ -481,6 +481,7 @@ export default class RoundTripPlugin extends Plugin {
 							highlights,
 							marks,
 							await this.reproduceLayout(entry).catch(() => null),
+							await this.readSourceBody(entry).catch(() => null),
 						),
 				},
 				(done, total) => updateProgress(notice, `Checking ${done}/${total} for annotations…`),
@@ -550,6 +551,19 @@ export default class RoundTripPlugin extends Plugin {
 		const layout = await this.buildLayout(entry);
 		this.layoutCache.set(entry.docId, layout);
 		return layout;
+	}
+
+	/**
+	 * The note's own markdown, frontmatter removed — what the marks get
+	 * projected onto (GP_E3_S13).
+	 */
+	private async readSourceBody(entry: MappingEntry): Promise<string | null> {
+		if (entry.pdfLayout === undefined) return null;
+		const file = this.app.vault.getFileByPath(entry.notePath);
+		if (file === null) return null;
+		const raw = await this.app.vault.cachedRead(file);
+		// Frontmatter belongs to the source note, not to a copy of its body.
+		return raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 	}
 
 	private async buildLayout(entry: MappingEntry): Promise<PdfLayout | null> {
@@ -623,6 +637,7 @@ export default class RoundTripPlugin extends Plugin {
 		highlights: Parameters<typeof renderAnnotationBlock>[0]["highlights"],
 		marks: ImportedMark[] = [],
 		layout: PdfLayout | null = null,
+		source: string | null = null,
 	): Promise<void> {
 		const sourceName = (notePath.split("/").pop() ?? notePath).replace(/\.md$/i, "");
 		const block = renderAnnotationBlock({
@@ -631,6 +646,7 @@ export default class RoundTripPlugin extends Plugin {
 			highlights,
 			marks,
 			layout,
+			source,
 			inSourceNote: this.settings.annotationTarget === "source",
 			importedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
 		});
