@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.0] - 2026-07-28
+
+### Changed
+
+- **Rewritten README and plugin description**, leading with the problem the
+  plugin solves rather than the list of things it does. The short description
+  now says what you get back rather than how the link is made.
+
 ## [0.24.0] - 2026-07-28
 
 ### Added

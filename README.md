@@ -1,103 +1,91 @@
 # reMarkable Round-Trip
 
-Send notes from your [Obsidian](https://obsidian.md) vault to a reMarkable
-tablet as e-ink friendly PDFs, annotate them on the tablet, and get those
-annotations back **in the note they came from** — as markdown you can search,
-link and edit. That return trip is what this plugin is for.
+**Read your notes on paper. Get your thinking back in the note it came from.**
 
-> **Status: experimental beta.** This plugin is under active development and
-> not yet in the community plugin registry. Expect rough edges; please report
-> issues!
+You read on your reMarkable because you think better there. You strike out a
+sentence, circle a phrase, run a line down the margin, write the objection that
+only occurs to you on paper.
 
-## Install (via BRAT)
+And then it stays there. The tablet keeps your reading; your vault keeps your
+writing; the two never meet. So you retype the good bits, or you tell yourself
+you will, or you quietly stop marking things up at all — because thinking that
+lands nowhere stops feeling worth the ink.
 
-1. Install the community plugin
-   [BRAT](https://obsidian.md/plugins?id=obsidian42-brat) (Beta Reviewers
-   Auto-update Tool).
-2. In BRAT: *Add beta plugin* → `maxonamission/obsidian-remarkable-round-trip`.
-3. Enable **reMarkable Round-Trip** in *Settings → Community plugins*.
+This plugin closes that loop. Send a note to your reMarkable, mark it up, and
+run one command. What comes back is **your own note with your marks worked into
+it** — struck-through text struck through, circled phrases in bold, margin bars
+as quotes, highlights in the colour you used. Markdown you can search, link and
+edit, not a screenshot of a page.
 
-## Setup
+> **Beta.** In active development and not yet in the community plugin
+> registry. It is used daily on a real device, and rough edges get fixed fast —
+> please report what you hit.
 
-1. Get a one-time pairing code at
-   [my.remarkable.com/device/browser/connect](https://my.remarkable.com/device/browser/connect).
-2. Open *Settings → reMarkable Round-Trip*, enter the code and select **Pair**.
+## Start here
 
-Self-hosting [rmfakecloud](https://ddvk.github.io/rmfakecloud/)? Toggle
-*Self-hosted endpoint* and enter your base URL instead.
+**1. Install.** Add the community plugin
+[BRAT](https://obsidian.md/plugins?id=obsidian42-brat), then *Add beta plugin*
+→ `maxonamission/obsidian-remarkable-round-trip`, and enable **reMarkable
+Round-Trip** in *Settings → Community plugins*.
 
-## Use
+**2. Pair.** Get a one-time code at
+[my.remarkable.com/device/browser/connect](https://my.remarkable.com/device/browser/connect),
+then open *Settings → reMarkable Round-Trip*, enter it and select **Pair**.
+Self-hosting [rmfakecloud](https://ddvk.github.io/rmfakecloud/) instead? Toggle
+*Self-hosted endpoint* and give your base URL.
+
+**3. Send a note.** Right-click any note → *Send to reMarkable*. Read it, mark
+it up, then run **Import annotations from reMarkable** from the command
+palette.
+
+That is the whole loop. Everything below is detail for when you want it.
+
+## Sending notes
 
 - **Command palette**: *Send current note to reMarkable*.
-- **Right-click a note or folder**: *Send to reMarkable* (folders send all
-  notes inside, with progress and per-file error reporting).
-- **Right-click a multi-selection**: select several notes and/or folders in
-  the file explorer and send them in one batch; duplicates are filtered out.
-- **Watch folder** (optional, off by default): notes dropped into a
-  configurable vault folder are converted and uploaded automatically;
-  unchanged notes are skipped.
+- **Right-click a note or folder**: *Send to reMarkable* — a folder sends
+  everything inside it, with progress and per-file errors.
+- **Right-click a multi-selection**: several notes and folders at once;
+  duplicates are filtered out.
+- **Watch folder** (optional, off by default): notes dropped into a folder you
+  choose are sent automatically, after a short quiet period. Unchanged notes
+  are skipped.
 
-What happens to your note:
+What happens to your note on the way:
 
-- Wikilinks are flattened to readable text; `![[embeds]]` are resolved
-  inline; callouts become titled quotes; comments are removed; frontmatter is
-  stripped (or rendered as a title block, if you prefer).
-- The note is typeset as a PDF on the reMarkable 2 page grid, with
-  configurable font size, line spacing and margins. Prefer reading comfort
-  over annotation anchoring? Switch the format to **EPUB**: it reflows, the
-  device sets the type size, you get a table of contents from your headings,
-  and non-Latin scripts survive intact.
-- Your vault folders are recreated on the device under a configurable base
-  folder (default `Obsidian`); re-sending a note replaces the previous copy
-  (the old one goes to the device trash).
-- Each note gets a stable `remarkable-id` in its frontmatter. That id, not the
-  file path, is how a document finds its note again — move or rename the note
-  and the link survives.
+- Wikilinks become readable text, `![[embeds]]` are resolved inline, callouts
+  become titled quotes, comments are dropped, and frontmatter is left out — or
+  rendered as a small title block, if you prefer.
+- It is typeset as a PDF on the reMarkable page grid, with font size, line
+  spacing and margins you control. Reading rather than annotating? Switch to
+  **EPUB**: it reflows, the device picks the type size, your headings become a
+  table of contents, and non-Latin scripts survive intact.
+- Your vault folders are recreated on the device under a base folder you
+  choose. Re-sending replaces the previous copy; the old one goes to the
+  device trash.
+- Each note gets a stable `remarkable-id` in its frontmatter. That id — not the
+  file path — is how a document finds its note again, so you can move and
+  rename freely.
 
-## Privacy and permissions
+## Getting your thinking back
 
-Your notes go directly from Obsidian to the endpoint you configure — the
-official reMarkable cloud or your own rmfakecloud server. No other services,
-no telemetry, no analytics.
+Run **Import annotations from reMarkable**. The plugin finds the documents you
+have touched since last time and writes what it read into your vault.
 
-Obsidian's plugin scan flags three capabilities. Here is what each is for:
+What you get is an **annotated copy of your note**: your own text, unchanged,
+with the marks worked in where you drew them. Bold, italics, headings, links
+and lists all survive, because the copy starts from your note rather than being
+rebuilt from the page.
 
-- **Reads and writes vault files.** It reads the note you send and writes the
-  annotations back. Nothing else is touched: generated blocks live between
-  markers, so your own text around them survives a re-import.
-- **Lists all files in the vault.** Only to find a note again by the
-  `remarkable-id` in its frontmatter, when its path no longer matches — that
-  is what lets you move or rename an annotated note without losing the link.
-  Paths are read, contents are not.
-- **Writes to the clipboard.** The import report is copied there so you can
-  paste it into a bug report. The same report is always written to
-  `reMarkable Round-Trip log.md` in your vault, so nothing depends on the
-  clipboard. It is never read.
-
-Your reMarkable pairing is a device token, obtained once from a code you enter
-yourself. It is stored in the plugin's own settings, and it is the only
-credential the plugin holds.
-
-## Getting annotations back
-
-Annotate a document on your reMarkable, then run **Import annotations from
-reMarkable** from the command palette. The plugin finds the documents that
-changed since the last import and writes what it read into your vault.
-
-What you get is an **annotated copy of the note**: your own text, unchanged,
-with the marks woven in where you drew them. Bold, italics, headings, links
-and lists all survive, because the copy starts from your note rather than
-being rebuilt from the page.
-
-By default it lands in a companion note (`Your note — annotations.md`) so your
-source note stays untouched; a setting switches to a section inside the source
-note itself. Either way the plugin only ever replaces its own marked block, so
-anything you write around it survives a re-import.
+It lands in a companion note (`Your note — annotations.md`) so your source note
+stays untouched; a setting puts it inside the source note instead. Either way
+the plugin only ever replaces its own marked block, so anything you write
+around it survives a re-import.
 
 ### Which marks are understood
 
-No OCR and no model: the plugin typeset the page itself, so it knows where
-every word sits and can tell from the *shape and position* of a stroke what it
+No OCR and no model. The plugin typeset the page itself, so it knows where
+every word sits and can tell from the shape and position of a stroke what it
 did and which words it points at.
 
 | Draw this on the tablet | Recognised as | Default result in your vault |
@@ -110,60 +98,82 @@ did and which words it points at.
 | Anything else — handwriting, arrows, scribbles | Remark | A cropped image in a callout, under the line it was written against |
 | **A page you added** on the tablet to write on | Added page | The whole page as an image, placed after the text it follows |
 
-Rules worth knowing:
+Worth knowing:
 
 - **A strike-through may be several strokes.** Go back over it as often as you
-  like: passes over the same words count as one mark.
+  like; passes over the same words count as one mark.
 - **Through or under decides the meaning.** Ink crossing the letters is a
-  strike-through, ink below them an underline. In the doubtful band right on
-  the baseline, strike-through wins.
-- **Two marks side by side on one line stay two marks.** Joining needs real
-  overlap, not proximity.
-- **A margin bar must be outside the text column**, and straight — a stroke
-  with a corner in it is read as a remark, not a bar.
+  strike-through, ink below them an underline. Right on the baseline,
+  strike-through wins.
+- **Two marks side by side on one line stay two marks.**
+- **A margin bar must sit outside the text column**, and be straight — a
+  stroke with a corner in it is read as a remark.
 - **Highlight colours come back as the colours you used**, straight from the
   device rather than mapped to a palette.
-- **A page you insert on the tablet keeps its place.** The reMarkable can add
-  a blank page to a PDF to write on; it comes back whole, after the text it
-  follows, and the pages after it still line up with the right part of your
-  note.
+- **A page you insert on the tablet keeps its place** — it comes back whole,
+  after the text it follows, and the pages after it still line up.
 
 ### Changing what a mark means
 
-The shapes are fixed — they are what a pen can draw — but what they *mean* is
-your own convention. Under **Settings → What a pen mark becomes**, each of the
-three inline marks can be set to strikethrough, bold, italic, underline,
-highlight, or left alone entirely. Circle everything you want to highlight?
-Set *Loop around words* to **Highlight** and it comes back that way.
+The shapes are fixed — they are what a pen can draw. What they *mean* is your
+own convention. Under **Settings → What a pen mark becomes**, each of the three
+inline marks can be set to strikethrough, bold, italic, underline, highlight,
+or left alone. Circle the things you want highlighted? Set *Loop around words*
+to **Highlight**.
 
 Margin bars always quote the lines they ran alongside, and handwriting always
-comes back as an image — those are not styling choices.
+comes back as an image; those are not styling choices.
 
-### When anchoring is not possible
+### When placement is not possible
 
 Placing marks needs the note to still match what was sent.
 
-- **Edited the note since?** The annotations still come back, but as a summary
-  rather than a copy, with a warning at the top of the block saying they
-  describe the earlier version. Send the note again to annotate the current
-  one.
-- **Sent it as EPUB?** EPUB reflows on the device, so there is no fixed page
-  to anchor to; annotations come back at page level.
-- **Moved or renamed the note?** That is fine — it is found again by its
+- **Edited the note since?** The annotations still come back, as a summary
+  rather than a copy, with a warning saying they describe the earlier version.
+  Send the note again to annotate the current one.
+- **Sent it as EPUB?** EPUB reflows on the device, so there is no fixed page to
+  anchor to; annotations come back at page level.
+- **Moved or renamed the note?** No problem — it is found again by its
   `remarkable-id`, and the companion note moves along with it.
 
-The import report (written to `reMarkable Round-Trip log.md` and copied to
-your clipboard) says per note what happened: what was read, what ended up in
-the vault, and which words each mark landed on.
+Every run writes a report to `reMarkable Round-Trip log.md` and copies it to
+your clipboard: what was read, what ended up in your vault, and which words
+each mark landed on.
 
-## Known limitations (beta)
+## Privacy and permissions
+
+Your notes go directly from Obsidian to the endpoint you configure — the
+official reMarkable cloud or your own rmfakecloud server. No other services, no
+telemetry, no analytics.
+
+Obsidian's plugin scan flags three capabilities. Here is what each is for:
+
+- **Reads and writes vault files.** It reads the note you send and writes the
+  annotations back. Nothing else is touched: generated blocks live between
+  markers, so your own text around them survives a re-import.
+- **Lists all files in the vault.** Only to find a note again by its
+  `remarkable-id` when its path no longer matches — that is what lets you move
+  or rename an annotated note without losing the link. Paths are read,
+  contents are not.
+- **Writes to the clipboard.** The import report is copied there so you can
+  paste it into a bug report. The same report always goes to a note in your
+  vault as well, so nothing depends on the clipboard. It is never read.
+
+Your reMarkable pairing is a device token, obtained once from a code you enter
+yourself. It is stored in the plugin's own settings, and it is the only
+credential the plugin holds.
+
+## Known limitations
 
 - Images render as placeholders in the PDF.
 - Standard PDF fonts (full Latin-1 coverage; other scripts get ASCII
   fallbacks).
-- The stroke reader is written against an undocumented format: unusual pens
-  or a future firmware may not render. The import report says so when a page
-  could not be read.
+- Handwriting comes back as an image, not as text — reading handwriting is a
+  different problem, and guessing at it would be worse than showing you what
+  you wrote.
+- The stroke reader is written against an undocumented format: unusual pens or
+  a future firmware may not render. The import report says so when a page could
+  not be read.
 
 ## License
 
