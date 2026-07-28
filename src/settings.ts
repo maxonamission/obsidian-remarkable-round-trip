@@ -1,80 +1,48 @@
 /**
- * Plugin settings + settings tab (PRD F1, F7, F9-basis).
+ * The settings tab (PRD F1, F7, F9-basis).
  *
- * Three sections, so plain `setHeading` sections suffice (settings pattern:
- * accordion only from ~5 sections; documented in the story).
+ * Two renderings of one description: `getSettingDefinitions()` for Obsidian
+ * 1.13+, which is what puts these settings in the settings search, and
+ * `display()` for everything before it. Both walk `settingschema.ts`, so a
+ * new setting appears in both without anyone remembering to do it twice
+ * (GP_E4_S3).
  */
 
-import { App, PluginSettingTab, Setting } from "obsidian";
+import {
+	App,
+	ButtonComponent,
+	PluginSettingTab,
+	Setting,
+	type SettingDefinition,
+	type SettingDefinitionItem,
+} from "obsidian";
 import { notify } from "./notify";
 import type RoundTripPlugin from "./main";
-import type { MappingTable } from "./id/mapping";
-import {
-	DEFAULT_MARK_STYLES,
-	MARK_STYLE_LABELS,
-	type MarkStyle,
-	type MarkStyles,
-} from "./incoming/markstyles";
-import type { OutputFormat } from "./sync/send";
+// One address for "the settings": the model lives in its own module so the
+// schema and the projection can use it without the Obsidian API, but
+// importers need not care (GP_E4_S3).
+export * from "./settingsmodel";
 import { TransportError } from "./transport/http";
+import {
+	SETTING_SECTIONS,
+	type SettingSpec,
+	checkEndpoint,
+	cleanPath,
+	isVisible,
+	readSetting,
+	writeSetting,
+} from "./settingschema";
 
-export interface RoundTripSettings {
-	/** Long-lived device token (empty = not paired). */
-	deviceToken: string;
-	/** Use a self-hosted rmfakecloud endpoint instead of the official cloud. */
-	useCustomEndpoint: boolean;
-	customEndpointUrl: string;
-	/** Delivered document format (F3); PDF anchors annotations, EPUB reflows. */
-	outputFormat: OutputFormat;
-	/** Render frontmatter as a small title block instead of dropping it. */
-	frontmatterAsTitleBlock: boolean;
-	fontSize: number;
-	lineHeight: number;
-	margin: number;
-	/** Watch folder (F6): auto-send notes dropped into this vault folder. */
-	watchFolderEnabled: boolean;
-	watchFolderPath: string;
-	/** Where imported annotations land (F11): companion note or in the source. */
-	annotationTarget: "companion" | "source";
-	/** Vault folder for companion notes; empty = vault root. */
-	annotationFolder: string;
-	/** Import handwritten annotations as PNG images (F12). */
-	importHandwriting: boolean;
-	/** Vault folder for the rendered handwriting images. */
-	handwritingFolder: string;
-	/** Mirror vault folders on the device (GP_E2_S7); off = flat root uploads. */
-	mirrorFolders: boolean;
-	/** Device folder under which the vault tree is mirrored ("" = root). */
-	deviceBaseFolder: string;
-	/** How each recognised pen mark is written into the copy (GP_E3_S19). */
-	markStyles: MarkStyles;
-	/** docId ↔ device document mapping (round-trip foundation, F5). */
-	mappings: MappingTable;
+/** Not a stored setting: the one-time code lives only until pairing. */
+const PAIRING_CODE_KEY = "__pairingCode";
+
+/** Folder paths are stored trimmed and without leading or trailing slashes. */
+function sanitise(key: string, value: unknown): unknown {
+	if (typeof value !== "string") return value;
+	return key.toLowerCase().includes("folder") || key === "customEndpointUrl"
+		? cleanPath(value)
+		: value;
 }
-
-export type { MarkStyle, MarkStyles };
-export { DEFAULT_MARK_STYLES, MARK_STYLE_LABELS };
-
-export const DEFAULT_SETTINGS: RoundTripSettings = {
-	deviceToken: "",
-	useCustomEndpoint: false,
-	customEndpointUrl: "",
-	outputFormat: "pdf",
-	frontmatterAsTitleBlock: false,
-	fontSize: 11,
-	lineHeight: 1.5,
-	margin: 40,
-	watchFolderEnabled: false,
-	watchFolderPath: "reMarkable-out",
-	annotationTarget: "companion",
-	annotationFolder: "reMarkable-in",
-	importHandwriting: true,
-	markStyles: { ...DEFAULT_MARK_STYLES },
-	handwritingFolder: "reMarkable-in/handwriting",
-	mirrorFolders: true,
-	deviceBaseFolder: "Obsidian",
-	mappings: {},
-};
 
 export class RoundTripSettingTab extends PluginSettingTab {
 	private pairingCode = "";
@@ -86,22 +54,160 @@ export class RoundTripSettingTab extends PluginSettingTab {
 		super(app, plugin);
 	}
 
+	/**
+	 * The declarative description (Obsidian 1.13+). Implementing this is what
+	 * makes these settings findable in the settings search; `display()` below
+	 * renders the same declaration for every earlier version, which is where
+	 * the owner is (1.12.7). One description, two renderers — see
+	 * `settingschema.ts` (GP_E4_S3).
+	 */
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		const groups: SettingDefinitionItem[] = [
+			{
+				type: "group",
+				heading: "Connection",
+				items: [
+					{
+						name: "Status",
+						desc: this.pairingStatus(),
+					},
+					{
+						name: "Pair with one-time code",
+						desc: "Enter the 8-letter code, then select Pair.",
+						visible: () => !this.paired,
+						control: { type: "text", key: PAIRING_CODE_KEY, placeholder: "abcdefgh" },
+					},
+					{
+						name: "Pair",
+						desc: "Exchange the code for a device token.",
+						visible: () => !this.paired,
+						action: (el) => {
+							new ButtonComponent(el)
+								.setButtonText("Pair")
+								.setCta()
+								.onClick(() => void this.pair());
+						},
+					},
+					{
+						name: "Unpair",
+						desc: "Forget the stored device token.",
+						visible: () => this.paired,
+						action: (el) => {
+							// setWarning, not setDestructive: the latter needs 1.13 and
+							// minAppVersion is 1.7.2, so the project's lint rules
+							// (rightly) forbid it. setWarning still works there.
+							new ButtonComponent(el)
+								.setButtonText("Unpair")
+								.setWarning()
+								.onClick(() => void this.unpair());
+						},
+					},
+					...SETTING_SECTIONS[0].items.map((spec) => this.defineSetting(spec)),
+				],
+			},
+		];
+
+		for (const section of SETTING_SECTIONS.slice(1)) {
+			groups.push({
+				type: "group",
+				heading: section.heading,
+				items: [
+					...(section.note === undefined
+						? []
+						: [{ name: section.heading, desc: section.note, searchable: false }]),
+					...section.items.map((spec) => this.defineSetting(spec)),
+				],
+			});
+		}
+		return groups;
+	}
+
+	/** One schema entry as a declarative definition. */
+	private defineSetting(spec: SettingSpec): SettingDefinition {
+		const base = {
+			name: spec.name,
+			desc: spec.desc,
+			visible: () => isVisible(spec, this.plugin.settings),
+		};
+		switch (spec.control.type) {
+			case "toggle":
+				return { ...base, control: { type: "toggle", key: spec.key } };
+			case "dropdown":
+				return {
+					...base,
+					control: { type: "dropdown", key: spec.key, options: spec.control.options },
+				};
+			case "slider":
+				return {
+					...base,
+					control: {
+						type: "slider",
+						key: spec.key,
+						min: spec.control.min,
+						max: spec.control.max,
+						step: spec.control.step,
+					},
+				};
+			default:
+				return {
+					...base,
+					control: {
+						type: "text",
+						key: spec.key,
+						placeholder: spec.control.placeholder,
+						validate:
+							spec.control.sanitise === "url"
+								? (value: string) => checkEndpoint(value)
+								: undefined,
+					},
+				};
+		}
+	}
+
+	/** Obsidian 1.13+ reads values through here; dotted keys reach nested ones. */
+	getControlValue(key: string): unknown {
+		if (key === PAIRING_CODE_KEY) return this.pairingCode;
+		return readSetting(this.plugin.settings, key);
+	}
+
+	/** …and writes them through here, applying the same cleanup as `display()`. */
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (key === PAIRING_CODE_KEY) {
+			this.pairingCode = String(value);
+			return;
+		}
+		this.plugin.settings = writeSetting(this.plugin.settings, key, sanitise(key, value));
+		await this.plugin.saveSettings();
+	}
+
+	private get paired(): boolean {
+		return this.plugin.settings.deviceToken !== "";
+	}
+
+	private pairingStatus(): string {
+		return this.paired
+			? "Paired with a reMarkable account."
+			: "Not paired. Get a one-time code at my.remarkable.com/device/browser/connect.";
+	}
+
+	/**
+	 * The imperative rendering, for Obsidian below 1.13. It walks the same
+	 * declaration, so a setting added to the schema turns up in both without
+	 * anyone remembering to do it twice.
+	 *
+	 * Everything in here is deprecated as of 1.13 — that is the point: this is
+	 * the path for versions that have nothing newer. Those deprecation
+	 * warnings are left standing rather than silenced: they are true, and the
+	 * day minAppVersion moves to 1.13 they are the list of what to delete.
+	 */
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
 
 		new Setting(containerEl).setName("Connection").setHeading();
+		new Setting(containerEl).setName("Status").setDesc(this.pairingStatus());
 
-		const paired = this.plugin.settings.deviceToken !== "";
-		new Setting(containerEl)
-			.setName("Status")
-			.setDesc(
-				paired
-					? "Paired with a reMarkable account."
-					: "Not paired. Get a one-time code at my.remarkable.com/device/browser/connect.",
-			);
-
-		if (!paired) {
+		if (!this.paired) {
 			new Setting(containerEl)
 				.setName("Pair with one-time code")
 				.setDesc("Enter the 8-letter code, then select Pair.")
@@ -121,8 +227,8 @@ export class RoundTripSettingTab extends PluginSettingTab {
 				.setName("Unpair")
 				.setDesc("Forget the stored device token.")
 				.addButton((button) =>
-					// setWarning is deprecated in favor of setDestructive (1.13+),
-					// but minAppVersion is 1.7.2 — keep the compatible API.
+					// setWarning, not setDestructive: the latter arrived in 1.13 and
+					// minAppVersion is 1.7.2. This branch only runs below 1.13.
 					button
 						.setButtonText("Unpair")
 						.setWarning()
@@ -130,301 +236,76 @@ export class RoundTripSettingTab extends PluginSettingTab {
 				);
 		}
 
-		new Setting(containerEl)
-			.setName("Self-hosted endpoint (rmfakecloud)")
-			.setDesc(
-				"Send documents to a self-hosted rmfakecloud server instead of the official reMarkable cloud.",
-			)
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.useCustomEndpoint).onChange(async (value) => {
-					this.plugin.settings.useCustomEndpoint = value;
-					await this.plugin.saveSettings();
-					this.display();
-				}),
-			);
+		SETTING_SECTIONS.forEach((section, index) => {
+			// The connection heading is already up, with the pairing controls
+			// under it; its schema settings continue in the same section.
+			if (index > 0) new Setting(containerEl).setName(section.heading).setHeading();
+			if (section.note !== undefined) new Setting(containerEl).setDesc(section.note);
+			for (const spec of section.items) {
+				if (!isVisible(spec, this.plugin.settings)) continue;
+				this.renderSetting(containerEl, spec);
+			}
+		});
+	}
 
-		if (this.plugin.settings.useCustomEndpoint) {
-			new Setting(containerEl)
-				.setName("rmfakecloud URL")
-				.setDesc("Base URL of the self-hosted server, e.g. https://rm.example.org")
-				.addText((text) =>
-					text
-						.setPlaceholder("https://rm.example.org")
-						.setValue(this.plugin.settings.customEndpointUrl)
-						.onChange(async (value) => {
-							const url = value.trim();
-							// Scheme guard: a typo here would only surface as a vague
-							// network error at send time. http is allowed (LAN
-							// rmfakecloud) but https is the sane default.
-							if (url !== "" && !/^https?:\/\//i.test(url)) {
-								notify("Endpoint URL must start with https:// (or http:// for LAN).");
-								return;
-							}
-							this.plugin.settings.customEndpointUrl = url;
-							await this.plugin.saveSettings();
-						}),
+	/** One schema entry, rendered with the pre-1.13 builder. */
+	private renderSetting(containerEl: HTMLElement, spec: SettingSpec): void {
+		const setting = new Setting(containerEl).setName(spec.name).setDesc(spec.desc);
+		const commit = async (value: unknown): Promise<void> => {
+			this.plugin.settings = writeSetting(this.plugin.settings, spec.key, value);
+			await this.plugin.saveSettings();
+			if (spec.refresh === true) this.display();
+		};
+		const current = readSetting(this.plugin.settings, spec.key);
+
+		switch (spec.control.type) {
+			case "toggle":
+				setting.addToggle((toggle) =>
+					toggle.setValue(current === true).onChange((value) => void commit(value)),
 				);
-		}
-
-		new Setting(containerEl).setName("Document format").setHeading();
-
-		new Setting(containerEl)
-			.setName("Send notes as")
-			.setDesc(
-				"PDF keeps a fixed page layout, which is what annotations anchor to — " +
-					"the right choice if you plan to write on the document. EPUB reflows, " +
-					"so the device picks the font size and it handles non-Latin scripts " +
-					"better; best for reading only.",
-			)
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOption("pdf", "PDF — fixed layout, best for annotating")
-					.addOption("epub", "EPUB — reflowable, best for reading")
-					.setValue(this.plugin.settings.outputFormat)
-					.onChange(async (value) => {
-						this.plugin.settings.outputFormat = value === "epub" ? "epub" : "pdf";
-						await this.plugin.saveSettings();
-						this.display();
-					}),
-			);
-
-		// The typography sliders only shape the PDF; an EPUB is laid out by the
-		// reader, so showing them there would promise control we do not have.
-		if (this.plugin.settings.outputFormat === "pdf") {
-			new Setting(containerEl).setName("Page layout").setHeading();
-
-			new Setting(containerEl)
-				.setName("Font size")
-				.setDesc("Body text size in points (headings scale along).")
-				.addSlider((slider) =>
-					slider
-						.setLimits(9, 14, 0.5)
-						.setValue(this.plugin.settings.fontSize)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							this.plugin.settings.fontSize = value;
-							await this.plugin.saveSettings();
-						}),
-				);
-
-			new Setting(containerEl)
-				.setName("Line spacing")
-				.setDesc("Line height as a multiple of the font size; roomier reads better on e-ink.")
-				.addSlider((slider) =>
-					slider
-						.setLimits(1.2, 1.9, 0.1)
-						.setValue(this.plugin.settings.lineHeight)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							this.plugin.settings.lineHeight = value;
-							await this.plugin.saveSettings();
-						}),
-				);
-
-			new Setting(containerEl)
-				.setName("Page margin")
-				.setDesc("Margin in points around the text — also your annotation space.")
-				.addSlider((slider) =>
-					slider
-						.setLimits(24, 64, 4)
-						.setValue(this.plugin.settings.margin)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							this.plugin.settings.margin = value;
-							await this.plugin.saveSettings();
-						}),
-				);
-		}
-
-		new Setting(containerEl).setName("Device organization").setHeading();
-
-		new Setting(containerEl)
-			.setName("Mirror vault folders")
-			.setDesc(
-				"Recreate the vault folder structure on the device and replace the " +
-					"previous copy when re-sending. Off: everything lands flat in the root.",
-			)
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.mirrorFolders).onChange(async (value) => {
-					this.plugin.settings.mirrorFolders = value;
-					await this.plugin.saveSettings();
-					this.display();
-				}),
-			);
-
-		if (this.plugin.settings.mirrorFolders) {
-			new Setting(containerEl)
-				.setName("Device base folder")
-				.setDesc(
-					"Folder on the reMarkable that holds the mirrored vault tree; empty for the root.",
-				)
-				.addText((text) =>
-					text
-						.setPlaceholder("Obsidian")
-						.setValue(this.plugin.settings.deviceBaseFolder)
-						.onChange(async (value) => {
-							this.plugin.settings.deviceBaseFolder = value.trim().replace(/^\/+|\/+$/g, "");
-							await this.plugin.saveSettings();
-						}),
-				);
-		}
-
-		new Setting(containerEl).setName("Annotations back into the vault").setHeading();
-
-		new Setting(containerEl)
-			.setName("Where imported annotations land")
-			.setDesc(
-				"A companion note keeps your source note untouched and links back to it. " +
-					"Writing into the source note itself is possible, but the plugin then " +
-					"edits a note you wrote — it only ever replaces its own marked block.",
-			)
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOption("companion", "Companion note (recommended)")
-					.addOption("source", "Section inside the source note")
-					.setValue(this.plugin.settings.annotationTarget)
-					.onChange(async (value) => {
-						this.plugin.settings.annotationTarget = value === "source" ? "source" : "companion";
-						await this.plugin.saveSettings();
-						this.display();
-					}),
-			);
-
-		if (this.plugin.settings.annotationTarget === "companion") {
-			new Setting(containerEl)
-				.setName("Folder for companion notes")
-				.setDesc("Vault path, e.g. reMarkable-in; empty puts them in the vault root.")
-				.addText((text) =>
-					text
-						.setPlaceholder("reMarkable-in")
-						.setValue(this.plugin.settings.annotationFolder)
-						.onChange(async (value) => {
-							this.plugin.settings.annotationFolder = value.trim().replace(/^\/+|\/+$/g, "");
-							await this.plugin.saveSettings();
-						}),
-				);
-		}
-
-		new Setting(containerEl)
-			.setName("Import handwriting as images")
-			.setDesc(
-				"Handwritten notes and freehand marks are pen strokes, not text. " +
-					"With this on, each written page is rendered to a PNG and embedded " +
-					"with the annotations so you can read it back.",
-			)
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.importHandwriting).onChange(async (value) => {
-					this.plugin.settings.importHandwriting = value;
-					await this.plugin.saveSettings();
-					this.display();
-				}),
-			);
-
-		if (this.plugin.settings.importHandwriting) {
-			new Setting(containerEl)
-				.setName("Folder for handwriting images")
-				.setDesc("Vault path where the rendered pages are stored.")
-				.addText((text) =>
-					text
-						.setPlaceholder("reMarkable-in/handwriting")
-						.setValue(this.plugin.settings.handwritingFolder)
-						.onChange(async (value) => {
-							this.plugin.settings.handwritingFolder = value.trim().replace(/^\/+|\/+$/g, "");
-							await this.plugin.saveSettings();
-						}),
-				);
-		}
-
-		new Setting(containerEl).setName("What a pen mark becomes").setHeading();
-		new Setting(containerEl).setDesc(
-			"The shapes are fixed — they are what a pen can draw — but what they mean " +
-				"is your own convention. A bar in the margin always quotes the lines it " +
-				"ran alongside, and handwriting always comes back as an image.",
-		);
-
-		const markSettings: { key: keyof MarkStyles; name: string; desc: string }[] = [
-			{
-				key: "strikethrough",
-				name: "Line through words",
-				desc: "A flat stroke crossing the letters, in one pass or several.",
-			},
-			{
-				key: "circle",
-				name: "Loop around words",
-				desc: "A closed shape drawn around a word or phrase.",
-			},
-			{
-				key: "underline",
-				name: "Line under words",
-				desc: "A flat stroke below the letters, clear of the baseline.",
-			},
-		];
-		for (const mark of markSettings) {
-			new Setting(containerEl)
-				.setName(mark.name)
-				.setDesc(mark.desc)
-				.addDropdown((dropdown) => {
-					for (const [value, label] of Object.entries(MARK_STYLE_LABELS)) {
+				return;
+			case "dropdown": {
+				const options = spec.control.options;
+				setting.addDropdown((dropdown) => {
+					for (const [value, label] of Object.entries(options)) {
 						dropdown.addOption(value, label);
 					}
-					dropdown
-						.setValue(this.plugin.settings.markStyles[mark.key])
-						.onChange(async (value) => {
-							this.plugin.settings.markStyles = {
-								...this.plugin.settings.markStyles,
-								[mark.key]: value as MarkStyle,
-							};
-							await this.plugin.saveSettings();
-						});
+					dropdown.setValue(String(current)).onChange((value) => void commit(value));
 				});
+				return;
+			}
+			case "slider": {
+				const { min, max, step } = spec.control;
+				setting.addSlider((slider) =>
+					slider
+						.setLimits(min, max, step)
+						.setValue(Number(current))
+						// setDynamicTooltip is deprecated in 1.13, where this renderer
+						// no longer runs; below it the value is not shown otherwise.
+						.setDynamicTooltip()
+						.onChange((value) => void commit(value)),
+				);
+				return;
+			}
+			default: {
+				const { placeholder, sanitise: mode } = spec.control;
+				setting.addText((text) =>
+					text
+						.setPlaceholder(placeholder ?? "")
+						.setValue(typeof current === "string" ? current : "")
+						.onChange((value) => {
+							if (mode === "url") {
+								const problem = checkEndpoint(value);
+								if (problem !== undefined) {
+									notify(problem);
+									return;
+								}
+							}
+							void commit(sanitise(spec.key, value));
+						}),
+				);
+			}
 		}
-
-		new Setting(containerEl).setName("Watch folder").setHeading();
-
-		new Setting(containerEl)
-			.setName("Auto-send from a vault folder")
-			.setDesc(
-				"Notes created or changed in the folder below are converted and " +
-					"uploaded automatically (after a short quiet period). Unchanged " +
-					"notes are skipped.",
-			)
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.watchFolderEnabled).onChange(async (value) => {
-					this.plugin.settings.watchFolderEnabled = value;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl)
-			.setName("Folder to watch")
-			.setDesc("Vault path, e.g. reMarkable-out")
-			.addText((text) =>
-				text
-					.setPlaceholder("reMarkable-out")
-					.setValue(this.plugin.settings.watchFolderPath)
-					.onChange(async (value) => {
-						this.plugin.settings.watchFolderPath = value.trim().replace(/^\/+|\/+$/g, "");
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl).setName("Content").setHeading();
-
-		new Setting(containerEl)
-			.setName("Frontmatter as title block")
-			.setDesc(
-				"Off (default): frontmatter is left out of the PDF. On: your fields " +
-					"(tags, author, dates…) are listed under the title; the plugin's own " +
-					"remarkable-id stays hidden.",
-			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.frontmatterAsTitleBlock)
-					.onChange(async (value) => {
-						this.plugin.settings.frontmatterAsTitleBlock = value;
-						await this.plugin.saveSettings();
-					}),
-			);
 	}
 
 	private async pair(): Promise<void> {

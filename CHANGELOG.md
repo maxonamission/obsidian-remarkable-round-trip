@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.24.0] - 2026-07-28
+
+### Added
+
+- **The settings are findable in Obsidian's settings search** on 1.13 and
+  later, through the declarative settings API. Obsidian 1.12 and earlier keep
+  the settings screen they always had — the minimum version stays 1.7.2.
+
+Both are rendered from a single description of the screen, so a setting can
+never appear in one and go missing from the other.
+
 ## [0.23.0] - 2026-07-28
 
 ### Fixed
