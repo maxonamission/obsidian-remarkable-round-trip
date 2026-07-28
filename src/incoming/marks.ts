@@ -222,17 +222,26 @@ export function readMarks(
 		// device units need the same scale before comparing to a line step.
 		const scale = layout === null ? 1 : layout.pageHeight / 1872;
 
+		const classified: Classified[] = [];
 		for (const candidate of candidates) {
-			const mark = classify(candidate, rows, step, textLeft, textRight, scale);
-			if (mark === null) leftovers.push(candidate);
-			else marks.push(mark);
+			const result = classify(candidate, rows, step, textLeft, textRight, scale);
+			if (result === null) leftovers.push(candidate);
+			else classified.push(result);
 		}
+		marks.push(...joinFlatMarks(classified));
 	} else {
 		leftovers.push(...candidates);
 	}
 
 	marks.push(...groupNotes(leftovers, rows, noteGap));
 	return marks.sort((a, b) => b.orderY - a.orderY);
+}
+
+/** A classified stroke, with the row it belongs to when it has one. */
+interface Classified {
+	mark: Mark;
+	row?: Row;
+	pdf?: Bounds;
 }
 
 function classify(
@@ -242,7 +251,7 @@ function classify(
 	textLeft: number,
 	textRight: number,
 	scale: number,
-): Mark | null {
+): Classified | null {
 	const { pdf, device, stroke } = candidate;
 	const width = pdf.maxX - pdf.minX;
 	const height = pdf.maxY - pdf.minY;
@@ -266,9 +275,11 @@ function classify(
 		const beside = rowsBeside(rows, pdf);
 		if (beside.length > 0) {
 			return {
-				...base,
-				kind: "margin",
-				quote: beside.map((row) => row.text).join(" "),
+				mark: {
+					...base,
+					kind: "margin",
+					quote: beside.map((row) => row.text).join(" "),
+				},
 			};
 		}
 	}
@@ -281,14 +292,24 @@ function classify(
 		if (row !== undefined) {
 			const covered = wordsUnder(row, pdf.minX, pdf.maxX);
 			if (covered.length > 0) {
+				// Through the text or under it. The line sits at the baseline,
+				// so ink centred above it crossed the letters and ink below
+				// them did not. Owner rule (2026-07-28): a strike-through wins
+				// the doubtful band — people who strike text through do it
+				// with several passes, and one wobbly pass sagging under the
+				// baseline must not turn the whole gesture into an underline.
 				const middle = (pdf.minY + pdf.maxY) / 2;
-				const throughText = middle > row.y + row.size * 0.15;
+				const throughText = middle > row.y;
 				return {
-					...base,
-					kind: throughText ? "strikethrough" : "underline",
-					target: covered.map((word) => word.text).join(" "),
-					words: covered.map((word) => word.id),
-					quote: row.text,
+					mark: {
+						...base,
+						kind: throughText ? "strikethrough" : "underline",
+						target: covered.map((word) => word.text).join(" "),
+						words: covered.map((word) => word.id),
+						quote: row.text,
+					},
+					row,
+					pdf,
 				};
 			}
 		}
@@ -301,17 +322,84 @@ function classify(
 			const covered = wordsUnder(row, pdf.minX, pdf.maxX);
 			if (covered.length > 0) {
 				return {
-					...base,
-					kind: "circle",
-					target: covered.map((word) => word.text).join(" "),
-					words: covered.map((word) => word.id),
-					quote: row.text,
+					mark: {
+						...base,
+						kind: "circle",
+						target: covered.map((word) => word.text).join(" "),
+						words: covered.map((word) => word.id),
+						quote: row.text,
+					},
 				};
 			}
 		}
 	}
 
 	return null;
+}
+
+/**
+ * One gesture, one mark.
+ *
+ * A strike-through is rarely a single stroke: people go back over it, and the
+ * tablet records each pass separately. Left alone that becomes two or three
+ * marks over the same words — and worse, a pass that sagged below the
+ * baseline is read as an underline, so the same phrase comes back struck
+ * *and* underlined, which it can never be (owner, 2026-07-28).
+ *
+ * So flat marks that share a row and overlap horizontally are joined, and a
+ * strike-through in the group decides the kind for all of it.
+ */
+function joinFlatMarks(classified: Classified[]): Mark[] {
+	const FLAT = new Set<MarkKind>(["strikethrough", "underline"]);
+	const out: Mark[] = [];
+	const groups: { row: Row; pdf: Bounds; members: Mark[] }[] = [];
+
+	for (const entry of classified) {
+		if (entry.row === undefined || entry.pdf === undefined || !FLAT.has(entry.mark.kind)) {
+			out.push(entry.mark);
+			continue;
+		}
+		// Substantial overlap, not mere adjacency. Two passes of one gesture
+		// cover the same words; an underline and a strike-through side by side
+		// on one row are two marks and must stay two (beta, 2026-07-26).
+		const found = groups.find(
+			(group) => group.row === entry.row && overlapsMostly(group.pdf, entry.pdf!),
+		);
+		if (found === undefined) {
+			groups.push({ row: entry.row, pdf: { ...entry.pdf }, members: [entry.mark] });
+			continue;
+		}
+		found.pdf = merge(found.pdf, entry.pdf);
+		found.members.push(entry.mark);
+	}
+
+	for (const group of groups) {
+		out.push(joinGroup(group.row, group.pdf, group.members));
+	}
+	return out;
+}
+
+/** Do two spans cover mostly the same stretch of a row? */
+function overlapsMostly(a: Bounds, b: Bounds): boolean {
+	const overlap = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+	const shortest = Math.min(a.maxX - a.minX, b.maxX - b.minX);
+	return shortest > 0 && overlap >= shortest * 0.5;
+}
+
+/** Collapse one row's passes into the single mark they were meant to be. */
+function joinGroup(row: Row, pdf: Bounds, members: Mark[]): Mark {
+	const first = members[0];
+	if (members.length === 1) return first;
+	const covered = wordsUnder(row, pdf.minX, pdf.maxX);
+	return {
+		kind: members.some((mark) => mark.kind === "strikethrough") ? "strikethrough" : "underline",
+		target: covered.map((word) => word.text).join(" "),
+		words: covered.map((word) => word.id),
+		quote: row.text,
+		strokes: members.flatMap((mark) => mark.strokes),
+		bounds: members.map((mark) => mark.bounds).reduce(merge),
+		orderY: Math.max(...members.map((mark) => mark.orderY)),
+	};
 }
 
 /** Unclassified ink is handwriting: group it per remark and keep the image. */

@@ -236,6 +236,67 @@ describe("readMarks", () => {
 		expect(marks[0].strokes).toHaveLength(1);
 	});
 
+	it("reads several passes over the same words as one strike-through", () => {
+		// Owner, 2026-07-28: a strike-through is rarely one stroke. Left alone
+		// the passes became separate marks, and a pass that sagged below the
+		// baseline was read as an underline — so the same phrase came back
+		// struck *and* underlined, which it can never be.
+		const { line, from, to } = spanOf("de ontwikkeling van");
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x: from, y: line.y + line.size * 0.3 },
+					{ x: to, y: line.y + line.size * 0.3 },
+				]),
+				strokeThrough([
+					{ x: from - 2, y: line.y - line.size * 0.1 },
+					{ x: to + 2, y: line.y - line.size * 0.1 },
+				]),
+			],
+			line.page,
+			layout,
+		);
+
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("strikethrough");
+		expect(marks[0].target).toBe("de ontwikkeling van");
+		expect(marks[0].strokes).toHaveLength(2);
+	});
+
+	it("gives a strike-through the benefit of the doubt at the baseline", () => {
+		// A single pass right on the baseline used to read as an underline.
+		// The owner strikes text through far more often than they underline it.
+		const { line, from, to } = spanOf("de ontwikkeling van");
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x: from, y: line.y + line.size * 0.05 },
+					{ x: to, y: line.y + line.size * 0.05 },
+				]),
+			],
+			line.page,
+			layout,
+		);
+
+		expect(marks[0].kind).toBe("strikethrough");
+	});
+
+	it("still reads a line clearly below the text as an underline", () => {
+		const { line, from, to } = spanOf("de ontwikkeling van");
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x: from, y: line.y - line.size * 0.2 },
+					{ x: to, y: line.y - line.size * 0.2 },
+				]),
+			],
+			line.page,
+			layout,
+		);
+
+		expect(marks[0].kind).toBe("underline");
+	});
+
 	it("keeps two marks on one line apart", () => {
 		// The beta case: an underline and a strike-through side by side on the
 		// same row must not merge into one blob.

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.20.0] - 2026-07-28
+
+### Fixed
+
+- **A strike-through drawn in several passes is one strike-through.** The
+  tablet records every pass separately, so the same phrase came back marked
+  two or three times — and a pass that sagged below the baseline was read as
+  an underline, leaving text both struck and underlined, which it can never
+  be. Passes over the same words on the same row are now joined, and a
+  strike-through in the group decides the kind.
+- **A line right on the baseline reads as a strike-through**, not an
+  underline. Only ink clearly below the letters is an underline now.
+- Two separate marks side by side on one line still stay two marks — joining
+  needs real overlap, not proximity.
+
 ## [0.19.0] - 2026-07-28
 
 ### Fixed
