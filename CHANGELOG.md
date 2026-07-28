@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.26.1] - 2026-07-28
+
+### Changed
+
+- **New short description**, in the owner's words: write in your vault, review
+  on reMarkable, get your remarks back in the note they came from. Also
+  satisfies the registry rule that a description must not contain the word
+  "Obsidian" — inside the plugin directory that context is a given.
+
 ## [0.26.0] - 2026-07-28
 
 ### Changed
