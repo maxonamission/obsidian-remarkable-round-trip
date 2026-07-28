@@ -90,6 +90,7 @@ did and which words it points at.
 | A **vertical bar in the margin** | Margin bar | The lines it ran alongside, as a `>` quote |
 | The **text highlighter** | Highlight | `<mark>` in the colour you used |
 | Anything else — handwriting, arrows, scribbles | Remark | A cropped image in a callout, under the line it was written against |
+| **A page you added** on the tablet to write on | Added page | The whole page as an image, placed after the text it follows |
 
 Rules worth knowing:
 
@@ -104,6 +105,10 @@ Rules worth knowing:
   with a corner in it is read as a remark, not a bar.
 - **Highlight colours come back as the colours you used**, straight from the
   device rather than mapped to a palette.
+- **A page you insert on the tablet keeps its place.** The reMarkable can add
+  a blank page to a PDF to write on; it comes back whole, after the text it
+  follows, and the pages after it still line up with the right part of your
+  note.
 
 ### Changing what a mark means
 

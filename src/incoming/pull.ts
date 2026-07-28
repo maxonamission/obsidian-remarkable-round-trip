@@ -14,7 +14,7 @@ import type { AnnotationOutcome } from "./annotationnote";
 import { Highlight, isHighlightFile, parseHighlightPage } from "./highlights";
 import { MarkKind, readMarks } from "./marks";
 import { deviceBoundsToPdf } from "./anchor";
-import { PageMap, parsePageOrder } from "./pagemap";
+import { PageMap, parsePageEntries } from "./pagemap";
 import { describePageView, parsePageView } from "./pageview";
 import { Stroke, parseRmPage } from "./rmlines";
 
@@ -45,6 +45,8 @@ export interface DocumentScan {
 	interpretedMarks: number;
 	/** Text highlights found inside the `.rm` pen layer (GP_E3_S11). */
 	highlightsInStrokes: number;
+	/** Pages the reader added on the device to write on (GP_E3_S20). */
+	addedPages: number;
 	/** Why anchoring was unavailable, when it was. */
 	anchorSkipped?: "no-layout";
 	/** How the vault block came out: annotated copy or summary (GP_E3_S14). */
@@ -84,6 +86,11 @@ export interface ImportedMark {
 	quote?: string;
 	/** Vault path of the rendered ink; only kinds that need a picture have one. */
 	path?: string;
+	/**
+	 * This is a whole page the reader added on the device, not a mark on the
+	 * source text (GP_E3_S20).
+	 */
+	addedPage?: number;
 }
 
 /** What the edge needs to paint one remark. */
@@ -195,6 +202,7 @@ export async function collectHighlights(
 		anchoredRemarks: 0,
 		interpretedMarks: 0,
 		highlightsInStrokes: 0,
+		addedPages: 0,
 	};
 	if (deps.checkSource) {
 		// Diagnosis, not a precondition: if the vault cannot answer, the
@@ -267,13 +275,18 @@ async function readPageMap(
 	if (content === undefined) return new PageMap([]);
 	try {
 		const json = await deps.readFile(content);
-		const order = parsePageOrder(json);
-		deps.log?.(`  page order: ${order.length} page(s) listed in .content`);
+		const entries = parsePageEntries(json);
+		const added = entries.filter((entry) => entry.pdfPage === null).length;
+		deps.log?.(
+			`  page order: ${entries.length} page(s) listed in .content` +
+				(added > 0 ? `, ${added} added on the device` : "") +
+				` — ${entries.map((entry) => entry.pdfPage ?? "added").join(",")}`,
+		);
 		// How the device was showing the page: the prime suspect behind ink
 		// that lands on the wrong line (GP_E3_S15).
 		const view = describePageView(parsePageView(json));
 		deps.log?.(`  page view: ${view === "" ? "(nothing recorded)" : view}`);
-		return new PageMap(order);
+		return new PageMap(entries);
 	} catch (error) {
 		scan.unreadableFiles++;
 		deps.log?.(
@@ -281,6 +294,59 @@ async function readPageMap(
 		);
 		return new PageMap([]);
 	}
+}
+
+/**
+ * A page added on the device, rendered whole.
+ *
+ * The reMarkable can insert a blank page into a PDF to write on. It carries
+ * no source text, so none of the mark reading applies — but it is often where
+ * the real thinking ends up, and until now it came back as a handful of
+ * disconnected drawings anchored to whatever happened to sit at those
+ * coordinates in the source (owner, 2026-07-28).
+ *
+ * It is placed after the last line of the source page it follows, which is
+ * where the reader turned the page to write it.
+ */
+async function readAddedPage(
+	entry: MappingEntry,
+	file: DocumentFile,
+	strokes: Stroke[],
+	pages: PageMap,
+	layout: PdfLayout | null,
+	deps: PullDeps,
+): Promise<{ page: number | undefined; mark: ImportedMark } | null> {
+	if (deps.renderStrokes === undefined || strokes.length === 0) return null;
+	const position = pages.positionOf(file.id);
+	const after = pages.precedingPdfPage(file.id);
+	const path = await deps.renderStrokes({
+		deviceDocId: entry.deviceDocId,
+		strokes,
+		page: position ?? 0,
+		remark: 1,
+	});
+	if (path === null) return null;
+	return {
+		// Ordered as the page that precedes it, so it lands in reading order.
+		page: after,
+		mark: {
+			kind: "note",
+			page: after,
+			addedPage: position,
+			quote: after === undefined ? undefined : lastLineOf(layout, after),
+			path,
+		},
+	};
+}
+
+/** The last line of a page, for anchoring what was written after it. */
+function lastLineOf(layout: PdfLayout | null, page: number): string | undefined {
+	if (layout === null) return undefined;
+	const onPage = layout.lines.filter((line) => line.page === page);
+	if (onPage.length === 0) return undefined;
+	const lowest = onPage.reduce((best, line) => (line.y < best.y ? line : best));
+	const text = lowest.text.trim();
+	return text === "" ? undefined : text;
 }
 
 /** Kinds the text says everything about; a picture of the ink adds nothing. */
@@ -341,6 +407,24 @@ async function readStrokePages(
 							`head ${found.head ?? ""} tail ${found.tail ?? ""}`,
 					);
 				}
+			}
+			// A page the reader added on the device shows none of the source, so
+			// there is nothing to anchor its ink to and nothing to interpret:
+			// it is a sheet of notes, and it comes back whole (GP_E3_S20).
+			if (pages.isAdded(file.id)) {
+				const added = await readAddedPage(entry, file, rm.strokes, pages, layout, deps);
+				if (added !== null) {
+					collected.push({ page: added.page, order: 0, mark: added.mark });
+					scan.addedPages++;
+					scan.renderedPages++;
+					scan.renderedRemarks++;
+					if (added.mark.quote !== undefined) scan.anchoredRemarks++;
+				}
+				deps.log?.(
+					`  ${file.id}: page ${pages.positionOf(file.id) ?? "?"} was added on the device, ` +
+						`${rm.strokes.length} stroke(s)${added === null ? " — not rendered" : ""}`,
+				);
+				continue;
 			}
 			const marks = readMarks(rm.strokes, page ?? 0, page === undefined ? null : layout);
 			// Raw ink geometry, so a mark that lands on the wrong line can be

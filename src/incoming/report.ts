@@ -57,8 +57,10 @@ export function renderImportReport(input: ImportReportInput): string {
 				: "";
 		const source =
 			scan.highlightsInStrokes > 0 && scan.highlightFiles === 0 ? " (from the pen layer)" : "";
+		const added =
+			scan.addedPages > 0 ? `, ${scan.addedPages} page(s) you added on the device` : "";
 		lines.push(
-			`✓ ${result.notePath}: ${result.highlightCount} highlight(s)${source}${rendered} ` +
+			`✓ ${result.notePath}: ${result.highlightCount} highlight(s)${source}${rendered}${added} ` +
 				`(${scan.totalFiles} files, ${scan.highlightFiles} highlight, ${scan.strokeFiles} stroke)`,
 		);
 		if (scan.unreadableFiles > 0) {
@@ -161,10 +163,16 @@ function diagnose(input: ImportReportInput): string {
 			? ` ${interpreted} of them were read as text — struck through, circled, underlined or ` +
 				"marked in the margin — and name the words they point at."
 			: "";
+	const addedPages = successes.reduce((total, r) => total + (r.scan?.addedPages ?? 0), 0);
+	const added =
+		addedPages > 0
+			? ` ${addedPages} page(s) you added on the reMarkable came back whole, placed after ` +
+				"the text they follow."
+			: "";
 	const handwriting =
 		renderedPages > 0
-			? ` ${renderedPages} page(s) with pen marks came back.${reading}${anchoring}`
-			: "";
+			? ` ${renderedPages} page(s) with pen marks came back.${reading}${anchoring}${added}`
+			: added;
 
 	if (imported.length > 0) {
 		return (
@@ -177,7 +185,7 @@ function diagnose(input: ImportReportInput): string {
 			`No text highlights were found, but ${renderedPages} page(s) with pen marks came ` +
 			`back.${reading} The reMarkable only writes a highlight file when you select text ` +
 			"and highlight it on a text layer; freehand marks and handwriting are pen strokes, " +
-			`which this plugin reads separately.${anchoring}`
+			`which this plugin reads separately.${anchoring}${added}`
 		);
 	}
 	if (failures.length === results.length && failures.length > 0) {

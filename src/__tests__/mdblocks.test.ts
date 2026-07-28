@@ -44,6 +44,14 @@ describe("parseBlocks", () => {
 
 	it("parses pipe tables into rows", () => {
 		const blocks = parseBlocks("| a | b |\n|---|---|\n| 1 | 2 |");
-		expect(blocks).toEqual([{ type: "table", rows: [["a", "b"], ["1", "2"]] }]);
+		expect(blocks).toEqual([
+			{
+				type: "table",
+				rows: [
+					["a", "b"],
+					["1", "2"],
+				],
+			},
+		]);
 	});
 });

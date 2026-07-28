@@ -78,7 +78,7 @@ describe("describeDiagnosis on a failure", () => {
 		const verdict = describeDiagnosis({
 			reachable: false,
 			error:
-				'Request Failed. UnknownHostException Unable to resolve host ' +
+				"Request Failed. UnknownHostException Unable to resolve host " +
 				'"eu.tectonic.remarkable.com": No address associated with hostname',
 		});
 		expect(verdict).toContain("network problem, not your pairing");

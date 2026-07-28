@@ -212,6 +212,26 @@ describe("projectOntoSource", () => {
 		expect(out).toContain("> ![[img/dev-p01-1.png]]");
 	});
 
+	it("places a page added on the device after the text it follows", () => {
+		// GP_E3_S20: it is a sheet of notes, not a remark in the margin, and it
+		// says so — a page of thinking must not read as a scribble.
+		const out = project([
+			{
+				kind: "note",
+				page: 1,
+				addedPage: 3,
+				quote: "of ze tevreden zijn.",
+				path: "img/dev-p03-1.png",
+			},
+		])?.markdown;
+		expect(out).toContain("[!note] Page added on the reMarkable (page 3)");
+		expect(out).toContain("> ![[img/dev-p03-1.png]]");
+		const lines = out?.split("\n") ?? [];
+		expect(lines.findIndex((line) => line.includes("Page added"))).toBeGreaterThan(
+			lines.findIndex((line) => line.includes("of ze tevreden")),
+		);
+	});
+
 	it("keeps a highlight it cannot find, rather than dropping it", () => {
 		const result = project([], [{ text: "staat niet in deze notitie", page: 1 }]);
 		expect(result?.unplaced).toHaveLength(1);

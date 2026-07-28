@@ -19,6 +19,7 @@ const scan = (over: Partial<NonNullable<Extract<PullResult, { ok: true }>["scan"
 	anchoredRemarks: 0,
 	interpretedMarks: 0,
 	highlightsInStrokes: 0,
+	addedPages: 0,
 	...over,
 });
 
@@ -224,6 +225,30 @@ describe("renderImportReport", () => {
 		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
 		expect(report).toContain("has been edited since it was sent");
 		expect(report).not.toContain("or it went over as EPUB");
+	});
+
+	it("mentions pages the reader added on the device", () => {
+		// GP_E3_S20: the reMarkable can insert a blank page into a PDF to write
+		// on; until now that page came back as loose drawings anchored to
+		// whatever happened to sit at those coordinates in the source.
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 0,
+				scan: scan({
+					strokeFiles: 3,
+					renderedPages: 1,
+					renderedRemarks: 1,
+					anchoredRemarks: 1,
+					addedPages: 1,
+				}),
+			},
+		];
+		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		expect(report).toContain("1 page(s) you added on the device");
+		expect(report).toContain("came back whole, placed after the text they follow");
 	});
 
 	it("says when the highlights came from the pen layer", () => {

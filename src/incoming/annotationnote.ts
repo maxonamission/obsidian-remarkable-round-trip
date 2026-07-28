@@ -171,6 +171,9 @@ function renderMark(mark: ImportedMark, styles: MarkStyles): string[] {
 		case "margin":
 			return ["Marked in the margin:", `> ${mark.quote}`, ...image];
 		default:
+			if (mark.addedPage !== undefined) {
+				return [`**Page added on the reMarkable** (page ${mark.addedPage})`, ...image];
+			}
 			return [...(mark.quote === undefined ? [] : [`Note at: “${mark.quote}”`]), ...image];
 	}
 }

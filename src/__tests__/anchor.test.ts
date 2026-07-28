@@ -24,7 +24,13 @@ const deviceYForPdfY = (pdfY: number, layout: PdfLayout) =>
 
 describe("strokeBounds", () => {
 	it("ignores non-finite points instead of poisoning the bounds", () => {
-		const bounds = strokeBounds([stroke([{ x: 0, y: 0 }, { x: NaN, y: 5 }, { x: 10, y: 20 }])]);
+		const bounds = strokeBounds([
+			stroke([
+				{ x: 0, y: 0 },
+				{ x: NaN, y: 5 },
+				{ x: 10, y: 20 },
+			]),
+		]);
 		expect(bounds).toEqual({ minX: 0, minY: 0, maxX: 10, maxY: 20 });
 	});
 
@@ -36,8 +42,14 @@ describe("strokeBounds", () => {
 describe("clusterStrokes", () => {
 	it("keeps the lines of one remark together", () => {
 		const clusters = clusterStrokes([
-			stroke([{ x: 0, y: 100 }, { x: 50, y: 110 }]),
-			stroke([{ x: 0, y: 150 }, { x: 50, y: 160 }]),
+			stroke([
+				{ x: 0, y: 100 },
+				{ x: 50, y: 110 },
+			]),
+			stroke([
+				{ x: 0, y: 150 },
+				{ x: 50, y: 160 },
+			]),
 		]);
 		expect(clusters).toHaveLength(1);
 		expect(clusters[0].bounds).toMatchObject({ minY: 100, maxY: 160 });

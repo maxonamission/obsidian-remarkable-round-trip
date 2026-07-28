@@ -5,13 +5,15 @@ describe("classifyFailure", () => {
 	it("recognises the Android name-resolution failure from the beta", () => {
 		// Verbatim from the device (2026-07-26).
 		const message =
-			'Request Failed. UnknownHostException Unable to resolve host ' +
+			"Request Failed. UnknownHostException Unable to resolve host " +
 			'"eu.tectonic.remarkable.com": No address associated with hostname';
 		expect(classifyFailure(new Error(message))).toBe("offline");
 	});
 
 	it("recognises the desktop and browser variants", () => {
-		expect(classifyFailure(new Error("getaddrinfo ENOTFOUND api.remarkable.com"))).toBe("offline");
+		expect(classifyFailure(new Error("getaddrinfo ENOTFOUND api.remarkable.com"))).toBe(
+			"offline",
+		);
 		expect(classifyFailure(new Error("TypeError: Failed to fetch"))).toBe("offline");
 		expect(classifyFailure(new Error("net::ERR_INTERNET_DISCONNECTED"))).toBe("offline");
 	});

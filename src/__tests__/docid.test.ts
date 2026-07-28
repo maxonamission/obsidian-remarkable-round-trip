@@ -21,12 +21,15 @@ describe("docid", () => {
 
 describe("mapping", () => {
 	it("records uploads and finds them by device doc id", () => {
-		const table = recordUpload({}, {
-			docId: "a",
-			notePath: "map/nota.md",
-			deviceDocId: "device-1",
-			contentHash: contentHash("inhoud"),
-		});
+		const table = recordUpload(
+			{},
+			{
+				docId: "a",
+				notePath: "map/nota.md",
+				deviceDocId: "device-1",
+				contentHash: contentHash("inhoud"),
+			},
+		);
 		expect(lookupByDeviceDocId(table, "device-1")?.notePath).toBe("map/nota.md");
 		expect(table["a"].uploadedAt).toBeTruthy();
 	});

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.22.0] - 2026-07-28
+
+### Added
+
+- **Pages you add on the tablet come back.** The reMarkable can insert a blank
+  page into a PDF to write on — often where the actual thinking ends up. Such
+  a page now comes back whole, as an image placed after the text it follows,
+  and labelled as an added page rather than a stray remark.
+
+### Fixed
+
+- **An inserted page no longer shifts the annotations after it.** A page added
+  in the middle pushed every following page down by one, so marks on later
+  pages were quoted against the wrong part of the note. The plugin now reads
+  which source page each device page actually shows, instead of assuming page
+  N is page N.
+
 ## [0.21.0] - 2026-07-28
 
 ### Added

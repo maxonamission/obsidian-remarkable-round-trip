@@ -41,10 +41,9 @@ describe("preprocess", () => {
 	});
 
 	it("renders frontmatter as title block when asked, hiding internal keys", () => {
-		const result = preprocess(
-			"---\nauthor: Max\nremarkable-id: abc\n---\nBody",
-			{ frontmatterAsTitleBlock: true },
-		);
+		const result = preprocess("---\nauthor: Max\nremarkable-id: abc\n---\nBody", {
+			frontmatterAsTitleBlock: true,
+		});
 		expect(result.markdown).toContain("- author: Max");
 		expect(result.markdown).not.toContain("remarkable-id");
 	});

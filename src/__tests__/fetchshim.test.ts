@@ -27,7 +27,9 @@ describe("isTransientTransportError", () => {
 	it("recognises the Android okhttp connection failure", () => {
 		expect(
 			isTransientTransportError(
-				new Error("Request Failed. IOException unexpected end of stream on com.android.okhttp.Address@6558e99b"),
+				new Error(
+					"Request Failed. IOException unexpected end of stream on com.android.okhttp.Address@6558e99b",
+				),
 			),
 		).toBe(true);
 	});
@@ -48,7 +50,9 @@ describe("installFetchShim retries", () => {
 		const transport: ShimTransport = () => {
 			calls++;
 			if (calls < 3) {
-				return Promise.reject(new Error("unexpected end of stream on com.android.okhttp.Address@1"));
+				return Promise.reject(
+					new Error("unexpected end of stream on com.android.okhttp.Address@1"),
+				);
 			}
 			return Promise.resolve(okResponse("recovered"));
 		};
@@ -89,16 +93,18 @@ describe("installFetchShim retries", () => {
 	it("leaves requests to other hosts on the original fetch", async () => {
 		let shimCalls = 0;
 		const original = globalThis.fetch;
-		const handle = installFetchShim(HOSTS, () => {
-			shimCalls++;
-			return Promise.resolve(okResponse());
-		}, NO_WAIT);
+		const handle = installFetchShim(
+			HOSTS,
+			() => {
+				shimCalls++;
+				return Promise.resolve(okResponse());
+			},
+			NO_WAIT,
+		);
 		restore = handle.restore;
 
 		expect(globalThis.fetch).not.toBe(original);
-		await globalThis
-			.fetch("https://example.invalid/nothing")
-			.catch(() => undefined); // network is unavailable in tests; only routing matters
+		await globalThis.fetch("https://example.invalid/nothing").catch(() => undefined); // network is unavailable in tests; only routing matters
 		expect(shimCalls).toBe(0);
 	});
 

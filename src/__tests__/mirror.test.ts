@@ -115,7 +115,13 @@ describe("MirrorTransport upload + replace", () => {
 
 	it("moves the previous device copy to trash, ignoring already-gone docs", async () => {
 		const { api, calls } = fakeApi([
-			{ id: "old-doc", hash: "hash-old", type: "DocumentType", visibleName: "Nota", parent: "" },
+			{
+				id: "old-doc",
+				hash: "hash-old",
+				type: "DocumentType",
+				visibleName: "Nota",
+				parent: "",
+			},
 		]);
 		const mirror = new MirrorTransport(api, "");
 		await mirror.trashPrevious("old-doc");

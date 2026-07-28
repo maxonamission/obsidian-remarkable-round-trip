@@ -416,9 +416,16 @@ function applyBlockMarks(
 		}
 		if (mark.kind === "note") {
 			const anchor = anchorLine(mark, words, ranges, lineOf, lines.length - 1);
+			// A whole page added on the device is not a remark in the margin;
+			// say what it is, so a page of thinking is not mistaken for a
+			// scribble (GP_E3_S20).
+			const title =
+				mark.addedPage === undefined
+					? "> [!note] Remark"
+					: `> [!note] Page added on the reMarkable (page ${mark.addedPage})`;
 			remarks.set(anchor, [
 				...(remarks.get(anchor) ?? []),
-				"> [!note] Remark",
+				title,
 				...(mark.path === undefined ? [] : [`> ![[${mark.path}]]`]),
 			]);
 		}

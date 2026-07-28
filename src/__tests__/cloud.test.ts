@@ -26,7 +26,11 @@ describe("register", () => {
 		expect(result.deviceToken).toBe("device-token-jwt");
 		expect(calls[0].url).toBe(`${OFFICIAL_ENDPOINTS.authHost}/token/json/2/device/new`);
 		const body = JSON.parse(calls[0].body as string) as Record<string, string>;
-		expect(body).toEqual({ code: "abcdefgh", deviceDesc: "browser-chrome", deviceID: "fixed-id" });
+		expect(body).toEqual({
+			code: "abcdefgh",
+			deviceDesc: "browser-chrome",
+			deviceID: "fixed-id",
+		});
 		expect(client.isRegistered).toBe(true);
 	});
 
