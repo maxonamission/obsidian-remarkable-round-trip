@@ -43,14 +43,7 @@ export interface PlacedWord {
 }
 
 /** What kind of source block a line came from (GP_E3_S12). */
-export type LineRole =
-	| "title"
-	| "heading"
-	| "paragraph"
-	| "list"
-	| "quote"
-	| "code"
-	| "table";
+export type LineRole = "title" | "heading" | "paragraph" | "list" | "quote" | "code" | "table";
 
 /** One piece of text as it was placed on the page (GP_E3_S8). */
 export interface LaidOutLine {
@@ -109,6 +102,14 @@ export function resolveLayoutOptions(
 }
 
 const HEADING_SIZES: Record<number, number> = {
+	// Level 0 is the document title. It carried no entry between 0.11.0 and
+	// 0.16.0 — the title moved from level 1 to level 0 to give it its own
+	// role, and silently fell through to the 11 pt body size. That cost more
+	// than an ugly title: the title block shrank by 49.7 pt, so rebuilding the
+	// layout of a document sent earlier put every row on page 1 fifty points
+	// too high, and every pen mark landed three rows below where it was drawn
+	// (GP_E3_S15).
+	0: 19,
 	1: 19,
 	2: 16,
 	3: 14,

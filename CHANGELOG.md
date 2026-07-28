@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.17.0] - 2026-07-28
+
+### Fixed
+
+- **Pen marks land on the line you drew them on again.** Strike-throughs,
+  underlines and circles were coming back about three text rows too low. The
+  cause was in this plugin's own typesetter, not in the tablet: since 0.11.0
+  the document title was drawn at the body text size instead of a title size,
+  which shrank the title block by 49.7 pt. Any document sent before that
+  change could no longer be reproduced faithfully, so every row on page 1 sat
+  fifty points too high — and every mark landed three rows below where it was
+  drawn. Existing annotations come out right without re-sending anything.
+- **The document title is a title again**, 19 pt rather than the same size as
+  the body text.
+- **No more stray `~~` in the text.** A strike-through that ran half into a
+  highlight closed inside it, and markdown left the marker visible
+  ("maken en~~ investeren in"). Marks are now cut at the edges of whatever
+  nests around them.
+
 ## [0.16.0] - 2026-07-27
 
 ### Fixed

@@ -74,6 +74,18 @@ describe("computeColumnWidths", () => {
 });
 
 describe("renderPdf", () => {
+	it("gives the document title a title's size, not the body's", async () => {
+		// Regression (GP_E3_S15): between 0.11.0 and 0.16.0 the title was drawn
+		// at heading level 0, which had no size of its own and fell through to
+		// the 11 pt body size. That shrank the title block by 49.7 pt, so
+		// rebuilding the layout of an earlier document put every row on page 1
+		// fifty points too high and every pen mark three rows too low.
+		const { layout } = await renderPdf(parseBlocks("Gewone alinea."), META);
+		const title = layout.lines.find((line) => line.text.includes("Testnotitie"));
+		expect(title?.size).toBe(19);
+		expect(title?.role).toBe("title");
+	});
+
 	it("produces a valid PDF with reMarkable page size and docId metadata", async () => {
 		const { bytes } = await renderPdf(parseBlocks("Eén alinea."), META);
 		expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
@@ -87,7 +99,10 @@ describe("renderPdf", () => {
 	});
 
 	it("breaks long content across multiple pages", async () => {
-		const longText = Array.from({ length: 120 }, (_, i) => `Alinea ${i} met wat tekst erbij.`).join("\n\n");
+		const longText = Array.from(
+			{ length: 120 },
+			(_, i) => `Alinea ${i} met wat tekst erbij.`,
+		).join("\n\n");
 		const { bytes } = await renderPdf(parseBlocks(longText), META);
 		const doc = await PDFDocument.load(bytes);
 		expect(doc.getPageCount()).toBeGreaterThan(1);

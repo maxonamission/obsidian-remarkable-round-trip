@@ -118,6 +118,21 @@ describe("projectOntoSource", () => {
 		);
 	});
 
+	it("nests a strike that runs into a highlight instead of crossing it", () => {
+		// Beta 2026-07-28: the vault showed "maken en~~ investeren in" — the
+		// strike closed inside the highlight, so markdown left the ~~ as text.
+		const out = project(
+			[{ kind: "strikethrough", page: 1, words: idsOf("Neem die groeiende ledencijfers.") }],
+			[{ text: "ledencijfers. Ze vertellen niet", rgb: "#f29eff", page: 1 }],
+		)?.markdown;
+		// Every wrapper opens and closes on the same side of the highlight.
+		expect(out).toContain("~~Neem die groeiende ~~");
+		expect(out).toContain('<mark style="background: #f29eff">~~ledencijfers.~~');
+		const [before, inside] = (out ?? "").split('<mark style="background: #f29eff">');
+		expect((before.match(/~~/g) ?? []).length % 2).toBe(0);
+		expect((inside.split("</mark>")[0].match(/~~/g) ?? []).length % 2).toBe(0);
+	});
+
 	it("quotes the lines a margin bar ran alongside", () => {
 		const out = project([
 			{ kind: "margin", page: 1, blocks: [blockOf("Neem die groeiende")] },

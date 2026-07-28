@@ -279,7 +279,7 @@ function applySpans(
 	}
 
 	const edits: { at: number; text: string; rank: number }[] = [];
-	for (const span of merged) {
+	for (const span of splitAtOuterEdges(merged)) {
 		const [open, close] = wrapperFor(span.kind, span.color, span.rgb);
 		if (open === "") continue;
 		const depth = KIND_ORDER.indexOf(span.kind);
@@ -292,6 +292,37 @@ function applySpans(
 	let out = source;
 	for (const edit of edits) {
 		out = out.slice(0, edit.at) + edit.text + out.slice(edit.at);
+	}
+	return out;
+}
+
+/**
+ * Cut every span at the edges of the kinds that nest outside it.
+ *
+ * A strike-through that starts before a highlight and ends inside it would
+ * otherwise produce `~~plannen <mark>maken en~~ investeren…</mark>` —
+ * crossing tags, which markdown renders by leaving a stray `~~` in the text
+ * (beta, 2026-07-28). Splitting the inner mark at the boundary gives
+ * `~~plannen ~~<mark>~~maken en~~ investeren…</mark>`: same meaning, properly
+ * nested.
+ */
+function splitAtOuterEdges<T extends { kind: string; start: number; end: number }>(
+	spans: T[],
+): T[] {
+	const out: T[] = [];
+	for (const span of spans) {
+		const depth = KIND_ORDER.indexOf(span.kind);
+		// Only spans that wrap *outside* this one can break its nesting.
+		const cuts = spans
+			.filter((other) => KIND_ORDER.indexOf(other.kind) < depth)
+			.flatMap((other) => [other.start, other.end])
+			.filter((at) => at > span.start && at < span.end)
+			.sort((a, b) => a - b);
+		let from = span.start;
+		for (const at of [...new Set(cuts), span.end]) {
+			out.push({ ...span, start: from, end: at });
+			from = at;
+		}
 	}
 	return out;
 }
