@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.18.0] - 2026-07-28
+
+### Fixed
+
+- **Striking through a quoted sentence renders again.** Marking
+  `"Laten we de cijfers maar eens bekijken."` produced `~~"Laten …"~~`, and
+  Obsidian left the tildes visible as text: a markdown delimiter that opens
+  against a quote instead of a word is not treated as a delimiter. Marks that
+  use markdown delimiters now start and end on a letter or digit, so the
+  quotes fall just outside the mark — same meaning, and it renders.
+- A mark covering nothing but punctuation no longer leaves an empty `~~~~`
+  behind.
+
 ## [0.17.0] - 2026-07-28
 
 ### Fixed

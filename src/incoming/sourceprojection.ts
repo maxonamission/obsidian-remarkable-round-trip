@@ -282,9 +282,13 @@ function applySpans(
 	for (const span of splitAtOuterEdges(merged)) {
 		const [open, close] = wrapperFor(span.kind, span.color, span.rgb);
 		if (open === "") continue;
+		// A markdown delimiter has to touch the text it marks; an HTML tag can
+		// sit anywhere. Only the former needs the punctuation moved out.
+		const range = open.startsWith("<") ? span : tightenToWord(source, span);
+		if (range === null) continue;
 		const depth = KIND_ORDER.indexOf(span.kind);
-		edits.push({ at: span.start, text: open, rank: depth });
-		edits.push({ at: span.end, text: close, rank: -depth });
+		edits.push({ at: range.start, text: open, rank: depth });
+		edits.push({ at: range.end, text: close, rank: -depth });
 	}
 	// Apply back to front so earlier offsets stay valid; at one position the
 	// outer wrapper opens first and closes last.
@@ -294,6 +298,25 @@ function applySpans(
 		out = out.slice(0, edit.at) + edit.text + out.slice(edit.at);
 	}
 	return out;
+}
+
+/**
+ * Pull a range in until it starts and ends on a letter or digit.
+ *
+ * Markdown delimiters are flanking-sensitive: `~~"Laten we …"~~` leaves the
+ * tildes in the text as literal characters, because the delimiter opens
+ * against a quote rather than a word (beta, 2026-07-28). Marking the phrase
+ * *inside* its quotes — `"~~Laten we …~~"` — says the same thing and renders.
+ *
+ * Returns null when nothing but punctuation was covered; there is no sensible
+ * markdown for striking a lone quote mark.
+ */
+function tightenToWord(source: string, span: Range): Range | null {
+	const wordish = /[\p{L}\p{N}]/u;
+	let { start, end } = span;
+	while (start < end && !wordish.test(source[start])) start++;
+	while (end > start && !wordish.test(source[end - 1])) end--;
+	return end > start ? { start, end } : null;
 }
 
 /**
