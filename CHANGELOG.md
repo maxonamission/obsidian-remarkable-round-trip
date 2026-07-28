@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.23.0] - 2026-07-28
+
+### Fixed
+
+- **No dynamic code execution in the release build.** Obsidian's plugin scan
+  reported four dynamic `<script>` element creations and a `new Function`.
+  None of it was this plugin's own code: it came from the `setImmediate`
+  polyfills baked into JSZip, which reaches the bundle through `rmapi-js`.
+  JSZip is now stubbed out — the plugin writes its own EPUB archives and reads
+  device documents entry by entry, so it never needed it. The bundle is 148 KB
+  smaller.
+- **Pop-out windows.** The plugin patched `fetch` on the shared global and
+  created its canvas on the shared document. Obsidian runs plugins per window,
+  so both now target the window the plugin is actually loaded in.
+
+### Changed
+
+- The README explains what each capability the plugin scan reports is for —
+  vault listing, clipboard, reads and writes — and what it deliberately does
+  not do.
+- Every build now checks the bundle for dynamic code execution and Node
+  builtins, so a future dependency cannot reintroduce either quietly.
+
 ## [0.22.0] - 2026-07-28
 
 ### Added

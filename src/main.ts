@@ -195,7 +195,9 @@ export default class RoundTripPlugin extends Plugin {
 				arrayBuffer: response.arrayBuffer,
 			};
 		};
-		this.fetchShim = installFetchShim(hosts, transport);
+		// activeWindow, not the shared global: a popped-out window has its own
+		// fetch, and only the window the plugin runs in should be patched.
+		this.fetchShim = installFetchShim(hosts, transport, { scope: activeWindow });
 	}
 
 	/** rmapi-js host options; rmfakecloud serves all three from one base (F7). */
@@ -661,7 +663,9 @@ export default class RoundTripPlugin extends Plugin {
 		const plan = planRender(request.strokes);
 		if (plan === null) return null;
 
-		const canvas = document.createElement("canvas");
+		// createEl rather than document.createElement: Obsidian's helper attaches
+		// to the right document, which matters in a popped-out window.
+		const canvas = createEl("canvas");
 		canvas.width = plan.width;
 		canvas.height = plan.height;
 		const context = canvas.getContext("2d");

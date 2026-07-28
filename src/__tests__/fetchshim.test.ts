@@ -6,7 +6,11 @@ import {
 } from "../transport/fetchshim";
 
 const HOSTS = ["https://eu.tectonic.remarkable.com"];
-const NO_WAIT = { backoffMs: () => 0, sleep: () => Promise.resolve() };
+const SCOPE = globalThis as unknown as { fetch: typeof fetch };
+
+// The shim patches a window; tests have none, so they hand it their own
+// scope explicitly rather than reaching for a shared global (GP_E3_S22).
+const NO_WAIT = { scope: SCOPE, backoffMs: () => 0, sleep: () => Promise.resolve() };
 
 let restore: (() => void) | null = null;
 afterEach(() => {

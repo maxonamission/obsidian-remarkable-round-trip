@@ -54,11 +54,29 @@ What happens to your note:
   file path, is how a document finds its note again — move or rename the note
   and the link survives.
 
-## Privacy
+## Privacy and permissions
 
 Your notes go directly from Obsidian to the endpoint you configure — the
 official reMarkable cloud or your own rmfakecloud server. No other services,
-no telemetry.
+no telemetry, no analytics.
+
+Obsidian's plugin scan flags three capabilities. Here is what each is for:
+
+- **Reads and writes vault files.** It reads the note you send and writes the
+  annotations back. Nothing else is touched: generated blocks live between
+  markers, so your own text around them survives a re-import.
+- **Lists all files in the vault.** Only to find a note again by the
+  `remarkable-id` in its frontmatter, when its path no longer matches — that
+  is what lets you move or rename an annotated note without losing the link.
+  Paths are read, contents are not.
+- **Writes to the clipboard.** The import report is copied there so you can
+  paste it into a bug report. The same report is always written to
+  `reMarkable Round-Trip log.md` in your vault, so nothing depends on the
+  clipboard. It is never read.
+
+Your reMarkable pairing is a device token, obtained once from a code you enter
+yourself. It is stored in the plugin's own settings, and it is the only
+credential the plugin holds.
 
 ## Getting annotations back
 

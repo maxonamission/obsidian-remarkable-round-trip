@@ -115,3 +115,29 @@ describe("renderEpub", () => {
 		expect(await read("EPUB/content.xhtml")).toContain("日本語 en Ελληνικά");
 	});
 });
+
+describe("the archive itself", () => {
+	it("stores mimetype first and uncompressed, as the EPUB spec requires", async () => {
+		// GP_E3_S21: written by hand since JSZip left a setImmediate polyfill in
+		// the bundle whose IE-era fallbacks create <script> elements.
+		const bytes = await renderEpub(parseBlocks("Tekst."), META);
+		const head = new TextDecoder("latin1").decode(bytes.subarray(0, 60));
+		expect(head.slice(30, 38)).toBe("mimetype");
+		expect(head.slice(38, 58)).toBe("application/epub+zip");
+		// Compression method (offset 8) is 0 = stored.
+		expect(new DataView(bytes.buffer).getUint16(8, true)).toBe(0);
+	});
+
+	it("produces the same bytes twice, so an unchanged note stays unchanged", async () => {
+		const first = await renderEpub(parseBlocks("Tekst."), META);
+		const second = await renderEpub(parseBlocks("Tekst."), META);
+		expect(Array.from(first)).toEqual(Array.from(second));
+	});
+
+	it("survives non-ASCII content and file names intact", async () => {
+		const bytes = await renderEpub(parseBlocks("Ze vertellen niet wáárom — lid worden."), META);
+		const zip = await JSZip.loadAsync(bytes);
+		const text = await zip.file("EPUB/content.xhtml")!.async("string");
+		expect(text).toContain("wáárom — lid worden");
+	});
+});

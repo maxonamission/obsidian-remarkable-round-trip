@@ -8,10 +8,10 @@
  * repaginates an EPUB, so page-level annotation mapping is fragile. PDF
  * therefore stays the default for anything you intend to annotate (K2).
  *
- * Pure JS/TS (JSZip), so the same path runs on mobile (N7).
+ * Pure JS/TS, so the same path runs on mobile (N7).
  */
 
-import JSZip from "jszip";
+import { zipStore } from "./zip";
 import type { Block, ListItem } from "./mdblocks";
 
 export interface EpubMetadata {
@@ -190,20 +190,15 @@ const CONTAINER_XML = `<?xml version="1.0" encoding="UTF-8"?>
 `;
 
 /** Render blocks to EPUB 3 bytes. */
-export async function renderEpub(
-	blocks: Block[],
-	meta: EpubMetadata,
-): Promise<Uint8Array> {
+export async function renderEpub(blocks: Block[], meta: EpubMetadata): Promise<Uint8Array> {
 	const { xhtml, toc } = renderBody(blocks);
-	const zip = new JSZip();
-
-	// The mimetype entry must come first and be stored uncompressed — that is
-	// what lets a reader sniff the format without unzipping.
-	zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
-	zip.file(CONTAINER_PATH, CONTAINER_XML);
-	zip.file(PACKAGE_PATH, packageDocument(meta));
-	zip.file(NAV_PATH, navDocument(meta, toc));
-	zip.file(CONTENT_PATH, contentDocument(meta, xhtml));
-
-	return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+	// `mimetype` must come first and be stored uncompressed; every entry here
+	// is stored, so that requirement is met by ordering alone.
+	return zipStore([
+		{ name: "mimetype", data: "application/epub+zip" },
+		{ name: CONTAINER_PATH, data: CONTAINER_XML },
+		{ name: PACKAGE_PATH, data: packageDocument(meta) },
+		{ name: NAV_PATH, data: navDocument(meta, toc) },
+		{ name: CONTENT_PATH, data: contentDocument(meta, xhtml) },
+	]);
 }

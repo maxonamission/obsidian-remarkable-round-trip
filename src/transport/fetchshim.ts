@@ -31,6 +31,13 @@ export interface ShimOptions {
 	/** Delay before retry N (ms); injected so tests run instantly. */
 	backoffMs?: (attempt: number) => number;
 	sleep?: (ms: number) => Promise<void>;
+	/**
+	 * The window whose `fetch` is patched. Obsidian runs plugins per window
+	 * and a popped-out window has its own, so the caller says which one —
+	 * patching the shared global would reach windows this plugin was never
+	 * loaded into. Defaults to the window this module was loaded in.
+	 */
+	scope?: { fetch: typeof fetch };
 }
 
 /**
@@ -95,13 +102,12 @@ export function installFetchShim(
 	transport: ShimTransport,
 	options: ShimOptions = {},
 ): ShimHandle {
-	const scope = globalThis as { fetch: typeof fetch };
+	const scope = options.scope ?? window;
 	// Keep the exact original reference (call it with an explicit receiver)
 	// so restore() is a true undo: binding here would stack a new wrapper on
 	// every settings save, since saveSettings reinstalls the shim.
 	const originalFetch = scope.fetch;
-	const callOriginal: typeof fetch = (input, init) =>
-		originalFetch.call(globalThis, input, init);
+	const callOriginal: typeof fetch = (input, init) => originalFetch.call(scope, input, init);
 	const attempts = options.attempts ?? 3;
 	const backoffMs = options.backoffMs ?? ((attempt: number) => 250 * 2 ** (attempt - 1));
 	const sleep =
@@ -128,10 +134,7 @@ export function installFetchShim(
 		throw lastError;
 	};
 
-	const shimmed = async (
-		input: RequestInfo | URL,
-		init?: RequestInit,
-	): Promise<Response> => {
+	const shimmed = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
 		const url =
 			typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 		if (!matchesHost(url, hosts)) return callOriginal(input, init);
