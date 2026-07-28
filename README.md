@@ -1,9 +1,9 @@
 # reMarkable Round-Trip
 
 Send notes from your [Obsidian](https://obsidian.md) vault to a reMarkable
-tablet as e-ink friendly PDFs — with your vault folder structure mirrored on
-the device and a stable document-ID that will link annotations back to their
-source note (the round-trip, in development).
+tablet as e-ink friendly PDFs, annotate them on the tablet, and get those
+annotations back **in the note they came from** — as markdown you can search,
+link and edit. That return trip is what this plugin is for.
 
 > **Status: experimental beta.** This plugin is under active development and
 > not yet in the community plugin registry. Expect rough edges; please report
@@ -50,8 +50,9 @@ What happens to your note:
 - Your vault folders are recreated on the device under a configurable base
   folder (default `Obsidian`); re-sending a note replaces the previous copy
   (the old one goes to the device trash).
-- Each note gets a stable `remarkable-id` in its frontmatter — the anchor
-  that the upcoming incoming route (annotations back into Obsidian) will use.
+- Each note gets a stable `remarkable-id` in its frontmatter. That id, not the
+  file path, is how a document finds its note again — move or rename the note
+  and the link survives.
 
 ## Privacy
 
@@ -63,35 +64,74 @@ no telemetry.
 
 Annotate a document on your reMarkable, then run **Import annotations from
 reMarkable** from the command palette. The plugin finds the documents that
-changed since the last import, pulls their text highlights, and writes them
-into your vault — grouped per page, with colours, linked to the note they
-came from.
+changed since the last import and writes what it read into your vault.
 
-By default they go into a companion note (`Your note — annotations.md`) so
-your source note stays untouched; a setting switches to a section inside the
-source note. Either way the plugin only replaces its own marked block, so
-your own writing around it survives a re-import.
+What you get is an **annotated copy of the note**: your own text, unchanged,
+with the marks woven in where you drew them. Bold, italics, headings, links
+and lists all survive, because the copy starts from your note rather than
+being rebuilt from the page.
 
-Pen marks come back as **text**. Because the plugin typeset the page, it knows
-where every word sits — so it can read what a mark did and name the words it
-points at:
+By default it lands in a companion note (`Your note — annotations.md`) so your
+source note stays untouched; a setting switches to a section inside the source
+note itself. Either way the plugin only ever replaces its own marked block, so
+anything you write around it survives a re-import.
 
-| On the tablet | In your vault |
-|---|---|
-| Line through words | ~~the struck words~~ — struck through |
-| Line under words | the underlined words — underlined |
-| Loop around a phrase | **the circled phrase** — circled |
-| Bar in the margin | Marked in the margin, with those lines quoted |
-| Arrow | Arrow: "from here" → "to here" |
+### Which marks are understood
 
-No OCR, no model: it is geometry over the plugin's own layout. Handwritten
-*words* stay images — there the ink is the content — rendered to PNG, cropped
-to the ink, and quoted with the sentence they were written against.
+No OCR and no model: the plugin typeset the page itself, so it knows where
+every word sits and can tell from the *shape and position* of a stroke what it
+did and which words it points at.
 
-Quoting needs the note to still match what was sent. Edited it since? The
-images come back without quotes rather than with the wrong ones, and the
-import report tells you to send the note again. EPUB reflows on the device,
-so there the annotations stay at page level.
+| Draw this on the tablet | Recognised as | Default result in your vault |
+|---|---|---|
+| A line **through** words | Strike-through | `~~the struck words~~` |
+| A line **under** words, clear of the baseline | Underline | `<u>the underlined words</u>` |
+| A **loop around** a word or phrase | Circle | `**the circled phrase**` |
+| A **vertical bar in the margin** | Margin bar | The lines it ran alongside, as a `>` quote |
+| The **text highlighter** | Highlight | `<mark>` in the colour you used |
+| Anything else — handwriting, arrows, scribbles | Remark | A cropped image in a callout, under the line it was written against |
+
+Rules worth knowing:
+
+- **A strike-through may be several strokes.** Go back over it as often as you
+  like: passes over the same words count as one mark.
+- **Through or under decides the meaning.** Ink crossing the letters is a
+  strike-through, ink below them an underline. In the doubtful band right on
+  the baseline, strike-through wins.
+- **Two marks side by side on one line stay two marks.** Joining needs real
+  overlap, not proximity.
+- **A margin bar must be outside the text column**, and straight — a stroke
+  with a corner in it is read as a remark, not a bar.
+- **Highlight colours come back as the colours you used**, straight from the
+  device rather than mapped to a palette.
+
+### Changing what a mark means
+
+The shapes are fixed — they are what a pen can draw — but what they *mean* is
+your own convention. Under **Settings → What a pen mark becomes**, each of the
+three inline marks can be set to strikethrough, bold, italic, underline,
+highlight, or left alone entirely. Circle everything you want to highlight?
+Set *Loop around words* to **Highlight** and it comes back that way.
+
+Margin bars always quote the lines they ran alongside, and handwriting always
+comes back as an image — those are not styling choices.
+
+### When anchoring is not possible
+
+Placing marks needs the note to still match what was sent.
+
+- **Edited the note since?** The annotations still come back, but as a summary
+  rather than a copy, with a warning at the top of the block saying they
+  describe the earlier version. Send the note again to annotate the current
+  one.
+- **Sent it as EPUB?** EPUB reflows on the device, so there is no fixed page
+  to anchor to; annotations come back at page level.
+- **Moved or renamed the note?** That is fine — it is found again by its
+  `remarkable-id`, and the companion note moves along with it.
+
+The import report (written to `reMarkable Round-Trip log.md` and copied to
+your clipboard) says per note what happened: what was read, what ended up in
+the vault, and which words each mark landed on.
 
 ## Known limitations (beta)
 

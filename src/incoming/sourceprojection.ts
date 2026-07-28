@@ -14,6 +14,7 @@
 
 import { PdfLayout, toWinAnsi } from "../convert/pdf";
 import { Highlight, colorName, rgbName } from "./highlights";
+import { DEFAULT_MARK_STYLES, MarkStyle, MarkStyles } from "./markstyles";
 import type { ImportedMark } from "./pull";
 
 /** Markdown punctuation that carries no text and may sit between words. */
@@ -64,21 +65,34 @@ function wrapperFor(
 	color?: number,
 	rgb?: string,
 	insideHtml = false,
+	styles: MarkStyles = DEFAULT_MARK_STYLES,
 ): [string, string] {
-	switch (kind) {
+	// A text highlight is not a shape the user chose, and it carries a colour
+	// of its own, so it is the one mark with no style setting.
+	if (kind === "highlight") {
+		// The device sends its own RGB, so use it verbatim rather than
+		// rounding to a palette name (GP_E3_S16).
+		const css = rgb ?? HIGHLIGHT_CSS[colorName(color) ?? ""];
+		if (css !== undefined) return [`<mark style="background: ${css}">`, "</mark>"];
+		return insideHtml ? ["<mark>", "</mark>"] : ["==", "=="];
+	}
+	const style = styles[kind as keyof MarkStyles];
+	return style === undefined ? ["", ""] : wrapperForStyle(style, insideHtml);
+}
+
+/** The markup for one style, in markdown or in HTML when it has to nest. */
+function wrapperForStyle(style: MarkStyle, insideHtml: boolean): [string, string] {
+	switch (style) {
 		case "strikethrough":
 			return insideHtml ? ["<s>", "</s>"] : ["~~", "~~"];
+		case "bold":
+			return insideHtml ? ["<strong>", "</strong>"] : ["**", "**"];
+		case "italic":
+			return insideHtml ? ["<em>", "</em>"] : ["*", "*"];
 		case "underline":
 			return ["<u>", "</u>"];
-		case "circle":
-			return insideHtml ? ["<strong>", "</strong>"] : ["**", "**"];
-		case "highlight": {
-			// The device sends its own RGB, so use it verbatim rather than
-			// rounding to a palette name (GP_E3_S16).
-			const css = rgb ?? HIGHLIGHT_CSS[colorName(color) ?? ""];
-			if (css !== undefined) return [`<mark style="background: ${css}">`, "</mark>"];
+		case "highlight":
 			return insideHtml ? ["<mark>", "</mark>"] : ["==", "=="];
-		}
 		default:
 			return ["", ""];
 	}
@@ -170,6 +184,8 @@ export interface ProjectionInput {
 	layout: PdfLayout;
 	highlights: Highlight[];
 	marks: ImportedMark[];
+	/** How each mark becomes markdown; defaults when not given. */
+	styles?: MarkStyles;
 }
 
 export interface ProjectionResult {
@@ -239,7 +255,7 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 		placed++;
 	}
 
-	let markdown = applySpans(input.source, spans);
+	let markdown = applySpans(input.source, spans, input.styles);
 	markdown = applyBlockMarks(markdown, input, words, ranges);
 
 	if (unplaced.length > 0) {
@@ -279,6 +295,7 @@ function wordIdsOf(
 function applySpans(
 	source: string,
 	spans: { kind: string; color?: number; rgb?: string; start: number; end: number }[],
+	styles: MarkStyles = DEFAULT_MARK_STYLES,
 ): string {
 	const merged: typeof spans = [];
 	for (const kind of KIND_ORDER) {
@@ -299,7 +316,7 @@ function applySpans(
 	const html: Range[] = [];
 	for (const span of splitAtOuterEdges(merged)) {
 		const insideHtml = html.some((outer) => outer.start <= span.start && span.end <= outer.end);
-		const [open, close] = wrapperFor(span.kind, span.color, span.rgb, insideHtml);
+		const [open, close] = wrapperFor(span.kind, span.color, span.rgb, insideHtml, styles);
 		if (open === "") continue;
 		// A markdown delimiter has to touch the text it marks; an HTML tag can
 		// sit anywhere. Only the former needs the punctuation moved out.

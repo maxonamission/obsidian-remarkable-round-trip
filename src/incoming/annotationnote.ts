@@ -10,6 +10,7 @@
 import type { PdfLayout } from "../convert/pdf";
 import { projectOntoSource } from "./sourceprojection";
 import { Highlight, colorName, rgbName } from "./highlights";
+import { DEFAULT_MARK_STYLES, MarkStyles } from "./markstyles";
 import type { ImportedMark } from "./pull";
 
 export const BEGIN_MARKER = "<!-- remarkable-round-trip:begin -->";
@@ -44,6 +45,8 @@ export interface AnnotationRenderInput {
 	 * assumed away (F14, N5).
 	 */
 	sourceChanged?: boolean;
+	/** How each recognised mark is written; defaults when not given. */
+	styles?: MarkStyles;
 }
 
 /** How the block came out, so the report can say so (GP_E3_S14). */
@@ -83,6 +86,7 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): RenderedAnn
 					layout: input.layout,
 					highlights: input.highlights,
 					marks,
+					styles: input.styles,
 				})
 			: null;
 	if (copy !== null) {
@@ -122,7 +126,7 @@ export function renderAnnotationBlock(input: AnnotationRenderInput): RenderedAnn
 				lines.push(mark.page === undefined ? "**Page unknown**" : `**Page ${mark.page}**`, "");
 				first = false;
 			}
-			lines.push(...renderMark(mark), "");
+			lines.push(...renderMark(mark, input.styles ?? DEFAULT_MARK_STYLES), "");
 		}
 	}
 
@@ -149,19 +153,43 @@ function fallbackReason(input: AnnotationRenderInput): AnnotationOutcome["reason
  * and link; only ink whose meaning lives in the ink itself stays a picture
  * (GP_E3_S9).
  */
-function renderMark(mark: ImportedMark): string[] {
+function renderMark(mark: ImportedMark, styles: MarkStyles): string[] {
 	const image = mark.path === undefined ? [] : [`![[${mark.path}]]`];
+	// The summary form names the gesture; the styling follows the same
+	// setting as the annotated copy so the two never disagree (GP_E3_S19).
+	const styled = (kind: keyof MarkStyles, label: string): string[] => {
+		const [open, close] = markupFor(styles[kind]);
+		return [`${open}${mark.target}${close} — ${label}`, ...image];
+	};
 	switch (mark.kind) {
 		case "strikethrough":
-			return [`~~${mark.target}~~ — struck through`, ...image];
+			return styled("strikethrough", "struck through");
 		case "underline":
-			return [`<u>${mark.target}</u> — underlined`, ...image];
+			return styled("underline", "underlined");
 		case "circle":
-			return [`**${mark.target}** — circled`, ...image];
+			return styled("circle", "circled");
 		case "margin":
 			return ["Marked in the margin:", `> ${mark.quote}`, ...image];
 		default:
 			return [...(mark.quote === undefined ? [] : [`Note at: “${mark.quote}”`]), ...image];
+	}
+}
+
+/** Inline markup for a style, for the summary form. */
+function markupFor(style: MarkStyles[keyof MarkStyles]): [string, string] {
+	switch (style) {
+		case "strikethrough":
+			return ["~~", "~~"];
+		case "bold":
+			return ["**", "**"];
+		case "italic":
+			return ["*", "*"];
+		case "underline":
+			return ["<u>", "</u>"];
+		case "highlight":
+			return ["==", "=="];
+		default:
+			return ["", ""];
 	}
 }
 

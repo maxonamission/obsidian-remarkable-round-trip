@@ -712,6 +712,7 @@ export default class RoundTripPlugin extends Plugin {
 			layout,
 			source,
 			inSourceNote: this.settings.annotationTarget === "source",
+			styles: this.settings.markStyles,
 			sourceChanged: sourceState === "changed",
 			importedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
 		});

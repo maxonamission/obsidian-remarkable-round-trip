@@ -141,6 +141,31 @@ describe("projectOntoSource", () => {
 		expect(out).not.toContain("~~");
 	});
 
+	it("follows the configured meaning of a mark", () => {
+		// The shapes are fixed; what they mean is the user's convention
+		// (owner question, 2026-07-28).
+		const out = projectOntoSource({
+			source: SOURCE,
+			layout,
+			marks: [{ kind: "circle", page: 1, words: idsOf("groeiende ledencijfers.") }],
+			highlights: [],
+			styles: { strikethrough: "strikethrough", circle: "highlight", underline: "italic" },
+		})?.markdown;
+		expect(out).toContain("==groeiende ledencijfers==.");
+		expect(out).not.toContain("**groeiende");
+	});
+
+	it("writes no markup at all for a mark set to leave the text alone", () => {
+		const out = projectOntoSource({
+			source: SOURCE,
+			layout,
+			marks: [{ kind: "circle", page: 1, words: idsOf("groeiende ledencijfers.") }],
+			highlights: [],
+			styles: { strikethrough: "strikethrough", circle: "none", underline: "underline" },
+		})?.markdown;
+		expect(out).toBe(SOURCE.trimEnd());
+	});
+
 	it("skips a mark that covers nothing but punctuation", () => {
 		// There is no sensible markdown for striking a lone quote mark, and
 		// ~~"~~ would only leave litter in the text.

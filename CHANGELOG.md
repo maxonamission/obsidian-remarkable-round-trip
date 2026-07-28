@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.21.0] - 2026-07-28
+
+### Added
+
+- **You decide what a mark means.** Under *Settings → What a pen mark
+  becomes*, each of the three inline marks — a line through words, a loop
+  around them, a line under them — can be set to strikethrough, bold, italic,
+  underline, highlight, or left alone. The shapes are fixed, because that is
+  what a pen can draw; what they mean is your convention. Margin bars always
+  quote the lines they ran alongside and handwriting always comes back as an
+  image, so those have no setting.
+
+### Changed
+
+- The README now documents every recognised mark: what to draw, how it is
+  recognised, what you get, and the rules behind it — several strokes count as
+  one strike-through, the baseline decides between striking and underlining,
+  and marks side by side stay separate. It also says when anchoring is not
+  possible and what happens instead.
+
 ## [0.20.0] - 2026-07-28
 
 ### Fixed

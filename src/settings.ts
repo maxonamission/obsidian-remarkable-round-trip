@@ -9,6 +9,12 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import { notify } from "./notify";
 import type RoundTripPlugin from "./main";
 import type { MappingTable } from "./id/mapping";
+import {
+	DEFAULT_MARK_STYLES,
+	MARK_STYLE_LABELS,
+	type MarkStyle,
+	type MarkStyles,
+} from "./incoming/markstyles";
 import type { OutputFormat } from "./sync/send";
 import { TransportError } from "./transport/http";
 
@@ -40,9 +46,14 @@ export interface RoundTripSettings {
 	mirrorFolders: boolean;
 	/** Device folder under which the vault tree is mirrored ("" = root). */
 	deviceBaseFolder: string;
+	/** How each recognised pen mark is written into the copy (GP_E3_S19). */
+	markStyles: MarkStyles;
 	/** docId ↔ device document mapping (round-trip foundation, F5). */
 	mappings: MappingTable;
 }
+
+export type { MarkStyle, MarkStyles };
+export { DEFAULT_MARK_STYLES, MARK_STYLE_LABELS };
 
 export const DEFAULT_SETTINGS: RoundTripSettings = {
 	deviceToken: "",
@@ -58,6 +69,7 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	annotationTarget: "companion",
 	annotationFolder: "reMarkable-in",
 	importHandwriting: true,
+	markStyles: { ...DEFAULT_MARK_STYLES },
 	handwritingFolder: "reMarkable-in/handwriting",
 	mirrorFolders: true,
 	deviceBaseFolder: "Obsidian",
@@ -94,11 +106,9 @@ export class RoundTripSettingTab extends PluginSettingTab {
 				.setName("Pair with one-time code")
 				.setDesc("Enter the 8-letter code, then select Pair.")
 				.addText((text) =>
-					text
-						.setPlaceholder("abcdefgh")
-						.onChange((value) => {
-							this.pairingCode = value;
-						}),
+					text.setPlaceholder("abcdefgh").onChange((value) => {
+						this.pairingCode = value;
+					}),
 				)
 				.addButton((button) =>
 					button
@@ -113,21 +123,24 @@ export class RoundTripSettingTab extends PluginSettingTab {
 				.addButton((button) =>
 					// setWarning is deprecated in favor of setDestructive (1.13+),
 					// but minAppVersion is 1.7.2 — keep the compatible API.
-					button.setButtonText("Unpair").setWarning().onClick(() => void this.unpair()),
+					button
+						.setButtonText("Unpair")
+						.setWarning()
+						.onClick(() => void this.unpair()),
 				);
 		}
 
 		new Setting(containerEl)
 			.setName("Self-hosted endpoint (rmfakecloud)")
-			.setDesc("Send documents to a self-hosted rmfakecloud server instead of the official reMarkable cloud.")
+			.setDesc(
+				"Send documents to a self-hosted rmfakecloud server instead of the official reMarkable cloud.",
+			)
 			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.useCustomEndpoint)
-					.onChange(async (value) => {
-						this.plugin.settings.useCustomEndpoint = value;
-						await this.plugin.saveSettings();
-						this.display();
-					}),
+				toggle.setValue(this.plugin.settings.useCustomEndpoint).onChange(async (value) => {
+					this.plugin.settings.useCustomEndpoint = value;
+					await this.plugin.saveSettings();
+					this.display();
+				}),
 			);
 
 		if (this.plugin.settings.useCustomEndpoint) {
@@ -232,27 +245,25 @@ export class RoundTripSettingTab extends PluginSettingTab {
 					"previous copy when re-sending. Off: everything lands flat in the root.",
 			)
 			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.mirrorFolders)
-					.onChange(async (value) => {
-						this.plugin.settings.mirrorFolders = value;
-						await this.plugin.saveSettings();
-						this.display();
-					}),
+				toggle.setValue(this.plugin.settings.mirrorFolders).onChange(async (value) => {
+					this.plugin.settings.mirrorFolders = value;
+					await this.plugin.saveSettings();
+					this.display();
+				}),
 			);
 
 		if (this.plugin.settings.mirrorFolders) {
 			new Setting(containerEl)
 				.setName("Device base folder")
-				.setDesc("Folder on the reMarkable that holds the mirrored vault tree; empty for the root.")
+				.setDesc(
+					"Folder on the reMarkable that holds the mirrored vault tree; empty for the root.",
+				)
 				.addText((text) =>
 					text
 						.setPlaceholder("Obsidian")
 						.setValue(this.plugin.settings.deviceBaseFolder)
 						.onChange(async (value) => {
-							this.plugin.settings.deviceBaseFolder = value
-								.trim()
-								.replace(/^\/+|\/+$/g, "");
+							this.plugin.settings.deviceBaseFolder = value.trim().replace(/^\/+|\/+$/g, "");
 							await this.plugin.saveSettings();
 						}),
 				);
@@ -302,13 +313,11 @@ export class RoundTripSettingTab extends PluginSettingTab {
 					"with the annotations so you can read it back.",
 			)
 			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.importHandwriting)
-					.onChange(async (value) => {
-						this.plugin.settings.importHandwriting = value;
-						await this.plugin.saveSettings();
-						this.display();
-					}),
+				toggle.setValue(this.plugin.settings.importHandwriting).onChange(async (value) => {
+					this.plugin.settings.importHandwriting = value;
+					await this.plugin.saveSettings();
+					this.display();
+				}),
 			);
 
 		if (this.plugin.settings.importHandwriting) {
@@ -320,12 +329,54 @@ export class RoundTripSettingTab extends PluginSettingTab {
 						.setPlaceholder("reMarkable-in/handwriting")
 						.setValue(this.plugin.settings.handwritingFolder)
 						.onChange(async (value) => {
-							this.plugin.settings.handwritingFolder = value
-								.trim()
-								.replace(/^\/+|\/+$/g, "");
+							this.plugin.settings.handwritingFolder = value.trim().replace(/^\/+|\/+$/g, "");
 							await this.plugin.saveSettings();
 						}),
 				);
+		}
+
+		new Setting(containerEl).setName("What a pen mark becomes").setHeading();
+		new Setting(containerEl).setDesc(
+			"The shapes are fixed — they are what a pen can draw — but what they mean " +
+				"is your own convention. A bar in the margin always quotes the lines it " +
+				"ran alongside, and handwriting always comes back as an image.",
+		);
+
+		const markSettings: { key: keyof MarkStyles; name: string; desc: string }[] = [
+			{
+				key: "strikethrough",
+				name: "Line through words",
+				desc: "A flat stroke crossing the letters, in one pass or several.",
+			},
+			{
+				key: "circle",
+				name: "Loop around words",
+				desc: "A closed shape drawn around a word or phrase.",
+			},
+			{
+				key: "underline",
+				name: "Line under words",
+				desc: "A flat stroke below the letters, clear of the baseline.",
+			},
+		];
+		for (const mark of markSettings) {
+			new Setting(containerEl)
+				.setName(mark.name)
+				.setDesc(mark.desc)
+				.addDropdown((dropdown) => {
+					for (const [value, label] of Object.entries(MARK_STYLE_LABELS)) {
+						dropdown.addOption(value, label);
+					}
+					dropdown
+						.setValue(this.plugin.settings.markStyles[mark.key])
+						.onChange(async (value) => {
+							this.plugin.settings.markStyles = {
+								...this.plugin.settings.markStyles,
+								[mark.key]: value as MarkStyle,
+							};
+							await this.plugin.saveSettings();
+						});
+				});
 		}
 
 		new Setting(containerEl).setName("Watch folder").setHeading();
@@ -338,12 +389,10 @@ export class RoundTripSettingTab extends PluginSettingTab {
 					"notes are skipped.",
 			)
 			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.watchFolderEnabled)
-					.onChange(async (value) => {
-						this.plugin.settings.watchFolderEnabled = value;
-						await this.plugin.saveSettings();
-					}),
+				toggle.setValue(this.plugin.settings.watchFolderEnabled).onChange(async (value) => {
+					this.plugin.settings.watchFolderEnabled = value;
+					await this.plugin.saveSettings();
+				}),
 			);
 
 		new Setting(containerEl)
