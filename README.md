@@ -1,21 +1,26 @@
 # reMarkable Round-Trip
 
-**Read your notes on paper. Get your thinking back in the note it came from.**
+**Somewhere on your reMarkable is the best idea you had this month.**
 
-You read on your reMarkable because you think better there. You strike out a
-sentence, circle a phrase, run a line down the margin, write the objection that
-only occurs to you on paper.
+You can even picture it: the line through the paragraph that had to go, the
+circle around the one phrase worth keeping, the objection scrawled in the
+margin that would never have occurred to you at a keyboard. Paper does that.
+It slows the text down until you can hear yourself think.
 
-And then it stays there. The tablet keeps your reading; your vault keeps your
-writing; the two never meet. So you retype the good bits, or you tell yourself
-you will, or you quietly stop marking things up at all — because thinking that
-lands nowhere stops feeling worth the ink.
+Then you are back at your desk, and your vault has never heard of any of it.
+The tablet remembers everything and tells your vault nothing — a beautiful
+drawer that locks from the inside. So you prop the tablet next to the screen
+and retype your own thinking. Or you promise yourself you will, later, and a
+month of reading quietly evaporates.
 
-This plugin closes that loop. Send a note to your reMarkable, mark it up, and
-run one command. What comes back is **your own note with your marks worked into
-it** — struck-through text struck through, circled phrases in bold, margin bars
-as quotes, highlights in the colour you used. Markdown you can search, link and
-edit, not a screenshot of a page.
+**This plugin is the way back.** Send a note to your reMarkable, mark it up,
+run one command. Your note returns with your marks worked into it: the
+sentence you struck out is struck out, the phrase you circled is bold, the
+margin bar became a quote, the highlight kept its colour. And next Tuesday,
+when you search your vault for that idea, it is *there* — in the sentence it
+was about, with your objection sitting underneath.
+
+Markdown you can search, link and edit. Not a photo of a page.
 
 > **Beta.** In active development and not yet in the community plugin
 > registry. It is used daily on a real device, and rough edges get fixed fast —

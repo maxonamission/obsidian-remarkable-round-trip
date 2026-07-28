@@ -1,9 +1,9 @@
 {
 	"id": "remarkable-round-trip",
 	"name": "reMarkable Round-Trip",
-	"version": "0.25.0",
+	"version": "0.26.0",
 	"minAppVersion": "1.7.2",
-	"description": "Mark up your notes on a reMarkable and get your marks back in the note they came from — as markdown you can search and edit, not a screenshot.",
+	"description": "Somewhere on your reMarkable is the best idea you had this month. Send notes from Obsidian, mark them up on paper, and get every mark back in the note it came from — as markdown, not a photo of a page.",
 	"author": "Max Kloosterman",
 	"authorUrl": "https://github.com/maxonamission",
 	"isDesktopOnly": false

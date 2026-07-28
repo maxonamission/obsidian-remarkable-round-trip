@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.26.0] - 2026-07-28
+
+### Changed
+
+- **The README and plugin description now open with the moment this plugin is
+  for** — the idea you know is on the tablet and cannot find in your vault —
+  instead of a summary of what the plugin does. Every promise in the new text
+  maps to a shipped, tested feature; the imagination is in the showing, not in
+  the claims.
+
 ## [0.25.0] - 2026-07-28
 
 ### Changed
