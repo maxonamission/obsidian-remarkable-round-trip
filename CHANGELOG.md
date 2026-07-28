@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.19.0] - 2026-07-28
+
+### Fixed
+
+- **Marks inside another mark render again.** 0.18.0 blamed the quotes around
+  a struck sentence; they were not the cause. The real rule is that markdown
+  is not parsed inside an inline HTML tag — and an underline has to be
+  `<u>…</u>`, because markdown has no underline. So a `~~strike~~` written
+  within it stayed on screen as tildes, and the same happened to a strike
+  inside a highlight. A mark that falls inside an HTML wrapper now uses its
+  own HTML tag (`<s>`, `<strong>`); a mark on its own stays plain markdown.
+
 ## [0.18.0] - 2026-07-28
 
 ### Fixed

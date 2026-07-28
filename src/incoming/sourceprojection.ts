@@ -48,21 +48,36 @@ const HIGHLIGHT_CSS: Record<string, string> = {
 	grey: "#dee2e6",
 };
 
-function wrapperFor(kind: string, color?: number, rgb?: string): [string, string] {
+/**
+ * The markup for one mark.
+ *
+ * Markdown by default — the copy should stay readable and editable as
+ * markdown. But **markdown inside an inline HTML tag is not parsed**: an
+ * underline is `<u>…</u>` because markdown has no underline at all, and a
+ * `~~strike~~` within it comes out as literal tildes (beta, 2026-07-28, twice
+ * in a row: first blamed on the quotes around the phrase, then measured
+ * properly). So a mark that ends up inside an HTML wrapper switches to its
+ * own HTML tag, which nests and renders in every Obsidian view.
+ */
+function wrapperFor(
+	kind: string,
+	color?: number,
+	rgb?: string,
+	insideHtml = false,
+): [string, string] {
 	switch (kind) {
 		case "strikethrough":
-			return ["~~", "~~"];
+			return insideHtml ? ["<s>", "</s>"] : ["~~", "~~"];
 		case "underline":
 			return ["<u>", "</u>"];
 		case "circle":
-			return ["**", "**"];
+			return insideHtml ? ["<strong>", "</strong>"] : ["**", "**"];
 		case "highlight": {
 			// The device sends its own RGB, so use it verbatim rather than
 			// rounding to a palette name (GP_E3_S16).
 			const css = rgb ?? HIGHLIGHT_CSS[colorName(color) ?? ""];
-			return css === undefined
-				? ["==", "=="]
-				: [`<mark style="background: ${css}">`, "</mark>"];
+			if (css !== undefined) return [`<mark style="background: ${css}">`, "</mark>"];
+			return insideHtml ? ["<mark>", "</mark>"] : ["==", "=="];
 		}
 		default:
 			return ["", ""];
@@ -279,13 +294,18 @@ function applySpans(
 	}
 
 	const edits: { at: number; text: string; rank: number }[] = [];
+	// Spans arrive outermost-kind first, so a wrapper's own choice is settled
+	// before the marks nested inside it have to make theirs.
+	const html: Range[] = [];
 	for (const span of splitAtOuterEdges(merged)) {
-		const [open, close] = wrapperFor(span.kind, span.color, span.rgb);
+		const insideHtml = html.some((outer) => outer.start <= span.start && span.end <= outer.end);
+		const [open, close] = wrapperFor(span.kind, span.color, span.rgb, insideHtml);
 		if (open === "") continue;
 		// A markdown delimiter has to touch the text it marks; an HTML tag can
 		// sit anywhere. Only the former needs the punctuation moved out.
 		const range = open.startsWith("<") ? span : tightenToWord(source, span);
 		if (range === null) continue;
+		if (open.startsWith("<")) html.push(range);
 		const depth = KIND_ORDER.indexOf(span.kind);
 		edits.push({ at: range.start, text: open, rank: depth });
 		edits.push({ at: range.end, text: close, rank: -depth });

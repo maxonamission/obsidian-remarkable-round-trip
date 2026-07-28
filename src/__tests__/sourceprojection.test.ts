@@ -130,6 +130,17 @@ describe("projectOntoSource", () => {
 		expect(out).not.toContain('~~"Precies');
 	});
 
+	it("switches a nested mark to HTML, because markdown does not parse inside a tag", () => {
+		// Beta 2026-07-28: <u>"~~Laten we …~~."</u> showed the tildes as text.
+		// The quotes were not the problem — the surrounding <u> was.
+		const out = project([
+			{ kind: "underline", page: 1, words: idsOf("Ze vertellen niet waarom mensen") },
+			{ kind: "strikethrough", page: 1, words: idsOf("vertellen niet") },
+		])?.markdown;
+		expect(out).toContain("<u>Ze <s>vertellen niet</s> waarom mensen</u>");
+		expect(out).not.toContain("~~");
+	});
+
 	it("skips a mark that covers nothing but punctuation", () => {
 		// There is no sensible markdown for striking a lone quote mark, and
 		// ~~"~~ would only leave litter in the text.
@@ -144,12 +155,13 @@ describe("projectOntoSource", () => {
 			[{ kind: "strikethrough", page: 1, words: idsOf("Neem die groeiende ledencijfers.") }],
 			[{ text: "ledencijfers. Ze vertellen niet", rgb: "#f29eff", page: 1 }],
 		)?.markdown;
-		// Every wrapper opens and closes on the same side of the highlight.
+		// Outside the highlight plain markdown; inside it HTML, because markdown
+		// is not parsed within an inline HTML tag.
 		expect(out).toContain("~~Neem die groeiende~~ ");
-		expect(out).toContain('<mark style="background: #f29eff">~~ledencijfers~~.');
+		expect(out).toContain('<mark style="background: #f29eff"><s>ledencijfers.</s>');
 		const [before, inside] = (out ?? "").split('<mark style="background: #f29eff">');
 		expect((before.match(/~~/g) ?? []).length % 2).toBe(0);
-		expect((inside.split("</mark>")[0].match(/~~/g) ?? []).length % 2).toBe(0);
+		expect(inside.split("</mark>")[0]).not.toContain("~~");
 	});
 
 	it("quotes the lines a margin bar ran alongside", () => {
