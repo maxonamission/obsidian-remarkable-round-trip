@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.2] - 2026-07-28
+
+### Changed
+
+- **The plugin is live in the community directory** — the README now points
+  there for installation instead of BRAT, and the beta note reflects it.
+
 ## [0.26.1] - 2026-07-28
 
 ### Changed

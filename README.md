@@ -22,16 +22,16 @@ was about, with your objection sitting underneath.
 
 Markdown you can search, link and edit. Not a photo of a page.
 
-> **Beta.** In active development and not yet in the community plugin
-> registry. It is used daily on a real device, and rough edges get fixed fast —
-> please report what you hit.
+> **Early days.** Fresh in the community plugin directory and under active
+> development. It is used daily on a real device, and rough edges get fixed
+> fast — please report what you hit.
 
 ## Start here
 
-**1. Install.** Add the community plugin
-[BRAT](https://obsidian.md/plugins?id=obsidian42-brat), then *Add beta plugin*
-→ `maxonamission/obsidian-remarkable-round-trip`, and enable **reMarkable
-Round-Trip** in *Settings → Community plugins*.
+**1. Install.** *Settings → Community plugins → Browse*, search for
+**reMarkable Round-Trip** — or use
+[this direct link](https://obsidian.md/plugins?id=remarkable-round-trip) —
+install and enable.
 
 **2. Pair.** Get a one-time code at
 [my.remarkable.com/device/browser/connect](https://my.remarkable.com/device/browser/connect),

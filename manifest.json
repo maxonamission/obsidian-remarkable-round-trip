@@ -1,7 +1,7 @@
 {
 	"id": "remarkable-round-trip",
 	"name": "reMarkable Round-Trip",
-	"version": "0.26.1",
+	"version": "0.26.2",
 	"minAppVersion": "1.7.2",
 	"description": "Write in your vault, review on reMarkable, and get your remarks back in the note they came from — as markdown you can actually edit and refine.",
 	"author": "Max Kloosterman",
