@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.27.0] - 2026-07-28
+
+### Changed
+
+- **License: MIT → GPL-3.0-or-later.** Copyleft keeps derivatives open — in
+  particular of the `.rm` stroke reader, which did not exist in JavaScript
+  before this plugin — and matches the author's other projects. Versions up
+  to and including 0.26.2 were released under MIT and remain so; nothing
+  changes for plugin *users*, only for anyone redistributing modified copies
+  of the code.
+
 ## [0.26.2] - 2026-07-28
 
 ### Changed

@@ -182,4 +182,8 @@ credential the plugin holds.
 
 ## License
 
-MIT
+GPL-3.0-or-later — Copyright (C) 2026 Max Kloosterman.
+
+Versions up to and including 0.26.2 were released under MIT and remain so;
+from 0.27.0 the plugin is GPL, so that derivatives — in particular of the
+`.rm` stroke reader, which did not exist in JavaScript before — stay open.
