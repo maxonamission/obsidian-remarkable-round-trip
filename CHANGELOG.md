@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.32.0] - 2026-08-13
+
+### Changed
+
+- **Obsidian 1.13 is now the minimum version.** The plugin shipped two
+  renderings of its settings screen since 0.24.0 — the modern declarative
+  one and a fallback for older Obsidian versions. With 1.13 now the stable
+  public release, the fallback is deleted: the community scan's six
+  deprecation notices are gone, the Unpair button uses the proper
+  destructive styling, and pairing state updates through the 1.13 API. If
+  your Obsidian is older than 1.13, you keep the current plugin version and
+  receive updates again after updating the app. Nothing else changes — the
+  two remaining scan notices (vault file listing, clipboard) are capability
+  disclosures for features the README explains, not issues.
+
+
 ## [0.31.0] - 2026-08-12
 
 ### Added

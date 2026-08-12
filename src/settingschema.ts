@@ -1,15 +1,11 @@
 /**
  * What the settings screen contains, as data (GP_E4_S3).
  *
- * Obsidian 1.13 introduced a declarative settings API, which is what makes a
- * plugin's settings turn up in the settings *search*. The imperative
- * `display()` is what every earlier version understands — and the owner is on
- * 1.12.7, so dropping it is not an option.
- *
- * Implementing both by hand would mean two descriptions of the same screen,
- * drifting apart at the first change. So the screen is described once, here,
- * in plain data: `settings.ts` renders it the old way and hands the same
- * declaration to the new API.
+ * Obsidian 1.13's declarative settings API renders this and indexes it for
+ * the settings search. The screen-as-data survived the deletion of the
+ * pre-1.13 imperative renderer (GP_E5_S8, minAppVersion 1.13.0): one
+ * description remains the single source for rendering, search and the
+ * schema tests.
  *
  * Deliberately free of any Obsidian import, so the description stays testable
  * and cannot pick up a dependency on the renderer it feeds.

@@ -1,18 +1,17 @@
 /**
  * The settings tab (PRD F1, F7, F9-basis).
  *
- * Two renderings of one description: `getSettingDefinitions()` for Obsidian
- * 1.13+, which is what puts these settings in the settings search, and
- * `display()` for everything before it. Both walk `settingschema.ts`, so a
- * new setting appears in both without anyone remembering to do it twice
- * (GP_E4_S3).
+ * One declarative description: `getSettingDefinitions()` walks
+ * `settingschema.ts`, which is also what puts these settings in the settings
+ * search (GP_E4_S3). The imperative `display()` fallback for pre-1.13
+ * versions was deleted when minAppVersion moved to 1.13.0 (GP_E5_S8) — its
+ * deprecation warnings were kept standing as exactly this deletion list.
  */
 
 import {
 	App,
 	ButtonComponent,
 	PluginSettingTab,
-	Setting,
 	type SettingDefinition,
 	type SettingDefinitionItem,
 } from "obsidian";
@@ -55,11 +54,9 @@ export class RoundTripSettingTab extends PluginSettingTab {
 	}
 
 	/**
-	 * The declarative description (Obsidian 1.13+). Implementing this is what
-	 * makes these settings findable in the settings search; `display()` below
-	 * renders the same declaration for every earlier version, which is where
-	 * the owner is (1.12.7). One description, two renderers — see
-	 * `settingschema.ts` (GP_E4_S3).
+	 * The declarative description; implementing this is also what makes these
+	 * settings findable in the settings search (GP_E4_S3). See
+	 * `settingschema.ts` for the screen-as-data it walks.
 	 */
 	getSettingDefinitions(): SettingDefinitionItem[] {
 		const groups: SettingDefinitionItem[] = [
@@ -93,12 +90,9 @@ export class RoundTripSettingTab extends PluginSettingTab {
 						desc: "Forget the stored device token.",
 						visible: () => this.paired,
 						action: (el) => {
-							// setWarning, not setDestructive: the latter needs 1.13 and
-							// minAppVersion is 1.7.2, so the project's lint rules
-							// (rightly) forbid it. setWarning still works there.
 							new ButtonComponent(el)
 								.setButtonText("Unpair")
-								.setWarning()
+								.setDestructive()
 								.onClick(() => void this.unpair());
 						},
 					},
@@ -190,124 +184,6 @@ export class RoundTripSettingTab extends PluginSettingTab {
 			: "Not paired. Get a one-time code at my.remarkable.com/device/browser/connect.";
 	}
 
-	/**
-	 * The imperative rendering, for Obsidian below 1.13. It walks the same
-	 * declaration, so a setting added to the schema turns up in both without
-	 * anyone remembering to do it twice.
-	 *
-	 * Everything in here is deprecated as of 1.13 — that is the point: this is
-	 * the path for versions that have nothing newer. Those deprecation
-	 * warnings are left standing rather than silenced: they are true, and the
-	 * day minAppVersion moves to 1.13 they are the list of what to delete.
-	 */
-	display(): void {
-		const { containerEl } = this;
-		containerEl.empty();
-
-		new Setting(containerEl).setName("Connection").setHeading();
-		new Setting(containerEl).setName("Status").setDesc(this.pairingStatus());
-
-		if (!this.paired) {
-			new Setting(containerEl)
-				.setName("Pair with one-time code")
-				.setDesc("Enter the 8-letter code, then select Pair.")
-				.addText((text) =>
-					text.setPlaceholder("abcdefgh").onChange((value) => {
-						this.pairingCode = value;
-					}),
-				)
-				.addButton((button) =>
-					button
-						.setButtonText("Pair")
-						.setCta()
-						.onClick(() => void this.pair()),
-				);
-		} else {
-			new Setting(containerEl)
-				.setName("Unpair")
-				.setDesc("Forget the stored device token.")
-				.addButton((button) =>
-					// setWarning, not setDestructive: the latter arrived in 1.13 and
-					// minAppVersion is 1.7.2. This branch only runs below 1.13.
-					button
-						.setButtonText("Unpair")
-						.setWarning()
-						.onClick(() => void this.unpair()),
-				);
-		}
-
-		SETTING_SECTIONS.forEach((section, index) => {
-			// The connection heading is already up, with the pairing controls
-			// under it; its schema settings continue in the same section.
-			if (index > 0) new Setting(containerEl).setName(section.heading).setHeading();
-			if (section.note !== undefined) new Setting(containerEl).setDesc(section.note);
-			for (const spec of section.items) {
-				if (!isVisible(spec, this.plugin.settings)) continue;
-				this.renderSetting(containerEl, spec);
-			}
-		});
-	}
-
-	/** One schema entry, rendered with the pre-1.13 builder. */
-	private renderSetting(containerEl: HTMLElement, spec: SettingSpec): void {
-		const setting = new Setting(containerEl).setName(spec.name).setDesc(spec.desc);
-		const commit = async (value: unknown): Promise<void> => {
-			this.plugin.settings = writeSetting(this.plugin.settings, spec.key, value);
-			await this.plugin.saveSettings();
-			if (spec.refresh === true) this.display();
-		};
-		const current = readSetting(this.plugin.settings, spec.key);
-
-		switch (spec.control.type) {
-			case "toggle":
-				setting.addToggle((toggle) =>
-					toggle.setValue(current === true).onChange((value) => void commit(value)),
-				);
-				return;
-			case "dropdown": {
-				const options = spec.control.options;
-				setting.addDropdown((dropdown) => {
-					for (const [value, label] of Object.entries(options)) {
-						dropdown.addOption(value, label);
-					}
-					dropdown.setValue(String(current)).onChange((value) => void commit(value));
-				});
-				return;
-			}
-			case "slider": {
-				const { min, max, step } = spec.control;
-				setting.addSlider((slider) =>
-					slider
-						.setLimits(min, max, step)
-						.setValue(Number(current))
-						// setDynamicTooltip is deprecated in 1.13, where this renderer
-						// no longer runs; below it the value is not shown otherwise.
-						.setDynamicTooltip()
-						.onChange((value) => void commit(value)),
-				);
-				return;
-			}
-			default: {
-				const { placeholder, sanitise: mode } = spec.control;
-				setting.addText((text) =>
-					text
-						.setPlaceholder(placeholder ?? "")
-						.setValue(typeof current === "string" ? current : "")
-						.onChange((value) => {
-							if (mode === "url") {
-								const problem = checkEndpoint(value);
-								if (problem !== undefined) {
-									notify(problem);
-									return;
-								}
-							}
-							void commit(sanitise(spec.key, value));
-						}),
-				);
-			}
-		}
-	}
-
 	private async pair(): Promise<void> {
 		try {
 			const client = this.plugin.createClient();
@@ -315,7 +191,9 @@ export class RoundTripSettingTab extends PluginSettingTab {
 			this.plugin.settings.deviceToken = registration.deviceToken;
 			await this.plugin.saveSettings();
 			notify("Paired with your reMarkable account.");
-			this.display();
+			// The pairing state changes both the Status text and which
+			// controls exist — structural, so rebuild the definitions.
+			this.update();
 		} catch (error) {
 			notify(
 				error instanceof TransportError
@@ -329,6 +207,6 @@ export class RoundTripSettingTab extends PluginSettingTab {
 		this.plugin.settings.deviceToken = "";
 		await this.plugin.saveSettings();
 		notify("Device token removed.");
-		this.display();
+		this.update();
 	}
 }
