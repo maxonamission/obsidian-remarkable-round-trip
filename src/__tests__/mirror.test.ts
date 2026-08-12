@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GenerationError } from "rmapi-js";
 import {
 	MirrorApi,
 	MirrorEntry,
@@ -140,6 +141,31 @@ describe("generation conflicts", () => {
 		expect(isGenerationConflict(new Error("precondition failed"))).toBe(true);
 		expect(isGenerationConflict(new Error("Failed to upload root schema"))).toBe(true);
 		expect(isGenerationConflict(new Error("gewoon kapot"))).toBe(false);
+	});
+
+	it("recognises rmapi-js' real GenerationError (GP_E5_S1)", () => {
+		// The real class never assigns `this.name`, so at runtime it carries
+		// name === "Error" — the guise the field failure arrived in. Guard both
+		// the instanceof path and the message fallback for re-wrapped errors.
+		const real = new GenerationError();
+		expect(real.name).toBe("Error");
+		expect(isGenerationConflict(real)).toBe(true);
+		expect(
+			isGenerationConflict(new Error("root generation was stale; try put again")),
+		).toBe(true);
+	});
+
+	it("retries the real GenerationError and reports it as busy-sync", async () => {
+		let calls = 0;
+		const result = await withGenerationRetry(() => {
+			calls++;
+			return calls < 2 ? Promise.reject(new GenerationError()) : Promise.resolve("ok");
+		}, NO_WAIT);
+		expect(result).toBe("ok");
+		expect(calls).toBe(2);
+		const reported = toTransportError(new GenerationError());
+		expect(reported.message).toContain("busy syncing");
+		expect(reported.message).not.toContain("Folder mirroring failed");
 	});
 
 	it("retries with a refreshed view and succeeds", async () => {

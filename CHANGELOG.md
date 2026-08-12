@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.27.1] - 2026-08-12
+
+### Fixed
+
+- **"Folder mirroring failed (root generation was stale; try put again)" now
+  retries instead of failing.** When the tablet (or another client) was
+  syncing at the same moment a note was sent, the cloud refused the write.
+  The retry machinery existed for exactly this case but never engaged: the
+  error class rmapi-js throws carries the generic `Error` name at runtime,
+  so it slipped past our detection. It is now recognised directly, the send
+  retries up to four times against a refreshed view of the device tree, and
+  if the cloud stays busy the message says so — wait for the tablet to
+  finish syncing and send again — instead of suggesting you disable folder
+  mirroring. Retries also leave a console trail so reports can show whether
+  they engaged.
+- Development-toolchain dependencies patched (`npm audit` clean); the
+  shipped bundle is unchanged by this.
+
 ## [0.27.0] - 2026-07-28
 
 ### Changed

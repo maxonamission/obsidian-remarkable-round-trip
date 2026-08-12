@@ -6,6 +6,8 @@
  * rmapi-js instance satisfies it at the edge.
  */
 
+import { GenerationError } from "rmapi-js";
+
 import { TransportError } from "./http";
 import { adviseFailure, classifyFailure } from "./failure";
 import type { UploadResult } from "./cloud";
@@ -40,12 +42,19 @@ export interface MirrorApi {
  * refresh your view of the tree and try again (GP_E3_S4).
  */
 export function isGenerationConflict(error: unknown): boolean {
+	// The class check is the reliable signal. `error.name` is NOT: rmapi-js
+	// never assigns `this.name`, so at runtime its GenerationError carries
+	// name === "Error" (GP_E5_S1 — the name check below only catches wrappers
+	// that set it deliberately).
+	if (error instanceof GenerationError) return true;
 	const name = error instanceof Error ? error.name : "";
 	const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
 	return (
-		// rmapi-js' own signal is the reliable one; the strings cover the same
-		// condition reaching us as a plain server message.
 		name === "GenerationError" ||
+		// The strings cover the same condition reaching us as a plain server
+		// message or re-wrapped error; "generation was stale" is the message
+		// of rmapi-js' GenerationError itself.
+		message.includes("generation was stale") ||
 		message.includes("precondition failed") ||
 		message.includes("root schema") ||
 		message.includes("generation mismatch") ||
@@ -80,6 +89,11 @@ export async function withGenerationRetry<T>(
 		} catch (error) {
 			lastError = error;
 			if (attempt === attempts || !isGenerationConflict(error)) throw error;
+			// Field diagnosability (GP_E5_S1): a console trail shows whether the
+			// retry machinery engaged at all when a user reports a failure.
+			console.warn(
+				`reMarkable Round-Trip: cloud tree changed underneath us (generation conflict); retrying ${attempt + 1}/${attempts}`,
+			);
 			await sleep(backoffMs(attempt));
 		}
 	}
