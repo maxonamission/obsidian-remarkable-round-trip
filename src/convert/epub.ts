@@ -12,7 +12,7 @@
  */
 
 import { zipStore } from "./zip";
-import type { Block, ListItem } from "./mdblocks";
+import { dropLeadingTitleHeading, type Block, type ListItem } from "./mdblocks";
 
 export interface EpubMetadata {
 	title: string;
@@ -196,7 +196,10 @@ const CONTAINER_XML = `<?xml version="1.0" encoding="UTF-8"?>
 
 /** Render blocks to EPUB 3 bytes. */
 export async function renderEpub(blocks: Block[], meta: EpubMetadata): Promise<Uint8Array> {
-	const { xhtml, toc } = renderBody(blocks);
+	// The content document opens with an <h1> of the title; a first H1 in the
+	// note saying the same thing showed twice (GP_E6_S6). EPUB reflows and
+	// anchors nothing, so no typo-versioning is needed here.
+	const { xhtml, toc } = renderBody(dropLeadingTitleHeading(blocks, meta.title));
 	// `mimetype` must come first and be stored uncompressed; every entry here
 	// is stored, so that requirement is met by ordering alone.
 	return zipStore([

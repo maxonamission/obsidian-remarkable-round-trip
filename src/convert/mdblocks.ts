@@ -175,3 +175,22 @@ export function parseBlocks(markdown: string): Block[] {
 	flushAll();
 	return blocks;
 }
+
+/**
+ * Drop a leading `# heading` that merely repeats the document title
+ * (GP_E6_S6): the typesetter draws the title itself, so a note whose first
+ * line is an H1 identical to its file name showed the same words twice.
+ * Case- and whitespace-insensitive; anything else stays untouched.
+ */
+export function dropLeadingTitleHeading(blocks: Block[], title: string): Block[] {
+	const first = blocks[0];
+	if (
+		first !== undefined &&
+		first.type === "heading" &&
+		first.level === 1 &&
+		first.text.trim().toLowerCase() === title.trim().toLowerCase()
+	) {
+		return blocks.slice(1);
+	}
+	return blocks;
+}

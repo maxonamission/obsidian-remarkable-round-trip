@@ -13,7 +13,7 @@
  */
 
 import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from "pdf-lib";
-import type { Block, ListItem } from "./mdblocks";
+import { dropLeadingTitleHeading, type Block, type ListItem } from "./mdblocks";
 
 /**
  * Typography behaviour version (GP_E5_S4–S7). Recorded per upload alongside
@@ -24,11 +24,11 @@ import type { Block, ListItem } from "./mdblocks";
  * (the GP_E3_S15 lesson). Version 1 = pre-0.29 behaviour; version 2 =
  * 0.29.0 (word breaking without float tolerance); version 3 = 0.29.1-0.30.0
  * (float tolerance, label rows); version 4 = 0.31.0 (keep tables together,
- * keep headings with their content); version 5 = current (fill-in rows at
- * 2.0 line steps instead of 2.4 — owner feedback: the roomier rows pushed
- * whole tables away from their text).
+ * keep headings with their content); version 5 = 0.32.1 (fill-in rows at
+ * 2.0 line steps instead of 2.4); version 6 = current (a leading H1 that
+ * repeats the document title is dropped — it showed twice).
  */
-export const TYPO_VERSION = 5;
+export const TYPO_VERSION = 6;
 
 export interface PdfLayoutOptions {
 	/** Base body font size in points. */
@@ -752,6 +752,11 @@ export async function renderPdf(
 	drawHeading(ts, 0, meta.title);
 	ts.y -= 4;
 
+	// The title just went up; a first H1 saying the same thing again is
+	// duplication, not content (GP_E6_S6, typo 6 — earlier uploads replay
+	// the duplicate so their anchors hold).
+	const content = ts.opts.typo >= 6 ? dropLeadingTitleHeading(blocks, meta.title) : blocks;
+
 	// A pagebreak is honoured lazily, before the next drawn block: a marker
 	// at the very end (or on an already-fresh page) never leaves a blank
 	// page behind (GP_E6_S1). Headings up to opts.breakAtHeading get the
@@ -759,7 +764,7 @@ export async function renderPdf(
 	// otherwise leave the title alone on a near-empty page.
 	let pendingBreak = false;
 	let drewContent = false;
-	for (const block of blocks) {
+	for (const block of content) {
 		if (block.type === "pagebreak") {
 			pendingBreak = true;
 			continue;

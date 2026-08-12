@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.32.2] - 2026-08-13
+
+### Improved
+
+- **A note that opens with a heading repeating its own file name no longer
+  shows that title twice.** The typeset page already carries the title; a
+  first `# heading` saying the same thing (any casing) is now skipped, in
+  PDF and EPUB alike. Notes whose first heading says something else are
+  untouched, and documents sent earlier replay the duplicate on import so
+  their annotations stay anchored.
+
+
 ## [0.32.1] - 2026-08-13
 
 ### Improved

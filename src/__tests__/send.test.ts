@@ -98,7 +98,7 @@ describe("sendNote output format", () => {
 			fontSize: 13,
 			lineHeight: 1.5,
 			margin: 40,
-			typo: 5,
+			typo: 6,
 			breakAtHeading: 0,
 			// The page size rides along too (GP_E6_S2): reproducing the layout
 			// later must not depend on which device model is selected then.

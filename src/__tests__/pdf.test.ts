@@ -265,6 +265,19 @@ describe("renderPdf", () => {
 		expect(legacyPages.size).toBeGreaterThan(1);
 	});
 
+	it("draws a title-repeating first H1 only once (GP_E6_S6)", async () => {
+		const md = "# Testnotitie\n\ntekst";
+		const modern = await renderPdf(parseBlocks(md), META, {});
+		const titled = modern.layout.lines.filter((l) => l.text.includes("Testnotitie"));
+		expect(titled).toHaveLength(1);
+		expect(titled[0].role).toBe("title");
+		// Earlier uploads replay the duplicate, so their anchors hold.
+		const legacy = await renderPdf(parseBlocks(md), META, { typo: 5 });
+		expect(
+			legacy.layout.lines.filter((l) => l.text.includes("Testnotitie")),
+		).toHaveLength(2);
+	});
+
 	it("sizes the page to the chosen device screen (GP_E6_S2)", async () => {
 		const { layout } = await renderPdf(
 			parseBlocks("Een alinea voor de Paper Pro."),

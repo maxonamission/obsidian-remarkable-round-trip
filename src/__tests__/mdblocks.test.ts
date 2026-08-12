@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBlocks, stripInline } from "../convert/mdblocks";
+import { dropLeadingTitleHeading, parseBlocks, stripInline } from "../convert/mdblocks";
 
 describe("stripInline", () => {
 	it("strips bold, italic, highlight, strike, code and links", () => {
@@ -74,5 +74,26 @@ describe("pagebreak marker (GP_E6_S1)", () => {
 	it("leaves \\pagebreak inside a sentence alone", () => {
 		const blocks = parseBlocks("dit is geen \\pagebreak marker");
 		expect(blocks).toEqual([{ type: "paragraph", text: "dit is geen \\pagebreak marker" }]);
+	});
+});
+
+describe("dropLeadingTitleHeading (GP_E6_S6)", () => {
+	it("drops a first H1 that repeats the title, whatever the case or spacing", () => {
+		const blocks = parseBlocks("# 90-90 Heuprotatie \n\ntekst");
+		expect(dropLeadingTitleHeading(blocks, "90-90 heuprotatie")).toEqual([
+			{ type: "paragraph", text: "tekst" },
+		]);
+	});
+
+	it("keeps a first H1 that says something else", () => {
+		const blocks = parseBlocks("# Inleiding\n\ntekst");
+		expect(dropLeadingTitleHeading(blocks, "90-90 heuprotatie")).toEqual(blocks);
+	});
+
+	it("keeps an H2 and a non-leading H1 alone", () => {
+		const sub = parseBlocks("## 90-90 heuprotatie\n\ntekst");
+		expect(dropLeadingTitleHeading(sub, "90-90 heuprotatie")).toEqual(sub);
+		const later = parseBlocks("tekst\n\n# 90-90 heuprotatie");
+		expect(dropLeadingTitleHeading(later, "90-90 heuprotatie")).toEqual(later);
 	});
 });
