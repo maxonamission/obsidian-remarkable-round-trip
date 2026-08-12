@@ -12,7 +12,7 @@
  * word — and inserting into the note keeps every last bit of its formatting.
  */
 
-import { PdfLayout, toWinAnsi } from "../convert/pdf";
+import { PdfLayout, TYPO_VERSION, toWinAnsi } from "../convert/pdf";
 import { Highlight, colorName, rgbName } from "./highlights";
 import { DEFAULT_MARK_STYLES, MarkStyle, MarkStyles } from "./markstyles";
 import type { ImportedMark } from "./pull";
@@ -111,13 +111,15 @@ interface Range {
  * sit anywhere inside or before it — `**Grote** financiële` still contains the
  * word "Grote". Returns the end offset, or null when this position is not it.
  */
-function matchAt(source: string, from: number, word: string): number | null {
+function matchAt(source: string, from: number, word: string, typo: number): number | null {
 	let at = from;
 	let taken = 0;
 	while (taken < word.length) {
 		if (at >= source.length) return null;
 		const ch = source[at];
-		const mapped = toWinAnsi(ch);
+		// Map exactly as the layout was typeset: a legacy layout carries
+		// "--" where the source has an em dash (GP_E5_S7).
+		const mapped = toWinAnsi(ch, typo);
 		if (mapped !== "" && word.startsWith(mapped, taken)) {
 			taken += mapped.length;
 			at++;
@@ -145,11 +147,17 @@ function matchAt(source: string, from: number, word: string): number | null {
 const WINDOW = 200;
 
 /** Where a word sits in the source, searching forward from `from`. */
-function findWord(source: string, from: number, word: string, window = WINDOW): Range | null {
+function findWord(
+	source: string,
+	from: number,
+	word: string,
+	typo: number,
+	window = WINDOW,
+): Range | null {
 	const limit = Math.min(source.length, from + window);
 	for (let at = from; at < limit; at++) {
 		if (SYNTAX.has(source[at])) continue;
-		const end = matchAt(source, at, word);
+		const end = matchAt(source, at, word, typo);
 		if (end !== null) return { start: at, end };
 	}
 	return null;
@@ -162,13 +170,13 @@ function findWord(source: string, from: number, word: string, window = WINDOW): 
  * first word that starts a run of three consecutive matches near the top of
  * the note — that is where the two texts genuinely meet.
  */
-function syncPoint(source: string, words: { text: string }[]): number {
+function syncPoint(source: string, words: { text: string }[], typo: number): number {
 	const head = Math.min(words.length, 60);
 	for (let index = 0; index < head; index++) {
 		let cursor = 0;
 		let run = 0;
 		for (let step = 0; step < 3 && index + step < words.length; step++) {
-			const hit = findWord(source, cursor, words[index + step].text, cursor === 0 ? 400 : 40);
+			const hit = findWord(source, cursor, words[index + step].text, typo, cursor === 0 ? 400 : 40);
 			if (hit === null) break;
 			cursor = hit.end;
 			run++;
@@ -210,11 +218,12 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 	// the note does not carry, an inlined embed) costs its own mark, and the
 	// cursor stays put so the next word can still line up.
 	const ranges = new Map<number, Range>();
-	const start = syncPoint(input.source, words);
+	const typo = input.layout.typo ?? TYPO_VERSION;
+	const start = syncPoint(input.source, words, typo);
 	let cursor = 0;
 	let found = 0;
 	for (const word of words.slice(start)) {
-		const hit = findWord(input.source, cursor, word.text);
+		const hit = findWord(input.source, cursor, word.text, typo);
 		if (hit === null) continue;
 		ranges.set(word.id, hit);
 		cursor = hit.end;

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.29.0] - 2026-08-12
+
+### Improved
+
+- **Narrow table columns no longer collide.** A word wider than its column
+  used to be drawn as-is and run into the neighbouring column — on a
+  many-column table the headers merged into one unreadable string. Words now
+  hard-break mid-word to fit the column, in tables and everywhere else (long
+  URLs included).
+- **Empty table rows become writing rows.** A table row with nothing in it is
+  a fill-in row — a training log, a checklist, a form. It now gets real
+  writing height and a faint rule to write on, instead of a one-line sliver
+  no pen fits in.
+- **Checkboxes are drawn, not spelled.** A `- [ ]` task renders as a real
+  square you can tick on the tablet; `- [x]` comes with its check mark drawn
+  in.
+- **Real typography.** Em and en dashes, curly quotes, ellipses and bullets
+  now reach the page as themselves instead of ASCII stand-ins (`--`, `...`);
+  block quotes get a drawn quote bar instead of a `|` character.
+- All of this only applies to documents sent from 0.29.0 on. Each upload now
+  records the typesetting behaviour it was laid out with, so annotations on
+  documents sent earlier still come back in exactly the right place.
+
 ## [0.28.0] - 2026-08-12
 
 ### Added

@@ -15,6 +15,16 @@
 import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from "pdf-lib";
 import type { Block, ListItem } from "./mdblocks";
 
+/**
+ * Typography behaviour version (GP_E5_S4–S7). Recorded per upload alongside
+ * the font numbers: an import reproduces the layout of a sent document by
+ * typesetting it again, so behaviour changes (word breaking, WinAnsi
+ * typography, fill-in rows, checkboxes) must replay per document — otherwise
+ * every improvement shifts the anchors of previously sent documents
+ * (the GP_E3_S15 lesson). Version 1 = pre-0.29 behaviour.
+ */
+export const TYPO_VERSION = 2;
+
 export interface PdfLayoutOptions {
 	/** Base body font size in points. */
 	fontSize?: number;
@@ -22,6 +32,8 @@ export interface PdfLayoutOptions {
 	lineHeight?: number;
 	/** Page margin in points. */
 	margin?: number;
+	/** Typography behaviour version; defaults to the current TYPO_VERSION. */
+	typo?: number;
 }
 
 export interface PdfMetadata {
@@ -78,6 +90,8 @@ export interface PdfLayout {
 	pageHeight: number;
 	pageCount: number;
 	lines: LaidOutLine[];
+	/** Typography behaviour version this layout was produced with. */
+	typo?: number;
 }
 
 // reMarkable 2 screen in PDF points (1404×1872 px at 226 DPI).
@@ -88,6 +102,7 @@ const DEFAULTS: Required<PdfLayoutOptions> = {
 	fontSize: 11,
 	lineHeight: 1.5,
 	margin: 40,
+	typo: TYPO_VERSION,
 };
 
 /**
@@ -118,32 +133,44 @@ const HEADING_SIZES: Record<number, number> = {
 	6: 11,
 };
 
-/** Replace characters WinAnsi cannot encode with a readable ASCII fallback. */
-export function toWinAnsi(text: string): string {
-	const replacements: Record<string, string> = {
-		"→": "->",
-		"←": "<-",
-		"↔": "<->",
-		"–": "-",
-		"—": "--",
-		"‘": "'",
-		"’": "'",
-		"“": '"',
-		"”": '"',
-		"…": "...",
-		" ": " ",
-		"•": "-",
-		"′": "'",
-		"″": '"',
-		"≤": "<=",
-		"≥": ">=",
-		"≠": "!=",
-		"≈": "~",
-	};
+/**
+ * Replace characters WinAnsi cannot encode with a readable ASCII fallback.
+ * Dashes, curly quotes, ellipsis and bullet ARE WinAnsi (0x85–0x97) and pass
+ * through untouched since GP_E5_S7 — the earlier blanket ASCII-fallback
+ * turned every em dash into "--" on the page.
+ */
+const REPLACEMENTS: Record<string, string> = {
+	"→": "->",
+	"←": "<-",
+	"↔": "<->",
+	"\u00a0": " ",
+	"′": "'",
+	"″": '"',
+	"≤": "<=",
+	"≥": ">=",
+	"≠": "!=",
+	"≈": "~",
+};
+
+/** The pre-0.29 blanket fallbacks, replayed for typo-version-1 documents. */
+const LEGACY_REPLACEMENTS: Record<string, string> = {
+	"–": "-",
+	"—": "--",
+	"‘": "'",
+	"’": "'",
+	"“": '"',
+	"”": '"',
+	"…": "...",
+	"•": "-",
+};
+
+export function toWinAnsi(text: string, typo: number = TYPO_VERSION): string {
 	let out = "";
 	for (const ch of text.normalize("NFC")) {
-		if (ch in replacements) {
-			out += replacements[ch];
+		if (typo < 2 && ch in LEGACY_REPLACEMENTS) {
+			out += LEGACY_REPLACEMENTS[ch];
+		} else if (ch in REPLACEMENTS) {
+			out += REPLACEMENTS[ch];
 		} else if (ch.charCodeAt(0) <= 0xff || isWinAnsiExtra(ch)) {
 			out += ch;
 		} else {
@@ -154,8 +181,10 @@ export function toWinAnsi(text: string): string {
 }
 
 function isWinAnsiExtra(ch: string): boolean {
-	// Printable WinAnsi characters above U+00FF (Euro, dashes, quotes, etc.).
-	return "€ŠšŽžŒœŸƒˆ˜†‡‰‹›™".includes(ch);
+	// Printable WinAnsi characters above U+00FF: Euro, ligatures, marks — and
+	// since GP_E5_S7 the typography that used to be ASCII-fallbacked: en/em
+	// dash, curly quotes, ellipsis, bullet.
+	return "€ŠšŽžŒœŸƒˆ˜†‡‰‹›™–—‘’“”…•".includes(ch);
 }
 
 interface Typesetter {
@@ -252,12 +281,35 @@ function ensureRoom(ts: Typesetter, needed: number): void {
 	if (ts.y - needed < ts.opts.margin) newPage(ts);
 }
 
-/** Greedy word-wrap for the given font/size and maximum line width. */
+/** Split a single word wider than the line into chunks that fit (GP_E5_S4). */
+function breakLongWord(word: string, font: PDFFont, size: number, maxWidth: number): string[] {
+	const parts: string[] = [];
+	let current = "";
+	for (const ch of word) {
+		const candidate = current + ch;
+		if (font.widthOfTextAtSize(candidate, size) <= maxWidth || current === "") {
+			current = candidate;
+		} else {
+			parts.push(current);
+			current = ch;
+		}
+	}
+	parts.push(current);
+	return parts;
+}
+
+/**
+ * Greedy word-wrap for the given font/size and maximum line width. A word
+ * wider than the line is hard-broken mid-word (GP_E5_S4): before, it was
+ * drawn as-is and overflowed — in a narrow table column that meant colliding
+ * with the neighbouring column's text.
+ */
 export function wrapText(
 	text: string,
 	font: PDFFont,
 	size: number,
 	maxWidth: number,
+	typo: number = TYPO_VERSION,
 ): string[] {
 	const words = text.split(/\s+/).filter((w) => w !== "");
 	if (words.length === 0) return [];
@@ -265,7 +317,23 @@ export function wrapText(
 	let current = "";
 	for (const word of words) {
 		const candidate = current === "" ? word : `${current} ${word}`;
-		if (font.widthOfTextAtSize(candidate, size) <= maxWidth || current === "") {
+		if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+			current = candidate;
+			continue;
+		}
+		// The candidate overflows: only now is the word's own width worth
+		// measuring (the fitting case above stays a single measurement).
+		if (typo >= 2 && font.widthOfTextAtSize(word, size) > maxWidth) {
+			if (current !== "") {
+				lines.push(current);
+			}
+			const parts = breakLongWord(word, font, size, maxWidth);
+			lines.push(...parts.slice(0, -1));
+			current = parts[parts.length - 1];
+			continue;
+		}
+		if (current === "") {
+			// Version 1: a single word wider than the line overflows as-is.
 			current = candidate;
 		} else {
 			lines.push(current);
@@ -303,13 +371,19 @@ function drawHeading(ts: Typesetter, level: number, text: string): void {
 	const gapBefore = size * 0.8;
 	ensureRoom(ts, gapBefore + size * ts.opts.lineHeight);
 	ts.y -= gapBefore;
-	const lines = wrapText(toWinAnsi(text), ts.bold, size, contentWidth(ts));
+	const lines = wrapText(toWinAnsi(text, ts.opts.typo), ts.bold, size, contentWidth(ts), ts.opts.typo);
 	drawLines(ts, lines, ts.bold, size, 0, size * 0.35);
 }
 
 function drawParagraph(ts: Typesetter, text: string): void {
 	beginBlock(ts, "paragraph");
-	const lines = wrapText(toWinAnsi(text), ts.body, ts.opts.fontSize, contentWidth(ts));
+	const lines = wrapText(
+		toWinAnsi(text, ts.opts.typo),
+		ts.body,
+		ts.opts.fontSize,
+		contentWidth(ts),
+		ts.opts.typo,
+	);
 	drawLines(ts, lines, ts.body, ts.opts.fontSize, 0, ts.opts.fontSize * 0.6);
 }
 
@@ -327,17 +401,25 @@ function drawList(ts: Typesetter, items: ListItem[]): void {
 
 		const indent = 14 + item.depth * 14;
 		const bullet = item.ordered ? `${counters[item.depth]}.` : "-";
-		const lines = wrapText(toWinAnsi(item.text), ts.body, size, contentWidth(ts, indent));
+		// A task item renders a drawn checkbox instead of the literal "[ ]"
+		// (GP_E5_S6) — a square you can actually tick with the pen.
+		const task = ts.opts.typo >= 2 && !item.ordered ? parseTaskMarker(item.text) : null;
+		const text = task ? task.rest : item.text;
+		const lines = wrapText(toWinAnsi(text, ts.opts.typo), ts.body, size, contentWidth(ts, indent), ts.opts.typo);
 		const step = size * ts.opts.lineHeight;
 		ensureRoom(ts, step);
 		// Bullet on the first line, hanging indent for wrapped lines.
 		ts.y -= step;
-		ts.page.drawText(bullet, {
-			x: ts.opts.margin + indent - 12,
-			y: ts.y,
-			size,
-			font: ts.body,
-		});
+		if (task) {
+			drawCheckbox(ts, ts.opts.margin + indent - 12, ts.y, size, task.checked);
+		} else {
+			ts.page.drawText(bullet, {
+				x: ts.opts.margin + indent - 12,
+				y: ts.y,
+				size,
+				font: ts.body,
+			});
+		}
 		if (lines.length > 0) {
 			put(ts, lines[0], ts.opts.margin + indent, ts.y, size, ts.body);
 		}
@@ -350,21 +432,59 @@ function drawList(ts: Typesetter, items: ListItem[]): void {
 	ts.y -= size * 0.6;
 }
 
+/** Markdown task marker at the start of a list item: "[ ] …" or "[x] …". */
+export function parseTaskMarker(text: string): { checked: boolean; rest: string } | null {
+	const match = /^\[( |x|X)\]\s+(.*)$/.exec(text);
+	if (!match) return null;
+	return { checked: match[1] !== " ", rest: match[2] };
+}
+
+/** A drawn checkbox at the bullet position; ticked with a check for [x]. */
+function drawCheckbox(ts: Typesetter, x: number, y: number, size: number, checked: boolean): void {
+	const box = size * 0.75;
+	ts.page.drawRectangle({
+		x,
+		y: y - box * 0.08,
+		width: box,
+		height: box,
+		borderWidth: 0.8,
+		borderColor: rgb(0.25, 0.25, 0.25),
+	});
+	if (checked) {
+		const y0 = y - box * 0.08;
+		ts.page.drawLine({
+			start: { x: x + box * 0.2, y: y0 + box * 0.45 },
+			end: { x: x + box * 0.42, y: y0 + box * 0.2 },
+			thickness: 1,
+			color: rgb(0.25, 0.25, 0.25),
+		});
+		ts.page.drawLine({
+			start: { x: x + box * 0.42, y: y0 + box * 0.2 },
+			end: { x: x + box * 0.85, y: y0 + box * 0.8 },
+			thickness: 1,
+			color: rgb(0.25, 0.25, 0.25),
+		});
+	}
+}
+
 function drawQuote(ts: Typesetter, quoteLines: string[]): void {
 	beginBlock(ts, "quote");
 	const size = ts.opts.fontSize;
 	const indent = 14;
 	const text = quoteLines.join(" ").trim();
-	const lines = wrapText(toWinAnsi(text), ts.italic, size, contentWidth(ts, indent));
+	const lines = wrapText(toWinAnsi(text, ts.opts.typo), ts.italic, size, contentWidth(ts, indent), ts.opts.typo);
 	const step = size * ts.opts.lineHeight;
 	for (const line of lines) {
 		ensureRoom(ts, step);
 		ts.y -= step;
-		ts.page.drawText("|", {
-			x: ts.opts.margin + 2,
-			y: ts.y,
-			size,
-			font: ts.body,
+		// A drawn quote bar instead of a "|" glyph per line (GP_E5_S7); the
+		// per-line segments span the full line step, so consecutive lines
+		// join into one continuous bar.
+		ts.page.drawLine({
+			start: { x: ts.opts.margin + 3, y: ts.y - step * 0.15 },
+			end: { x: ts.opts.margin + 3, y: ts.y + step * 0.85 },
+			thickness: 1.5,
+			color: rgb(0.55, 0.55, 0.55),
 		});
 		put(ts, line, ts.opts.margin + indent, ts.y, size, ts.italic);
 	}
@@ -377,7 +497,7 @@ function drawCode(ts: Typesetter, codeLines: string[]): void {
 	const step = size * 1.3;
 	for (const raw of codeLines) {
 		// Hard-truncate: code is preformatted, wrapping would garble it.
-		let line = toWinAnsi(raw.replace(/\t/g, "  "));
+		let line = toWinAnsi(raw.replace(/\t/g, "  "), ts.opts.typo);
 		while (line.length > 0 && ts.mono.widthOfTextAtSize(line, size) > contentWidth(ts, 8)) {
 			line = line.slice(0, -1);
 		}
@@ -425,7 +545,7 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 		Math.max(
 			...rows.map((row, rowIndex) => {
 				const font = rowIndex === 0 ? ts.bold : ts.body;
-				const text = toWinAnsi(row[c] ?? "");
+				const text = toWinAnsi(row[c] ?? "", ts.opts.typo);
 				return text === "" ? 0 : font.widthOfTextAtSize(text, size) + pad;
 			}),
 		),
@@ -435,9 +555,26 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 
 	rows.forEach((row, rowIndex) => {
 		beginBlock(ts, "table", rowIndex);
+		// An all-empty body row is a fill-in row (GP_E5_S5): give it real
+		// writing height and a faint rule to write on — a one-line sliver is
+		// useless under a pen.
+		const isWritingRow =
+			ts.opts.typo >= 2 && rowIndex > 0 && row.every((cell) => (cell ?? "").trim() === "");
+		if (isWritingRow) {
+			const height = 2.4 * step;
+			ensureRoom(ts, height);
+			ts.y -= height;
+			ts.page.drawLine({
+				start: { x: ts.opts.margin, y: ts.y },
+				end: { x: ts.opts.margin + total, y: ts.y },
+				thickness: 0.4,
+				color: rgb(0.7, 0.7, 0.7),
+			});
+			return;
+		}
 		const font = rowIndex === 0 ? ts.bold : ts.body;
 		const cellLines = row.map((cell, c) =>
-			wrapText(toWinAnsi(cell), font, size, Math.max(widths[c] - pad, 24)),
+			wrapText(toWinAnsi(cell, ts.opts.typo), font, size, Math.max(widths[c] - pad, 24), ts.opts.typo),
 		);
 		const rowLines = Math.max(1, ...cellLines.map((lines) => lines.length));
 		// Keep the row on one page when it fits; taller-than-page rows fall
@@ -558,6 +695,9 @@ export async function renderPdf(
 			pageHeight: PAGE_HEIGHT,
 			pageCount: ts.pageIndex,
 			lines: ts.placed,
+			// The RESOLVED version (ts.opts, defaults filled in) — the raw
+			// option may be undefined and would misreport what was used.
+			typo: ts.opts.typo,
 		},
 	};
 }

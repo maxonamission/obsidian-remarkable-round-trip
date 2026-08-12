@@ -92,10 +92,13 @@ describe("sendNote output format", () => {
 		const { table } = await sendNote(NOTE, {}, deps);
 		// Defaults filled in: reproducing the layout later must not depend on
 		// what the settings happen to say then (GP_E3_S8).
+		// The typo version rides along (GP_E5_S4-S7): an import replays the
+		// typesetter behaviour this upload was laid out with.
 		expect(Object.values(table)[0].pdfLayout).toEqual({
 			fontSize: 13,
 			lineHeight: 1.5,
 			margin: 40,
+			typo: 2,
 		});
 	});
 

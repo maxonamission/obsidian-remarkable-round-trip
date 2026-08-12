@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import zlib from "node:zlib";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import { parseBlocks } from "../convert/mdblocks";
 import {
 	computeColumnWidths,
+	parseTaskMarker,
 	renderPdf,
 	toWinAnsi,
+	wrapText,
 	DOCID_SUBJECT_PREFIX,
 	PAGE_WIDTH,
 	PAGE_HEIGHT,
@@ -40,8 +42,14 @@ function inflateContentStreams(bytes: Uint8Array): string {
 }
 
 describe("toWinAnsi", () => {
-	it("maps common typographic characters to ASCII fallbacks", () => {
-		expect(toWinAnsi("a → b — 'x' … ≤5")).toBe("a -> b -- 'x' ... <=5");
+	it("keeps WinAnsi typography and falls back only for what WinAnsi lacks (GP_E5_S7)", () => {
+		expect(toWinAnsi("a → b — 'x' … ≤5")).toBe("a -> b — 'x' … <=5");
+		expect(toWinAnsi("‘q’ “r” – • s")).toBe("‘q’ “r” – • s");
+	});
+
+	it("replays the pre-0.29 ASCII fallbacks for typo-version-1 documents", () => {
+		expect(toWinAnsi("a → b — 'x' … ≤5", 1)).toBe("a -> b -- 'x' ... <=5");
+		expect(toWinAnsi("‘q’ “r” – • s", 1)).toBe("'q' \"r\" - - s");
 	});
 
 	it("keeps Latin-1 diacritics intact", () => {
@@ -70,6 +78,46 @@ describe("computeColumnWidths", () => {
 	it("falls back to an equal split in degenerate cases", () => {
 		const widths = computeColumnWidths([500, 500], 100);
 		expect(widths).toEqual([50, 50]);
+	});
+});
+
+describe("wrapText word breaking (GP_E5_S4)", () => {
+	it("hard-breaks a word wider than the line, losing nothing", async () => {
+		const doc = await PDFDocument.create();
+		const font = await doc.embedFont(StandardFonts.Helvetica);
+		const lines = wrapText("Achillespees", font, 10, 30);
+		expect(lines.length).toBeGreaterThan(1);
+		for (const line of lines) {
+			expect(font.widthOfTextAtSize(line, 10)).toBeLessThanOrEqual(30);
+		}
+		expect(lines.join("")).toBe("Achillespees");
+	});
+
+	it("replays the old overflow for typo-version-1 layouts", async () => {
+		const doc = await PDFDocument.create();
+		const font = await doc.embedFont(StandardFonts.Helvetica);
+		expect(wrapText("Achillespees", font, 10, 30, 1)).toEqual(["Achillespees"]);
+	});
+});
+
+describe("parseTaskMarker (GP_E5_S6)", () => {
+	it("recognises open and checked task markers", () => {
+		expect(parseTaskMarker("[ ] Warming-up")).toEqual({ checked: false, rest: "Warming-up" });
+		expect(parseTaskMarker("[x] Klaar")).toEqual({ checked: true, rest: "Klaar" });
+		expect(parseTaskMarker("[X] Klaar")).toEqual({ checked: true, rest: "Klaar" });
+	});
+
+	it("keeps the number on ordered task items instead of swallowing it", async () => {
+		const { bytes } = await renderPdf(parseBlocks("1. [ ] Taak\n2. [x] Klaar"), META, {});
+		const content = inflateContentStreams(bytes);
+		expect(content).toContain("1.");
+		expect(content).toContain("[ ] Taak");
+	});
+
+	it("leaves plain items and mid-text brackets alone", () => {
+		expect(parseTaskMarker("Warming-up [ ] later")).toBeNull();
+		expect(parseTaskMarker("[y] geen taak")).toBeNull();
+		expect(parseTaskMarker("gewone regel")).toBeNull();
 	});
 });
 
@@ -106,6 +154,20 @@ describe("renderPdf", () => {
 		const { bytes } = await renderPdf(parseBlocks(longText), META);
 		const doc = await PDFDocument.load(bytes);
 		expect(doc.getPageCount()).toBeGreaterThan(1);
+	});
+
+	it("gives all-empty table rows writing height, unlike typo version 1 (GP_E5_S5)", async () => {
+		const md = "| A | B |\n|---|---|\n| | |\n\nNa de tabel";
+		const blocks = parseBlocks(md);
+		const modern = await renderPdf(blocks, META, {});
+		const legacy = await renderPdf(blocks, META, { typo: 1 });
+		const after = (layoutLines: { text: string; y: number }[]) => {
+			const line = layoutLines.find((l) => l.text.includes("Na de tabel"));
+			if (!line) throw new Error("paragraph after table not laid out");
+			return line.y;
+		};
+		// More vertical space consumed by the fill-in row pushes what follows down.
+		expect(after(modern.layout.lines)).toBeLessThan(after(legacy.layout.lines));
 	});
 
 	it("renders a wide table without dropping cell content (wraps instead)", async () => {

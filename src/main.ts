@@ -713,7 +713,9 @@ export default class RoundTripPlugin extends Plugin {
 		const { layout } = await renderPdf(
 			parseBlocks(pre.markdown),
 			{ title: file.basename, docId: entry.docId },
-			typography,
+			// Documents sent before 0.29.0 carry no typo version: replay the
+			// behaviour they were typeset with (GP_E3_S15 lesson).
+			{ ...typography, typo: typography.typo ?? 1 },
 		);
 		return layout;
 	}

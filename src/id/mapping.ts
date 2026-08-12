@@ -23,10 +23,12 @@ export interface MappingEntry {
 	/**
 	 * Typography of this upload (GP_E3_S8). The layout map itself is far too
 	 * big to keep here, so the import reproduces it from the note plus these
-	 * three numbers — which stays correct even if the settings changed since.
+	 * numbers — which stays correct even if the settings changed since.
 	 * Absent for EPUB: a reflowing document has no fixed geometry to anchor to.
+	 * `typo` records the typesetter behaviour version (GP_E5_S4–S7); absent
+	 * means version 1 (sent before 0.29.0).
 	 */
-	pdfLayout?: { fontSize: number; lineHeight: number; margin: number };
+	pdfLayout?: { fontSize: number; lineHeight: number; margin: number; typo?: number };
 }
 
 export type MappingTable = Record<string, MappingEntry>;

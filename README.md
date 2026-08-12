@@ -62,6 +62,9 @@ What happens to your note on the way:
 - Wikilinks become readable text, `![[embeds]]` are resolved inline, callouts
   become titled quotes, comments are dropped, and frontmatter is left out — or
   rendered as a small title block, if you prefer.
+- Task checkboxes (`- [ ]`) become real drawn squares you can tick with the
+  pen, and an empty table row becomes a fill-in row with room to write —
+  a note with log tables turns into a form you complete on the device.
 - It is typeset as a PDF on the reMarkable page grid, with font size, line
   spacing and margins you control. Reading rather than annotating? Switch to
   **EPUB**: it reflows, the device picks the type size, your headings become a

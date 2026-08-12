@@ -169,7 +169,7 @@ describe("projectOntoSource", () => {
 	it("skips a mark that covers nothing but punctuation", () => {
 		// There is no sensible markdown for striking a lone quote mark, and
 		// ~~"~~ would only leave litter in the text.
-		const out = project([{ kind: "strikethrough", page: 1, words: idsOf("-") }])?.markdown;
+		const out = project([{ kind: "strikethrough", page: 1, words: idsOf("\u2013") }])?.markdown;
 		expect(out).not.toContain("~~");
 	});
 
