@@ -66,8 +66,10 @@ What happens to your note on the way:
   pen, and a table row that is empty — or holds only a label in its first
   column — becomes a fill-in row with room to write: a note with log tables
   turns into a form you complete on the device.
-- A `\pagebreak` line (Pandoc's convention) forces a new page — give each
-  day of a weekly log its own page.
+- A `\pagebreak` line (Pandoc's convention) forces a new page — or let the
+  plugin do it: a setting starts a new page before `#` (or `#` and `##`)
+  headings. Tables that fit on a page stay whole instead of snapping in
+  two, and a heading never dangles at the bottom without its text.
 - It is typeset as a PDF on your reMarkable's own page grid — pick your
   model under *Settings → Page layout* (reMarkable 1/2/Paper Pure or
   Paper Pro) — with a layout preset for what the page is for: easy

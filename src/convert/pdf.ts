@@ -22,9 +22,11 @@ import type { Block, ListItem } from "./mdblocks";
  * typography, fill-in rows, checkboxes) must replay per document — otherwise
  * every improvement shifts the anchors of previously sent documents
  * (the GP_E3_S15 lesson). Version 1 = pre-0.29 behaviour; version 2 =
- * 0.29.0 (word breaking without float tolerance); version 3 = current.
+ * 0.29.0 (word breaking without float tolerance); version 3 = 0.29.1-0.30.0
+ * (float tolerance, label rows); version 4 = current (keep tables together,
+ * keep headings with their content).
  */
-export const TYPO_VERSION = 3;
+export const TYPO_VERSION = 4;
 
 export interface PdfLayoutOptions {
 	/** Base body font size in points. */
@@ -38,6 +40,11 @@ export interface PdfLayoutOptions {
 	/** Page size in PDF points; defaults to the reMarkable 1/2 screen (GP_E6_S2). */
 	pageWidth?: number;
 	pageHeight?: number;
+	/**
+	 * Start a new page before headings up to this level (GP_E6_S4);
+	 * 0 = only at explicit \pagebreak markers.
+	 */
+	breakAtHeading?: number;
 }
 
 export interface PdfMetadata {
@@ -109,6 +116,7 @@ const DEFAULTS: Required<PdfLayoutOptions> = {
 	typo: TYPO_VERSION,
 	pageWidth: PAGE_WIDTH,
 	pageHeight: PAGE_HEIGHT,
+	breakAtHeading: 0,
 };
 
 /**
@@ -395,7 +403,12 @@ function drawHeading(ts: Typesetter, level: number, text: string): void {
 	beginBlock(ts, level === 0 ? "title" : "heading", Math.max(level, 1));
 	const size = HEADING_SIZES[level] ?? 11;
 	const gapBefore = size * 0.8;
-	ensureRoom(ts, gapBefore + size * ts.opts.lineHeight);
+	// Keep-with-next (GP_E6_S5, typo 4): a heading only starts on a page if
+	// at least a couple of body lines fit under it — a heading dangling at
+	// the bottom belongs with its content on the next page.
+	const keepWith =
+		level >= 1 && ts.opts.typo >= 4 ? 2 * ts.opts.fontSize * ts.opts.lineHeight : 0;
+	ensureRoom(ts, gapBefore + size * ts.opts.lineHeight + keepWith);
 	ts.y -= gapBefore;
 	const lines = wrapText(toWinAnsi(text, ts.opts.typo), ts.bold, size, contentWidth(ts), ts.opts.typo);
 	drawLines(ts, lines, ts.bold, size, 0, size * 0.35);
@@ -579,30 +592,20 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 	const widths = computeColumnWidths(naturals, total);
 	const offsets = widths.map((_, c) => widths.slice(0, c).reduce((a, b) => a + b, 0));
 
-	rows.forEach((row, rowIndex) => {
-		beginBlock(ts, "table", rowIndex);
-		// An all-empty body row is a fill-in row (GP_E5_S5): give it real
-		// writing height and a faint rule to write on — a one-line sliver is
-		// useless under a pen.
-		const isWritingRow =
+	// Plan every row up front: fill-in shapes (GP_E5_S5), wrapped cell lines
+	// and each row's height. The plan feeds the keep-together decision below
+	// AND the drawing loop, so the two can never disagree.
+	const plans = rows.map((row, rowIndex) => {
+		// An all-empty body row is a fill-in row (GP_E5_S5): real writing
+		// height and a faint rule — a one-line sliver is useless under a pen.
+		const writing =
 			ts.opts.typo >= 2 && rowIndex > 0 && row.every((cell) => (cell ?? "").trim() === "");
-		if (isWritingRow) {
-			const height = 2.4 * step;
-			ensureRoom(ts, height);
-			ts.y -= height;
-			ts.page.drawLine({
-				start: { x: ts.opts.margin, y: ts.y },
-				end: { x: ts.opts.margin + total, y: ts.y },
-				thickness: 0.4,
-				color: rgb(0.7, 0.7, 0.7),
-			});
-			return;
+		if (writing) {
+			return { writing, label: false, cellLines: [] as string[][], height: 2.4 * step };
 		}
-		// A label row — only the first column filled, the rest left to complete
-		// on the device ("Slaap (uren) | _") — is the other fill-in shape
-		// (GP_E5_S5 follow-up): the label is drawn, and the row still gets
-		// writing height plus a rule. Typo 3: earlier uploads replay without.
-		const isLabelRow =
+		// A label row — only the first column filled, the rest left to
+		// complete on the device — is the other fill-in shape (typo 3+).
+		const label =
 			ts.opts.typo >= 3 &&
 			rowIndex > 0 &&
 			row.length > 1 &&
@@ -613,7 +616,41 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 			wrapText(toWinAnsi(cell, ts.opts.typo), font, size, Math.max(widths[c] - pad, 24), ts.opts.typo),
 		);
 		const rowLines = Math.max(1, ...cellLines.map((lines) => lines.length));
-		const rowHeight = isLabelRow ? Math.max(rowLines, 2.4) * step : rowLines * step;
+		const height = (label ? Math.max(rowLines, 2.4) : rowLines) * step + (rowIndex === 0 ? 6 : 0);
+		return { writing, label, cellLines, height };
+	});
+
+	// Keep-together (GP_E6_S5, typo 4): a table that fits on one page but not
+	// in the space left moves to a fresh page whole, instead of snapping in
+	// two. Taller-than-page tables keep the row-by-row behaviour.
+	if (ts.opts.typo >= 4) {
+		const tableHeight = plans.reduce((sum, plan) => sum + plan.height, 0);
+		if (tableHeight <= ts.opts.pageHeight - 2 * ts.opts.margin) {
+			ensureRoom(ts, tableHeight);
+		}
+	}
+
+	rows.forEach((row, rowIndex) => {
+		beginBlock(ts, "table", rowIndex);
+		const plan = plans[rowIndex];
+		if (plan.writing) {
+			ensureRoom(ts, plan.height);
+			ts.y -= plan.height;
+			ts.page.drawLine({
+				start: { x: ts.opts.margin, y: ts.y },
+				end: { x: ts.opts.margin + total, y: ts.y },
+				thickness: 0.4,
+				color: rgb(0.7, 0.7, 0.7),
+			});
+			return;
+		}
+		const isLabelRow = plan.label;
+		const font = rowIndex === 0 ? ts.bold : ts.body;
+		const cellLines = plan.cellLines;
+		// The planned height IS the consumed height — one formula, one truth,
+		// or ensureRoom(tableHeight) above could reserve a different total
+		// than the rows actually use.
+		const rowHeight = plan.height;
 		// Keep the row on one page when it fits; taller-than-page rows fall
 		// back to a mid-row break via the per-line floor guard below.
 		ensureRoom(ts, Math.min(rowHeight, ts.opts.pageHeight - 2 * ts.opts.margin));
@@ -682,7 +719,7 @@ export async function renderPdf(
 	meta: PdfMetadata,
 	options: PdfLayoutOptions = {},
 ): Promise<PdfRender> {
-	const opts = { ...DEFAULTS, ...options };
+	const opts = resolveLayoutOptions(options);
 	const doc = await PDFDocument.create();
 	doc.setTitle(meta.title);
 	doc.setSubject(`${DOCID_SUBJECT_PREFIX}${meta.docId}`);
@@ -710,17 +747,26 @@ export async function renderPdf(
 
 	// A pagebreak is honoured lazily, before the next drawn block: a marker
 	// at the very end (or on an already-fresh page) never leaves a blank
-	// page behind (GP_E6_S1).
+	// page behind (GP_E6_S1). Headings up to opts.breakAtHeading get the
+	// same treatment (GP_E6_S4) — except the very first block, which would
+	// otherwise leave the title alone on a near-empty page.
 	let pendingBreak = false;
+	let drewContent = false;
 	for (const block of blocks) {
 		if (block.type === "pagebreak") {
 			pendingBreak = true;
 			continue;
 		}
-		if (pendingBreak) {
+		const breakForHeading =
+			block.type === "heading" &&
+			drewContent &&
+			block.level >= 1 &&
+			block.level <= ts.opts.breakAtHeading;
+		if (pendingBreak || breakForHeading) {
 			pendingBreak = false;
 			if (ts.y < ts.opts.pageHeight - ts.opts.margin) newPage(ts);
 		}
+		drewContent = true;
 		switch (block.type) {
 			case "heading":
 				drawHeading(ts, block.level, block.text);

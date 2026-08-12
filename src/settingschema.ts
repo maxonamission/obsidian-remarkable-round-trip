@@ -16,13 +16,20 @@
  */
 
 import { MARK_STYLE_LABELS } from "./incoming/markstyles";
-import type { DeviceModel, LayoutPreset } from "./settingsmodel";
+import type { DeviceModel, HeadingBreak, LayoutPreset } from "./settingsmodel";
 
 /** GP_E6_S2: which screen the PDF page is sized for. Typed against the
  * model union so a new DeviceModel without a label is a compile error. */
 const DEVICE_MODEL_LABELS: Record<DeviceModel, string> = {
 	rm2: "reMarkable 1 / 2 / Paper Pure",
 	paperpro: "reMarkable Paper Pro",
+};
+
+/** GP_E6_S4: automatic page breaks before headings. */
+const HEADING_BREAK_LABELS: Record<HeadingBreak, string> = {
+	off: "Off — only at \\pagebreak markers",
+	h1: "Before # headings",
+	h2: "Before # and ## headings",
 };
 
 /** GP_E6_S3: named typography bundles; custom exposes the sliders. */
@@ -170,6 +177,16 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 					"Pages are sized to this screen, so what you send fills the " +
 					"device exactly. The reMarkable 1, 2 and Paper Pure share a screen.",
 				control: { type: "dropdown", options: DEVICE_MODEL_LABELS },
+				visibleWhen: { key: "outputFormat", equals: "pdf" },
+			},
+			{
+				key: "pageBreakAtHeading",
+				name: "Start a new page at headings",
+				desc:
+					"Automatically turn the page before headings of this level — a " +
+					"weekly log with a heading per day gets each day on its own " +
+					"page. A \\pagebreak line works everywhere, whatever this says.",
+				control: { type: "dropdown", options: HEADING_BREAK_LABELS },
 				visibleWhen: { key: "outputFormat", equals: "pdf" },
 			},
 			{

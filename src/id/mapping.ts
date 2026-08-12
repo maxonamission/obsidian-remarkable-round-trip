@@ -36,6 +36,8 @@ export interface MappingEntry {
 		/** Page size of this upload (GP_E6_S2); absent = reMarkable 1/2 screen. */
 		pageWidth?: number;
 		pageHeight?: number;
+		/** Heading level up to which pages broke (GP_E6_S4); absent = 0. */
+		breakAtHeading?: number;
 	};
 }
 

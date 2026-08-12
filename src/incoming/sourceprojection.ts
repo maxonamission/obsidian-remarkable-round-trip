@@ -12,7 +12,7 @@
  * word — and inserting into the note keeps every last bit of its formatting.
  */
 
-import { PdfLayout, TYPO_VERSION, toWinAnsi } from "../convert/pdf";
+import { PdfLayout, toWinAnsi } from "../convert/pdf";
 import { Highlight, colorName, rgbName } from "./highlights";
 import { DEFAULT_MARK_STYLES, MarkStyle, MarkStyles } from "./markstyles";
 import type { ImportedMark } from "./pull";
@@ -218,7 +218,11 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 	// the note does not carry, an inlined embed) costs its own mark, and the
 	// cursor stays put so the next word can still line up.
 	const ranges = new Map<number, Range>();
-	const typo = input.layout.typo ?? TYPO_VERSION;
+	// Absent means version 1, the same convention as the mapping entry the
+	// layout is rebuilt from (id/mapping.ts) — a legacy layout carries "--"
+	// where the source has an em dash, and mapping modern against it fails
+	// at the first typographic character.
+	const typo = input.layout.typo ?? 1;
 	const start = syncPoint(input.source, words, typo);
 	let cursor = 0;
 	let found = 0;

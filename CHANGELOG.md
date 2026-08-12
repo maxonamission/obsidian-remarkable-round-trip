@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.31.0] - 2026-08-12
+
+### Added
+
+- **Automatic page breaks at headings.** Under *Settings → Page layout*,
+  choose to start a new page before `#` headings, or before `#` and `##` —
+  a weekly log with a heading per day gets each day on its own page, no
+  markers needed. The very first heading after the title stays put, and
+  `\pagebreak` keeps working everywhere. Off by default.
+- **Tables stay whole, headings stay with their text.** A table that fits
+  on one page no longer snaps in two at a page boundary — it moves to a
+  fresh page whole. And a heading no longer dangles at the bottom of a page
+  with its content on the next: it needs room for at least two lines under
+  it, or it moves along. No settings — just better typesetting. As always,
+  documents sent with earlier versions replay their own layout on import,
+  so existing annotations stay anchored.
+
+
 ## [0.30.0] - 2026-08-12
 
 ### Added

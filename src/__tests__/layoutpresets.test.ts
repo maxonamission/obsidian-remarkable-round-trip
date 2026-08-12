@@ -3,6 +3,7 @@ import {
 	DEFAULT_SETTINGS,
 	DEVICE_PAGE_SIZES,
 	LAYOUT_PRESETS,
+	breakLevelFor,
 	layoutFor,
 } from "../settingsmodel";
 
@@ -44,5 +45,13 @@ describe("device page sizes (GP_E6_S2)", () => {
 			expect(pageWidth / pageHeight).toBeGreaterThan(0.73);
 			expect(pageWidth / pageHeight).toBeLessThan(0.77);
 		}
+	});
+});
+
+describe("heading-break level (GP_E6_S4)", () => {
+	it("maps the setting to the typesetter's level, defaulting to manual only", () => {
+		expect(breakLevelFor(DEFAULT_SETTINGS)).toBe(0);
+		expect(breakLevelFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "h1" })).toBe(1);
+		expect(breakLevelFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "h2" })).toBe(2);
 	});
 });

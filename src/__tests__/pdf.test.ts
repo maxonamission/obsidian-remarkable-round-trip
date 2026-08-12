@@ -219,6 +219,52 @@ describe("renderPdf", () => {
 		expect(layout.pageCount).toBe(1);
 	});
 
+	it("breaks the page before headings up to the configured level (GP_E6_S4)", async () => {
+		const md = "# Dag 1\n\ntekst een\n\n## Sectie\n\ntekst twee\n\n### Detail\n\ntekst drie";
+		const { layout } = await renderPdf(parseBlocks(md), META, { breakAtHeading: 2 });
+		const pageOf = (text: string) => layout.lines.find((l) => l.text.includes(text))?.page;
+		// The first heading right after the title stays put (no near-empty page 1).
+		expect(pageOf("Dag 1")).toBe(1);
+		expect(pageOf("Sectie")).toBe(2);
+		expect(pageOf("tekst twee")).toBe(2);
+		// ### is beyond the configured level and does not break.
+		expect(pageOf("Detail")).toBe(2);
+	});
+
+	it("keeps every heading on one page with breakAtHeading off (default)", async () => {
+		const md = "# Dag 1\n\ntekst een\n\n## Sectie\n\ntekst twee";
+		const { layout } = await renderPdf(parseBlocks(md), META, {});
+		expect(layout.pageCount).toBe(1);
+	});
+
+	it("moves a heading that would dangle at the page bottom along with its text (GP_E6_S5)", async () => {
+		// A small page forces the situation deterministically: the paragraph
+		// leaves room for the heading but not for any content under it.
+		const filler = Array.from({ length: 6 }, (_, i) => `regel ${i}`).join("\n\n");
+		const md = `${filler}\n\n## Kop\n\ndaaronder`;
+		const { layout } = await renderPdf(parseBlocks(md), META, { pageHeight: 260 });
+		const kop = layout.lines.find((l) => l.text.includes("Kop"));
+		const text = layout.lines.find((l) => l.text.includes("daaronder"));
+		expect(kop?.page).toBe(text?.page);
+	});
+
+	it("moves a table that fits on one page to a fresh page instead of splitting it (GP_E6_S5)", async () => {
+		const filler = Array.from({ length: 5 }, (_, i) => `regel ${i}`).join("\n\n");
+		const table = "| A | B |\n|---|---|\n| a1 | b1 |\n| a2 | b2 |\n| a3 | b3 |";
+		const md = `${filler}\n\n${table}`;
+		const modern = await renderPdf(parseBlocks(md), META, { pageHeight: 300 });
+		const tablePages = new Set(
+			modern.layout.lines.filter((l) => l.role === "table").map((l) => l.page),
+		);
+		expect(tablePages.size).toBe(1);
+		// Typo 3 replay splits it, proving the fixture actually forces the case.
+		const legacy = await renderPdf(parseBlocks(md), META, { pageHeight: 300, typo: 3 });
+		const legacyPages = new Set(
+			legacy.layout.lines.filter((l) => l.role === "table").map((l) => l.page),
+		);
+		expect(legacyPages.size).toBeGreaterThan(1);
+	});
+
 	it("sizes the page to the chosen device screen (GP_E6_S2)", async () => {
 		const { layout } = await renderPdf(
 			parseBlocks("Een alinea voor de Paper Pro."),

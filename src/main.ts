@@ -13,6 +13,7 @@ import {
 	DEVICE_PAGE_SIZES,
 	RoundTripSettings,
 	RoundTripSettingTab,
+	breakLevelFor,
 	layoutFor,
 } from "./settings";
 import { remarkable } from "rmapi-js";
@@ -407,11 +408,13 @@ export default class RoundTripPlugin extends Plugin {
 							(fm as Record<string, unknown>)[DOCID_FRONTMATTER_KEY] = docId;
 						});
 					},
-					// Preset bundle (or the sliders) plus the page size of the
-					// chosen device screen (GP_E6_S2/S3).
+					// Preset bundle (or the sliders), the page size of the chosen
+					// device screen and the heading-break level (GP_E6_S2/S3/S4);
+					// all of it is recorded per upload for layout reproduction.
 					layout: {
 						...layoutFor(this.settings),
 						...DEVICE_PAGE_SIZES[this.settings.deviceModel],
+						breakAtHeading: breakLevelFor(this.settings),
 					},
 					frontmatterAsTitleBlock: this.settings.frontmatterAsTitleBlock,
 					skipUnchanged: options.auto === true,

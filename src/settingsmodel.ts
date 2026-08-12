@@ -52,6 +52,8 @@ export interface RoundTripSettings {
 	deviceModel: DeviceModel;
 	/** Named typography bundle; "custom" uses the three sliders (GP_E6_S3). */
 	layoutPreset: LayoutPreset;
+	/** Automatic page breaks before headings (GP_E6_S4). */
+	pageBreakAtHeading: HeadingBreak;
 	/** Announce minor/major updates with a brief what's-new notice (GP_E5_S3). */
 	showUpdateNotice: boolean;
 	/** Last plugin version this install has run; "" = fresh install. */
@@ -80,6 +82,7 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	deviceBaseFolder: "Obsidian",
 	deviceModel: "rm2",
 	layoutPreset: "custom",
+	pageBreakAtHeading: "off",
 	showUpdateNotice: true,
 	lastSeenVersion: "",
 	mappings: {},
@@ -126,4 +129,12 @@ export function layoutFor(settings: RoundTripSettings): {
 		lineHeight: settings.lineHeight,
 		margin: settings.margin,
 	};
+}
+
+/** Automatic page breaks before headings (GP_E6_S4). */
+export type HeadingBreak = "off" | "h1" | "h2";
+
+/** The heading level up to which sends break the page; 0 = manual only. */
+export function breakLevelFor(settings: RoundTripSettings): number {
+	return { off: 0, h1: 1, h2: 2 }[settings.pageBreakAtHeading];
 }
