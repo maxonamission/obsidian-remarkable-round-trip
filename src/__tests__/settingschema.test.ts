@@ -23,7 +23,9 @@ describe("the settings schema", () => {
 	it("covers every setting a user can change", () => {
 		// The counterpart: a setting added to the model but not to the schema
 		// would be invisible in both renderers.
-		const internal = new Set(["deviceToken", "mappings"]);
+		// lastSeenVersion is bookkeeping for the update notice (GP_E5_S3), not
+		// a user choice — only its showUpdateNotice toggle belongs in the UI.
+		const internal = new Set(["deviceToken", "mappings", "lastSeenVersion"]);
 		const described = new Set(specs.map((spec) => spec.key.split(".")[0]));
 		for (const key of Object.keys(DEFAULT_SETTINGS)) {
 			if (internal.has(key)) continue;

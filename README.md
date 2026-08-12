@@ -49,7 +49,8 @@ That is the whole loop. Everything below is detail for when you want it.
 
 - **Command palette**: *Send current note to reMarkable*.
 - **Right-click a note or folder**: *Send to reMarkable* — a folder sends
-  everything inside it, with progress and per-file errors.
+  everything inside it, with progress and per-file errors, and keeps its own
+  subfolder structure on the device even when folder mirroring is off.
 - **Right-click a multi-selection**: several notes and folders at once;
   duplicates are filtered out.
 - **Watch folder** (optional, off by default): notes dropped into a folder you

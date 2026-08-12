@@ -38,3 +38,16 @@ export function flattenSelection<T extends { path: string }>(
 	walk(selection);
 	return out;
 }
+
+/**
+ * Folder path of `dir` relative to `root` (GP_E5_S2): sending a folder keeps
+ * its internal structure on the device even when vault mirroring is off, so
+ * device folders start at the sent folder rather than the full vault path.
+ * `root` "" or "/" means the vault root (nothing to strip); a `dir` outside
+ * `root` is returned unchanged rather than guessed at.
+ */
+export function relativeFolderPath(dir: string, root: string): string {
+	if (root === "" || root === "/") return dir;
+	if (dir === root) return "";
+	return dir.startsWith(`${root}/`) ? dir.slice(root.length + 1) : dir;
+}

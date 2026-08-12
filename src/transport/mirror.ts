@@ -3,7 +3,10 @@
  *
  * Design: docs/ontwerp-mapspiegeling.md (route C). The api surface we consume
  * is declared locally (structural typing) so tests inject a fake and the
- * rmapi-js instance satisfies it at the edge.
+ * rmapi-js instance satisfies it at the edge. The one deliberate exception is
+ * the GenerationError class import below: recognising the library's own error
+ * type by identity is the reliable signal (GP_E5_S1) and is worth the direct
+ * coupling.
  */
 
 import { GenerationError } from "rmapi-js";

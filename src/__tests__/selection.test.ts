@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flattenSelection, SelectionKind } from "../sync/selection";
+import { flattenSelection, relativeFolderPath, SelectionKind } from "../sync/selection";
 
 /** Minimal stand-in for Obsidian's TFile/TFolder tree. */
 interface Node {
@@ -44,5 +44,28 @@ describe("flattenSelection", () => {
 
 	it("returns nothing for a selection without notes", () => {
 		expect(flatten([folder("leeg", []), { path: "x.pdf", ext: "pdf" }])).toEqual([]);
+	});
+});
+
+describe("relativeFolderPath (GP_E5_S2)", () => {
+	it("strips the sent folder's parent so the folder itself lands at the root", () => {
+		expect(relativeFolderPath("Projecten/Training/Week 1", "Projecten")).toBe(
+			"Training/Week 1",
+		);
+	});
+
+	it("maps the root of the sent tree to the device root", () => {
+		expect(relativeFolderPath("Projecten", "Projecten")).toBe("");
+	});
+
+	it("keeps paths as-is when the selection sits at the vault root", () => {
+		expect(relativeFolderPath("Training/Week 1", "")).toBe("Training/Week 1");
+		expect(relativeFolderPath("Training/Week 1", "/")).toBe("Training/Week 1");
+	});
+
+	it("does not treat a sibling prefix as a parent", () => {
+		expect(relativeFolderPath("Projecten-archief/Oud", "Projecten")).toBe(
+			"Projecten-archief/Oud",
+		);
 	});
 });

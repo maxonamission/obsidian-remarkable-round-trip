@@ -48,6 +48,10 @@ export interface RoundTripSettings {
 	deviceBaseFolder: string;
 	/** How each recognised pen mark is written into the copy (GP_E3_S19). */
 	markStyles: MarkStyles;
+	/** Announce minor/major updates with a brief what's-new notice (GP_E5_S3). */
+	showUpdateNotice: boolean;
+	/** Last plugin version this install has run; "" = fresh install. */
+	lastSeenVersion: string;
 	/** docId ↔ device document mapping (round-trip foundation, F5). */
 	mappings: MappingTable;
 }
@@ -70,5 +74,7 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	handwritingFolder: "reMarkable-in/handwriting",
 	mirrorFolders: true,
 	deviceBaseFolder: "Obsidian",
+	showUpdateNotice: true,
+	lastSeenVersion: "",
 	mappings: {},
 };

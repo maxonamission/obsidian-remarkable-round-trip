@@ -6,7 +6,7 @@
  * pipeline (preprocess → PDF → upload → mapping) is pure and lives in src/.
  */
 
-import { Menu, Plugin, TAbstractFile, TFile, TFolder, requestUrl } from "obsidian";
+import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, requestUrl } from "obsidian";
 import { notify, progressNotice, updateProgress } from "./notify";
 import { DEFAULT_SETTINGS, RoundTripSettings, RoundTripSettingTab } from "./settings";
 import { remarkable } from "rmapi-js";
@@ -43,7 +43,8 @@ import {
 	upsertAnnotationBlock,
 } from "./incoming/annotationnote";
 import { WatchQueue } from "./sync/watcher";
-import { flattenSelection } from "./sync/selection";
+import { flattenSelection, relativeFolderPath } from "./sync/selection";
+import { shouldAnnounceUpdate } from "./updatenotice";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "svg", "webp", "avif"]);
 const MAX_EMBED_DEPTH = 3;
@@ -66,6 +67,12 @@ export default class RoundTripPlugin extends Plugin {
 		this.addSettingTab(new RoundTripSettingTab(this.app, this));
 		this.setupWatcher();
 		this.setupFetchShim();
+
+		// Subtle "what's changed" notice (GP_E5_S3) — deferred to layout-ready
+		// so it never adds to startup noise.
+		this.app.workspace.onLayoutReady(() => {
+			void this.checkForUpdateNotice();
+		});
 
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => this.watchQueue?.noteChanged(file.path)),
@@ -127,7 +134,15 @@ export default class RoundTripPlugin extends Plugin {
 						item
 							.setTitle("Send folder to reMarkable")
 							.setIcon("send")
-							.onClick(() => void this.sendFiles(collectMarkdownFiles(file))),
+							// The sent folder keeps its internal structure on the
+							// device even when vault mirroring is off (GP_E5_S2):
+							// paths are made relative to the folder's parent, so
+							// the folder itself is created at the device root.
+							.onClick(() =>
+								void this.sendFiles(collectMarkdownFiles(file), {
+									structureRoot: folderParentPath(file),
+								}),
+							),
 					);
 				}
 			}),
@@ -244,7 +259,39 @@ export default class RoundTripPlugin extends Plugin {
 	 * Send notes. In `auto` mode (watch folder) unchanged notes are skipped
 	 * and an all-skipped run stays silent — errors always surface.
 	 */
-	async sendFiles(files: TFile[], options: { auto?: boolean } = {}): Promise<void> {
+	/**
+	 * GP_E5_S3: show a one-time notice when the installed version stepped up a
+	 * minor or major version since last seen — never for a patch bump, and
+	 * never when the toggle is off. The stored version always advances when it
+	 * differs (patch bump or toggle-off included), so a later minor/major jump
+	 * is judged from the right baseline.
+	 */
+	private async checkForUpdateNotice(): Promise<void> {
+		const current = this.manifest.version;
+		const prev = this.settings.lastSeenVersion;
+
+		if (shouldAnnounceUpdate(prev, current) && this.settings.showUpdateNotice) {
+			const [major, minor] = current.split(".");
+			const frag = createFragment((f) => {
+				f.appendText(`reMarkable Round-Trip updated to ${major}.${minor} — `);
+				f.createEl("a", {
+					text: "see what's new",
+					href: `https://github.com/maxonamission/obsidian-remarkable-round-trip/releases/tag/${current}`,
+				});
+			});
+			new Notice(frag, 8000);
+		}
+
+		if (current !== prev) {
+			this.settings.lastSeenVersion = current;
+			await this.saveSettings();
+		}
+	}
+
+	async sendFiles(
+		files: TFile[],
+		options: { auto?: boolean; structureRoot?: string } = {},
+	): Promise<void> {
 		if (files.length === 0) {
 			notify("No markdown notes to send.");
 			return;
@@ -259,13 +306,20 @@ export default class RoundTripPlugin extends Plugin {
 		// folder listing is fetched once and reused across the batch. When the
 		// mirroring API is unreachable we degrade to root uploads instead of
 		// refusing to send (N3 — and a beta tester hit exactly this on mobile,
-		// GP_E2_S12).
+		// GP_E2_S12). A folder send keeps its internal structure even with
+		// vault mirroring off (GP_E5_S2): the folder tree then goes to the
+		// device root, without the base folder or the full vault path.
+		const structureOnly = !this.settings.mirrorFolders && options.structureRoot !== undefined;
 		let mirror: MirrorTransport | null = null;
 		let mirroringDegraded = false;
-		if (this.settings.mirrorFolders) {
+		let mirroringDegradedReason: string | null = null;
+		if (this.settings.mirrorFolders || structureOnly) {
 			try {
 				const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
-				mirror = new MirrorTransport(api, this.settings.deviceBaseFolder);
+				mirror = new MirrorTransport(
+					api,
+					structureOnly ? "" : this.settings.deviceBaseFolder,
+				);
 			} catch (error) {
 				mirroringDegraded = true;
 				console.error("reMarkable Round-Trip: folder mirroring unavailable", error);
@@ -311,19 +365,29 @@ export default class RoundTripPlugin extends Plugin {
 						: client,
 					format: this.settings.outputFormat,
 					resolveParent: activeMirror
-						? (notePath) =>
-								activeMirror
-									.ensureFolderPath(notePath.split("/").slice(0, -1).join("/"))
+						? (notePath) => {
+								const dir = notePath.split("/").slice(0, -1).join("/");
+								const target = structureOnly
+									? relativeFolderPath(dir, options.structureRoot ?? "")
+									: dir;
+								return activeMirror
+									.ensureFolderPath(target)
 									.catch((error: unknown) => {
 										// Losing the folder is not worth losing the note:
-										// deliver it to the device root instead (N3).
+										// deliver it to the device root instead (N3). Keep
+										// the first reason so the user hears *why* — the
+										// busy-syncing guidance must reach them (GP_E5_S1),
+										// not just the console.
 										mirroringDegraded = true;
+										const message = toTransportError(error).message;
+										mirroringDegradedReason ??= message;
 										console.error(
 											`reMarkable Round-Trip: folder for "${notePath}" unavailable`,
-											toTransportError(error).message,
+											message,
 										);
 										return "";
-									})
+									});
+							}
 						: undefined,
 					replacePrevious: activeMirror
 						? (previousId) => activeMirror.trashPrevious(previousId)
@@ -353,6 +417,7 @@ export default class RoundTripPlugin extends Plugin {
 			reportResults(results, {
 				quietWhenAllSkipped: options.auto === true,
 				mirroringDegraded: mirroringDegraded && mirror !== null,
+				mirroringDegradedReason: mirroringDegradedReason ?? undefined,
 			});
 		} finally {
 			notice.hide();
@@ -804,6 +869,12 @@ function collectFromSelection(selection: TAbstractFile[]): TFile[] {
 	}) as TFile[];
 }
 
+/** Vault path of the folder's parent, normalised: Obsidian's vault root is "/". */
+function folderParentPath(folder: TFolder): string {
+	const parent = folder.parent?.path ?? "";
+	return parent === "/" ? "" : parent;
+}
+
 function collectMarkdownFiles(folder: TFolder): TFile[] {
 	const files: TFile[] = [];
 	for (const child of folder.children) {
@@ -815,12 +886,19 @@ function collectMarkdownFiles(folder: TFolder): TFile[] {
 
 function reportResults(
 	results: SendResult[],
-	options: { quietWhenAllSkipped?: boolean; mirroringDegraded?: boolean } = {},
+	options: {
+		quietWhenAllSkipped?: boolean;
+		mirroringDegraded?: boolean;
+		/** First transport explanation, e.g. the busy-syncing guidance (GP_E5_S1). */
+		mirroringDegradedReason?: string;
+	} = {},
 ): void {
 	if (options.mirroringDegraded) {
+		const reason = options.mirroringDegradedReason;
 		notify(
-			"Some folders could not be created on the device — those notes went to the root.",
-			8000,
+			"Some folders could not be created on the device — those notes went to the root." +
+				(reason ? ` ${reason}` : ""),
+			10000,
 		);
 	}
 	const failures = results.filter((r): r is Extract<SendResult, { ok: false }> => !r.ok);

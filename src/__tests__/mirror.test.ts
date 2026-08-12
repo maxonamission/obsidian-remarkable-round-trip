@@ -144,12 +144,12 @@ describe("generation conflicts", () => {
 	});
 
 	it("recognises rmapi-js' real GenerationError (GP_E5_S1)", () => {
-		// The real class never assigns `this.name`, so at runtime it carries
-		// name === "Error" — the guise the field failure arrived in. Guard both
-		// the instanceof path and the message fallback for re-wrapped errors.
-		const real = new GenerationError();
-		expect(real.name).toBe("Error");
-		expect(isGenerationConflict(real)).toBe(true);
+		// The real class does not (currently) assign `this.name`, so at runtime
+		// it can carry name === "Error" — the guise the field failure arrived
+		// in. Guard the instanceof path and the message fallback for re-wrapped
+		// errors; deliberately no assertion on `.name` itself, so an upstream
+		// fix that starts setting it does not break this test.
+		expect(isGenerationConflict(new GenerationError())).toBe(true);
 		expect(
 			isGenerationConflict(new Error("root generation was stale; try put again")),
 		).toBe(true);

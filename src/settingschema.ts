@@ -291,4 +291,17 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 			},
 		],
 	},
+	{
+		heading: "Updates",
+		items: [
+			{
+				key: "showUpdateNotice",
+				name: "Notify about new versions",
+				desc:
+					"After an update to a new major or minor version, show a brief " +
+					"notice linking to what changed. Patch releases stay silent.",
+				control: { type: "toggle" },
+			},
+		],
+	},
 ];

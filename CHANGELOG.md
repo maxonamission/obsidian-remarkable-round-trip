@@ -1,6 +1,19 @@
 # Changelog
 
-## [0.27.1] - 2026-08-12
+## [0.28.0] - 2026-08-12
+
+### Added
+
+- **Sending a folder keeps its structure — even with mirroring off.** Until
+  now, *Send folder to reMarkable* with "Mirror vault folders" disabled
+  dropped every note flat into the device root. The sent folder now
+  recreates its own subfolders on the device, rooted at the device root:
+  mirroring off means "don't recreate my whole vault path", not "flatten
+  everything". With mirroring on, nothing changes.
+- **A subtle what's-changed notice after updates.** When the plugin steps up
+  a minor or major version, a brief notice links to the release notes.
+  Patch releases stay silent, a fresh install stays silent, and the notice
+  can be turned off under *Settings → Updates*.
 
 ### Fixed
 
@@ -9,12 +22,13 @@
   syncing at the same moment a note was sent, the cloud refused the write.
   The retry machinery existed for exactly this case but never engaged: the
   error class rmapi-js throws carries the generic `Error` name at runtime,
-  so it slipped past our detection. It is now recognised directly, the send
-  retries up to four times against a refreshed view of the device tree, and
-  if the cloud stays busy the message says so — wait for the tablet to
-  finish syncing and send again — instead of suggesting you disable folder
-  mirroring. Retries also leave a console trail so reports can show whether
-  they engaged.
+  so it slipped past our detection. It is now recognised directly and the
+  send is tried up to four times (three retries) against a refreshed view
+  of the device tree. If the cloud stays busy the message says so — wait
+  for the tablet to finish syncing and send again — instead of suggesting
+  you disable folder mirroring, and that explanation now also reaches the
+  notice when notes fall back to the root, not just the console. Retries
+  leave a console trail so reports can show whether they engaged.
 - Development-toolchain dependencies patched (`npm audit` clean); the
   shipped bundle is unchanged by this.
 
