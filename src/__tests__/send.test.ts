@@ -99,6 +99,10 @@ describe("sendNote output format", () => {
 			lineHeight: 1.5,
 			margin: 40,
 			typo: 3,
+			// The page size rides along too (GP_E6_S2): reproducing the layout
+			// later must not depend on which device model is selected then.
+			pageWidth: 447,
+			pageHeight: 596,
 		});
 	});
 

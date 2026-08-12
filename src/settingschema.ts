@@ -16,6 +16,22 @@
  */
 
 import { MARK_STYLE_LABELS } from "./incoming/markstyles";
+import type { DeviceModel, LayoutPreset } from "./settingsmodel";
+
+/** GP_E6_S2: which screen the PDF page is sized for. Typed against the
+ * model union so a new DeviceModel without a label is a compile error. */
+const DEVICE_MODEL_LABELS: Record<DeviceModel, string> = {
+	rm2: "reMarkable 1 / 2 / Paper Pure",
+	paperpro: "reMarkable Paper Pro",
+};
+
+/** GP_E6_S3: named typography bundles; custom exposes the sliders. */
+const LAYOUT_PRESET_LABELS: Record<LayoutPreset, string> = {
+	readable: "Easy reading — larger type, roomy lines",
+	form: "Fill-in form — balanced, with writing space",
+	compact: "Compact — as much on a page as fits",
+	custom: "Custom — use the sliders below",
+};
 
 export type ControlSpec =
 	| { type: "toggle" }
@@ -35,7 +51,8 @@ export interface SettingSpec {
 	name: string;
 	desc: string;
 	control: ControlSpec;
-	visibleWhen?: VisibleWhen;
+	/** One condition, or several that must ALL hold (GP_E6_S3). */
+	visibleWhen?: VisibleWhen | VisibleWhen[];
 	/**
 	 * Changing this reveals or hides other settings, so the tab has to be
 	 * drawn again.
@@ -69,10 +86,15 @@ export function writeSetting<T>(settings: T, key: string, value: unknown): T {
 	};
 }
 
+/** The visibility conditions of a setting, normalised to a list. */
+export function conditionsOf(spec: SettingSpec): VisibleWhen[] {
+	if (spec.visibleWhen === undefined) return [];
+	return Array.isArray(spec.visibleWhen) ? spec.visibleWhen : [spec.visibleWhen];
+}
+
 /** Is this setting shown, given the current values? */
 export function isVisible(spec: SettingSpec, settings: unknown): boolean {
-	if (spec.visibleWhen === undefined) return true;
-	return readSetting(settings, spec.visibleWhen.key) === spec.visibleWhen.equals;
+	return conditionsOf(spec).every((c) => readSetting(settings, c.key) === c.equals);
 }
 
 /** Trim a vault or device folder path to the form the plugin stores. */
@@ -142,25 +164,53 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 		heading: "Page layout",
 		items: [
 			{
+				key: "deviceModel",
+				name: "reMarkable model",
+				desc:
+					"Pages are sized to this screen, so what you send fills the " +
+					"device exactly. The reMarkable 1, 2 and Paper Pure share a screen.",
+				control: { type: "dropdown", options: DEVICE_MODEL_LABELS },
+				visibleWhen: { key: "outputFormat", equals: "pdf" },
+			},
+			{
+				key: "layoutPreset",
+				name: "Layout",
+				desc:
+					"What the page is for. Each choice sets type size, line spacing " +
+					"and margins; pick Custom to use the sliders yourself.",
+				control: { type: "dropdown", options: LAYOUT_PRESET_LABELS },
+				visibleWhen: { key: "outputFormat", equals: "pdf" },
+				refresh: true,
+			},
+			{
 				key: "fontSize",
 				name: "Font size",
 				desc: "Body text size in points (headings scale along).",
 				control: { type: "slider", min: 9, max: 14, step: 0.5 },
-				visibleWhen: { key: "outputFormat", equals: "pdf" },
+				visibleWhen: [
+					{ key: "outputFormat", equals: "pdf" },
+					{ key: "layoutPreset", equals: "custom" },
+				],
 			},
 			{
 				key: "lineHeight",
 				name: "Line spacing",
 				desc: "Line height as a multiple of the font size; roomier reads better on e-ink.",
 				control: { type: "slider", min: 1.2, max: 1.9, step: 0.1 },
-				visibleWhen: { key: "outputFormat", equals: "pdf" },
+				visibleWhen: [
+					{ key: "outputFormat", equals: "pdf" },
+					{ key: "layoutPreset", equals: "custom" },
+				],
 			},
 			{
 				key: "margin",
 				name: "Page margin",
 				desc: "Margin in points around the text — also your annotation space.",
 				control: { type: "slider", min: 24, max: 64, step: 4 },
-				visibleWhen: { key: "outputFormat", equals: "pdf" },
+				visibleWhen: [
+					{ key: "outputFormat", equals: "pdf" },
+					{ key: "layoutPreset", equals: "custom" },
+				],
 			},
 		],
 	},

@@ -1,6 +1,23 @@
 # Changelog
 
-## [0.29.1] - 2026-08-12
+## [0.30.0] - 2026-08-12
+
+### Added
+
+- **`\pagebreak` starts a new page.** Put it on its own line (Pandoc's
+  convention) and the PDF turns the page there — give each day of a weekly
+  log its own page. In EPUB, which reflows, it renders as a rule.
+- **Pick your reMarkable model.** Pages are now sized to the screen of the
+  device you choose under *Settings → Page layout* — reMarkable 1/2/Paper
+  Pure or Paper Pro — so what you send fills your screen exactly. Each
+  upload remembers its page size, so annotations on documents sent at
+  another size still anchor correctly. (The Paper Pro Move's 9:16 screen
+  needs its own ink-mapping work and a real device to validate against, so
+  it is not offered yet.)
+- **Layout presets.** Choose what a page is for instead of juggling sliders:
+  *Easy reading* (larger type, roomy lines), *Fill-in form* (balanced, with
+  writing space), *Compact* (as much on a page as fits) — or *Custom*, which
+  keeps the three sliders exactly as you set them.
 
 ### Improved
 

@@ -48,6 +48,10 @@ export interface RoundTripSettings {
 	deviceBaseFolder: string;
 	/** How each recognised pen mark is written into the copy (GP_E3_S19). */
 	markStyles: MarkStyles;
+	/** Which reMarkable's screen the PDF page is sized for (GP_E6_S2). */
+	deviceModel: DeviceModel;
+	/** Named typography bundle; "custom" uses the three sliders (GP_E6_S3). */
+	layoutPreset: LayoutPreset;
 	/** Announce minor/major updates with a brief what's-new notice (GP_E5_S3). */
 	showUpdateNotice: boolean;
 	/** Last plugin version this install has run; "" = fresh install. */
@@ -74,7 +78,52 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	handwritingFolder: "reMarkable-in/handwriting",
 	mirrorFolders: true,
 	deviceBaseFolder: "Obsidian",
+	deviceModel: "rm2",
+	layoutPreset: "custom",
 	showUpdateNotice: true,
 	lastSeenVersion: "",
 	mappings: {},
 };
+
+/** reMarkable screens the typesetter can target (GP_E6_S2). */
+export type DeviceModel = "rm2" | "paperpro";
+
+/**
+ * Screen sizes in PDF points (device pixels / DPI × 72). The reMarkable 1,
+ * 2 and Paper Pure share a screen; the Paper Pro differs. Sizing the page to
+ * the actual screen keeps the 1:1 page grid (K2) that anchoring relies on.
+ * Both are 3:4 portrait — the shape the incoming ink transform assumes. The
+ * Paper Pro Move (954×1696, 9:16) is deliberately NOT offered: its aspect
+ * would make the device-to-page mapping anisotropic, and no Move is
+ * available to validate against. Own story once one is.
+ */
+export const DEVICE_PAGE_SIZES: Record<DeviceModel, { pageWidth: number; pageHeight: number }> = {
+	rm2: { pageWidth: 447, pageHeight: 596 }, // 1404×1872 @ 226 dpi (rM1/rM2/Paper Pure)
+	paperpro: { pageWidth: 509, pageHeight: 679 }, // 1620×2160 @ 229 dpi
+};
+
+/** Named typography bundles (GP_E6_S3); "custom" falls back to the sliders. */
+export type LayoutPreset = "readable" | "form" | "compact" | "custom";
+
+export const LAYOUT_PRESETS: Record<
+	Exclude<LayoutPreset, "custom">,
+	{ fontSize: number; lineHeight: number; margin: number }
+> = {
+	readable: { fontSize: 13, lineHeight: 1.6, margin: 44 },
+	form: { fontSize: 11, lineHeight: 1.5, margin: 40 },
+	compact: { fontSize: 9, lineHeight: 1.3, margin: 30 },
+};
+
+/** The typography a send should actually use: preset bundle or the sliders. */
+export function layoutFor(settings: RoundTripSettings): {
+	fontSize: number;
+	lineHeight: number;
+	margin: number;
+} {
+	if (settings.layoutPreset !== "custom") return { ...LAYOUT_PRESETS[settings.layoutPreset] };
+	return {
+		fontSize: settings.fontSize,
+		lineHeight: settings.lineHeight,
+		margin: settings.margin,
+	};
+}

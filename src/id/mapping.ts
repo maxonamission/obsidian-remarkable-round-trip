@@ -28,7 +28,15 @@ export interface MappingEntry {
 	 * `typo` records the typesetter behaviour version (GP_E5_S4–S7); absent
 	 * means version 1 (sent before 0.29.0).
 	 */
-	pdfLayout?: { fontSize: number; lineHeight: number; margin: number; typo?: number };
+	pdfLayout?: {
+		fontSize: number;
+		lineHeight: number;
+		margin: number;
+		typo?: number;
+		/** Page size of this upload (GP_E6_S2); absent = reMarkable 1/2 screen. */
+		pageWidth?: number;
+		pageHeight?: number;
+	};
 }
 
 export type MappingTable = Record<string, MappingEntry>;

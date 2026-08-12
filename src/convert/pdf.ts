@@ -35,6 +35,9 @@ export interface PdfLayoutOptions {
 	margin?: number;
 	/** Typography behaviour version; defaults to the current TYPO_VERSION. */
 	typo?: number;
+	/** Page size in PDF points; defaults to the reMarkable 1/2 screen (GP_E6_S2). */
+	pageWidth?: number;
+	pageHeight?: number;
 }
 
 export interface PdfMetadata {
@@ -104,6 +107,8 @@ const DEFAULTS: Required<PdfLayoutOptions> = {
 	lineHeight: 1.5,
 	margin: 40,
 	typo: TYPO_VERSION,
+	pageWidth: PAGE_WIDTH,
+	pageHeight: PAGE_HEIGHT,
 };
 
 /**
@@ -210,9 +215,9 @@ interface Typesetter {
 }
 
 function newPage(ts: Typesetter): void {
-	ts.page = ts.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+	ts.page = ts.doc.addPage([ts.opts.pageWidth, ts.opts.pageHeight]);
 	ts.pageIndex++;
-	ts.y = PAGE_HEIGHT - ts.opts.margin;
+	ts.y = ts.opts.pageHeight - ts.opts.margin;
 }
 
 /**
@@ -383,7 +388,7 @@ function drawLines(
 }
 
 function contentWidth(ts: Typesetter, indent = 0): number {
-	return PAGE_WIDTH - 2 * ts.opts.margin - indent;
+	return ts.opts.pageWidth - 2 * ts.opts.margin - indent;
 }
 
 function drawHeading(ts: Typesetter, level: number, text: string): void {
@@ -611,7 +616,7 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 		const rowHeight = isLabelRow ? Math.max(rowLines, 2.4) * step : rowLines * step;
 		// Keep the row on one page when it fits; taller-than-page rows fall
 		// back to a mid-row break via the per-line floor guard below.
-		ensureRoom(ts, Math.min(rowHeight, PAGE_HEIGHT - 2 * ts.opts.margin));
+		ensureRoom(ts, Math.min(rowHeight, ts.opts.pageHeight - 2 * ts.opts.margin));
 		const top = ts.y;
 		let lowest = top;
 		row.forEach((_cell, c) => {
@@ -652,7 +657,7 @@ function drawHr(ts: Typesetter): void {
 	ts.y -= 10;
 	ts.page.drawLine({
 		start: { x: ts.opts.margin, y: ts.y },
-		end: { x: PAGE_WIDTH - ts.opts.margin, y: ts.y },
+		end: { x: ts.opts.pageWidth - ts.opts.margin, y: ts.y },
 		thickness: 0.5,
 		color: rgb(0.4, 0.4, 0.4),
 	});
@@ -703,7 +708,19 @@ export async function renderPdf(
 	drawHeading(ts, 0, meta.title);
 	ts.y -= 4;
 
+	// A pagebreak is honoured lazily, before the next drawn block: a marker
+	// at the very end (or on an already-fresh page) never leaves a blank
+	// page behind (GP_E6_S1).
+	let pendingBreak = false;
 	for (const block of blocks) {
+		if (block.type === "pagebreak") {
+			pendingBreak = true;
+			continue;
+		}
+		if (pendingBreak) {
+			pendingBreak = false;
+			if (ts.y < ts.opts.pageHeight - ts.opts.margin) newPage(ts);
+		}
 		switch (block.type) {
 			case "heading":
 				drawHeading(ts, block.level, block.text);
@@ -732,8 +749,8 @@ export async function renderPdf(
 	return {
 		bytes: await doc.save(),
 		layout: {
-			pageWidth: PAGE_WIDTH,
-			pageHeight: PAGE_HEIGHT,
+			pageWidth: ts.opts.pageWidth,
+			pageHeight: ts.opts.pageHeight,
 			pageCount: ts.pageIndex,
 			lines: ts.placed,
 			// The RESOLVED version (ts.opts, defaults filled in) — the raw

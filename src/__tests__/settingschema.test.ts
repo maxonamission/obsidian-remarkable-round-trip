@@ -4,6 +4,7 @@ import {
 	SETTING_SECTIONS,
 	checkEndpoint,
 	cleanPath,
+	conditionsOf,
 	isVisible,
 	readSetting,
 	writeSetting,
@@ -42,8 +43,9 @@ describe("the settings schema", () => {
 
 	it("only hides a setting behind a condition that can be met", () => {
 		for (const spec of specs) {
-			if (spec.visibleWhen === undefined) continue;
-			expect(readSetting(DEFAULT_SETTINGS, spec.visibleWhen.key), spec.key).toBeDefined();
+			for (const condition of conditionsOf(spec)) {
+				expect(readSetting(DEFAULT_SETTINGS, condition.key), spec.key).toBeDefined();
+			}
 		}
 	});
 
@@ -51,7 +53,7 @@ describe("the settings schema", () => {
 		// A conditional setting whose controlling setting does not redraw the
 		// tab would appear only after closing and reopening settings.
 		const controllers = new Set(
-			specs.flatMap((spec) => (spec.visibleWhen === undefined ? [] : [spec.visibleWhen.key])),
+			specs.flatMap((spec) => conditionsOf(spec).map((condition) => condition.key)),
 		);
 		for (const spec of specs) {
 			if (!controllers.has(spec.key)) continue;

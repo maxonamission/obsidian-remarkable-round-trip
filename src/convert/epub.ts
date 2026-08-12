@@ -125,6 +125,11 @@ export function renderBody(blocks: Block[]): RenderedBody {
 			case "hr":
 				parts.push("<hr/>");
 				break;
+			case "pagebreak":
+				// EPUB reflows; the device decides pagination. Render a rule so
+				// the author's intended cut stays visible (GP_E6_S1).
+				parts.push("<hr/>");
+				break;
 		}
 	}
 	return { xhtml: parts.join("\n"), toc };

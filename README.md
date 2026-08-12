@@ -63,10 +63,16 @@ What happens to your note on the way:
   become titled quotes, comments are dropped, and frontmatter is left out — or
   rendered as a small title block, if you prefer.
 - Task checkboxes (`- [ ]`) become real drawn squares you can tick with the
-  pen, and an empty table row becomes a fill-in row with room to write —
-  a note with log tables turns into a form you complete on the device.
-- It is typeset as a PDF on the reMarkable page grid, with font size, line
-  spacing and margins you control. Reading rather than annotating? Switch to
+  pen, and a table row that is empty — or holds only a label in its first
+  column — becomes a fill-in row with room to write: a note with log tables
+  turns into a form you complete on the device.
+- A `\pagebreak` line (Pandoc's convention) forces a new page — give each
+  day of a weekly log its own page.
+- It is typeset as a PDF on your reMarkable's own page grid — pick your
+  model under *Settings → Page layout* (reMarkable 1/2/Paper Pure or
+  Paper Pro) — with a layout preset for what the page is for: easy
+  reading, fill-in form, compact, or custom font size, line spacing and
+  margins. Reading rather than annotating? Switch to
   **EPUB**: it reflows, the device picks the type size, your headings become a
   table of contents, and non-Latin scripts survive intact.
 - Your vault folders are recreated on the device under a base folder you

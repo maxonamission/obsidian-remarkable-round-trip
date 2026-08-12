@@ -201,6 +201,37 @@ describe("renderPdf", () => {
 		expect(after(modern.layout.lines)).toBeLessThan(after(previous.layout.lines));
 	});
 
+	it("starts a new page at a \\pagebreak marker (GP_E6_S1)", async () => {
+		const { layout } = await renderPdf(
+			parseBlocks("eerste\n\n\\pagebreak\n\ntweede"),
+			META,
+			{},
+		);
+		const pageOf = (text: string) =>
+			layout.lines.find((l) => l.text.includes(text))?.page;
+		expect(pageOf("eerste")).toBe(1);
+		expect(pageOf("tweede")).toBe(2);
+		expect(layout.pageCount).toBe(2);
+	});
+
+	it("does not leave a blank page after a trailing \\pagebreak", async () => {
+		const { layout } = await renderPdf(parseBlocks("tekst\n\n\\pagebreak"), META, {});
+		expect(layout.pageCount).toBe(1);
+	});
+
+	it("sizes the page to the chosen device screen (GP_E6_S2)", async () => {
+		const { layout } = await renderPdf(
+			parseBlocks("Een alinea voor de Paper Pro."),
+			META,
+			{ pageWidth: 509, pageHeight: 679 },
+		);
+		expect(layout.pageWidth).toBe(509);
+		expect(layout.pageHeight).toBe(679);
+		// Text starts at the top of the taller page, not at the rM2 height.
+		const first = layout.lines[0];
+		expect(first.y).toBeGreaterThan(596 - 40);
+	});
+
 	it("renders a wide table without dropping cell content (wraps instead)", async () => {
 		const md = [
 			"| Doelgroep | Algemene leerdoelen | Kennis | Vaardigheden | Bewustzijn |",

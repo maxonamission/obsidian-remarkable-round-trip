@@ -55,3 +55,24 @@ describe("parseBlocks", () => {
 		]);
 	});
 });
+
+describe("pagebreak marker (GP_E6_S1)", () => {
+	it("turns \\pagebreak on its own line into a pagebreak block", () => {
+		const blocks = parseBlocks("eerste\n\n\\pagebreak\n\ntweede");
+		expect(blocks).toEqual([
+			{ type: "paragraph", text: "eerste" },
+			{ type: "pagebreak" },
+			{ type: "paragraph", text: "tweede" },
+		]);
+	});
+
+	it("flushes a running paragraph before the break", () => {
+		const blocks = parseBlocks("eerste\n\\pagebreak\ntweede");
+		expect(blocks.map((b) => b.type)).toEqual(["paragraph", "pagebreak", "paragraph"]);
+	});
+
+	it("leaves \\pagebreak inside a sentence alone", () => {
+		const blocks = parseBlocks("dit is geen \\pagebreak marker");
+		expect(blocks).toEqual([{ type: "paragraph", text: "dit is geen \\pagebreak marker" }]);
+	});
+});

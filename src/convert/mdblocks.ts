@@ -14,7 +14,8 @@ export type Block =
 	| { type: "quote"; lines: string[] }
 	| { type: "code"; lines: string[] }
 	| { type: "table"; rows: string[][] }
-	| { type: "hr" };
+	| { type: "hr" }
+	| { type: "pagebreak" };
 
 export interface ListItem {
 	depth: number;
@@ -26,6 +27,8 @@ export interface ListItem {
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
 const LIST_RE = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
 const HR_RE = /^(?:-{3,}|\*{3,}|_{3,})\s*$/;
+// Pandoc's convention, adopted as ours (GP_E6_S1): a hard page break.
+const PAGEBREAK_RE = /^\\pagebreak$/;
 const FENCE_RE = /^(?:```|~~~)/;
 const TABLE_DIVIDER_RE = /^\s*\|?[\s:|-]+\|[\s:|-]*$/;
 
@@ -109,6 +112,12 @@ export function parseBlocks(markdown: string): Block[] {
 				level: heading[1].length,
 				text: stripInline(heading[2].trim()),
 			});
+			continue;
+		}
+
+		if (PAGEBREAK_RE.test(line.trim())) {
+			flushAll();
+			blocks.push({ type: "pagebreak" });
 			continue;
 		}
 

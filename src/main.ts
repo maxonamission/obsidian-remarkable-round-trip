@@ -8,7 +8,13 @@
 
 import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, requestUrl } from "obsidian";
 import { notify, progressNotice, updateProgress } from "./notify";
-import { DEFAULT_SETTINGS, RoundTripSettings, RoundTripSettingTab } from "./settings";
+import {
+	DEFAULT_SETTINGS,
+	DEVICE_PAGE_SIZES,
+	RoundTripSettings,
+	RoundTripSettingTab,
+	layoutFor,
+} from "./settings";
 import { remarkable } from "rmapi-js";
 import { HttpClient } from "./transport/http";
 import {
@@ -401,10 +407,11 @@ export default class RoundTripPlugin extends Plugin {
 							(fm as Record<string, unknown>)[DOCID_FRONTMATTER_KEY] = docId;
 						});
 					},
+					// Preset bundle (or the sliders) plus the page size of the
+					// chosen device screen (GP_E6_S2/S3).
 					layout: {
-						fontSize: this.settings.fontSize,
-						lineHeight: this.settings.lineHeight,
-						margin: this.settings.margin,
+						...layoutFor(this.settings),
+						...DEVICE_PAGE_SIZES[this.settings.deviceModel],
 					},
 					frontmatterAsTitleBlock: this.settings.frontmatterAsTitleBlock,
 					skipUnchanged: options.auto === true,
