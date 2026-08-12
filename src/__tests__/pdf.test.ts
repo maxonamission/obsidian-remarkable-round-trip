@@ -93,6 +93,19 @@ describe("wrapText word breaking (GP_E5_S4)", () => {
 		expect(lines.join("")).toBe("Achillespees");
 	});
 
+	it("does not break a word that exactly fills its column (float noise)", async () => {
+		// The real field case (0.29.0, "Achillespee/s"): a two-column table
+		// whose first column is sized BY this word — the wrap width re-enters
+		// as width-minus-plus-pad and lands 7e-15 pt under the word's width.
+		const doc = await PDFDocument.create();
+		const font = await doc.embedFont(StandardFonts.Helvetica);
+		const word = "Achillespees";
+		const maxWidth = font.widthOfTextAtSize(word, 10) + 8 - 8;
+		expect(wrapText(word, font, 10, maxWidth)).toEqual([word]);
+		// 0.29.0 uploads (typo 2) broke here, and must replay that way.
+		expect(wrapText(word, font, 10, maxWidth, 2).length).toBeGreaterThan(1);
+	});
+
 	it("replays the old overflow for typo-version-1 layouts", async () => {
 		const doc = await PDFDocument.create();
 		const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -168,6 +181,24 @@ describe("renderPdf", () => {
 		};
 		// More vertical space consumed by the fill-in row pushes what follows down.
 		expect(after(modern.layout.lines)).toBeLessThan(after(legacy.layout.lines));
+	});
+
+	it("gives label rows (only first column filled) writing height too", async () => {
+		// The owner's log shape: "Slaap (uren) | " — a label with an empty
+		// value cell to complete on the device (GP_E5_S5 follow-up, typo 3).
+		const md = "| Veld | Waarde |\n|---|---|\n| Slaap (uren) | |\n\nNa de tabel";
+		const blocks = parseBlocks(md);
+		const modern = await renderPdf(blocks, META, {});
+		const previous = await renderPdf(blocks, META, { typo: 2 });
+		const after = (layoutLines: { text: string; y: number }[]) => {
+			const line = layoutLines.find((l) => l.text.includes("Na de tabel"));
+			if (!line) throw new Error("paragraph after table not laid out");
+			return line.y;
+		};
+		// The label itself is still drawn...
+		expect(modern.layout.lines.some((l) => l.text.includes("Slaap"))).toBe(true);
+		// ...and the row consumes writing height, pushing what follows down.
+		expect(after(modern.layout.lines)).toBeLessThan(after(previous.layout.lines));
 	});
 
 	it("renders a wide table without dropping cell content (wraps instead)", async () => {

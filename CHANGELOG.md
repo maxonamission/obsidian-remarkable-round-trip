@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.29.1] - 2026-08-12
+
+### Improved
+
+- **Label rows get writing space too.** A table row where only the first
+  column is filled — "Sleep (hours) | " with the value left to complete on
+  the device — now gets the same writing height and faint rule as an
+  all-empty row. The label is drawn as usual.
+
+### Fixed
+
+- **A word that exactly fills its table column is no longer broken.** The
+  0.29.0 word-breaking compared measured widths that differ only by float
+  noise (56.13 vs 56.129999999999995), so a two-column table sized by its
+  longest word split that very word ("Achillespee/s"). Width comparisons now
+  carry a hairline tolerance. Documents sent with 0.29.0 replay the old
+  behaviour on import, so their annotations stay anchored.
+
 ## [0.29.0] - 2026-08-12
 
 ### Improved

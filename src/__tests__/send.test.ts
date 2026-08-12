@@ -98,7 +98,7 @@ describe("sendNote output format", () => {
 			fontSize: 13,
 			lineHeight: 1.5,
 			margin: 40,
-			typo: 2,
+			typo: 3,
 		});
 	});
 

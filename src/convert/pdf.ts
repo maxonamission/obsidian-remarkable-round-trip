@@ -21,9 +21,10 @@ import type { Block, ListItem } from "./mdblocks";
  * typesetting it again, so behaviour changes (word breaking, WinAnsi
  * typography, fill-in rows, checkboxes) must replay per document — otherwise
  * every improvement shifts the anchors of previously sent documents
- * (the GP_E3_S15 lesson). Version 1 = pre-0.29 behaviour.
+ * (the GP_E3_S15 lesson). Version 1 = pre-0.29 behaviour; version 2 =
+ * 0.29.0 (word breaking without float tolerance); version 3 = current.
  */
-export const TYPO_VERSION = 2;
+export const TYPO_VERSION = 3;
 
 export interface PdfLayoutOptions {
 	/** Base body font size in points. */
@@ -281,13 +282,28 @@ function ensureRoom(ts: Typesetter, needed: number): void {
 	if (ts.y - needed < ts.opts.margin) newPage(ts);
 }
 
+/**
+ * Float-noise guard for width comparisons (GP_E5_S4 follow-up): a table
+ * column's wrap width is its own content's measured width minus and plus the
+ * same padding, which re-enters as e.g. 56.129999999999995 against a word of
+ * 56.13. Without the tolerance, a word that exactly fills its column is
+ * "wider" by 7e-15 pt and gets broken ("Achillespee/s").
+ */
+const WIDTH_EPSILON = 0.01;
+
 /** Split a single word wider than the line into chunks that fit (GP_E5_S4). */
-function breakLongWord(word: string, font: PDFFont, size: number, maxWidth: number): string[] {
+function breakLongWord(
+	word: string,
+	font: PDFFont,
+	size: number,
+	maxWidth: number,
+	epsilon: number,
+): string[] {
 	const parts: string[] = [];
 	let current = "";
 	for (const ch of word) {
 		const candidate = current + ch;
-		if (font.widthOfTextAtSize(candidate, size) <= maxWidth || current === "") {
+		if (font.widthOfTextAtSize(candidate, size) <= maxWidth + epsilon || current === "") {
 			current = candidate;
 		} else {
 			parts.push(current);
@@ -322,18 +338,23 @@ export function wrapText(
 			continue;
 		}
 		// The candidate overflows: only now is the word's own width worth
-		// measuring (the fitting case above stays a single measurement).
-		if (typo >= 2 && font.widthOfTextAtSize(word, size) > maxWidth) {
+		// measuring (the fitting case above stays a single measurement). The
+		// float tolerance is itself versioned: 0.29.0 (typo 2) broke words
+		// without it, and its uploads must replay that way.
+		const epsilon = typo >= 3 ? WIDTH_EPSILON : 0;
+		if (typo >= 2 && font.widthOfTextAtSize(word, size) > maxWidth + epsilon) {
 			if (current !== "") {
 				lines.push(current);
 			}
-			const parts = breakLongWord(word, font, size, maxWidth);
+			const parts = breakLongWord(word, font, size, maxWidth, epsilon);
 			lines.push(...parts.slice(0, -1));
 			current = parts[parts.length - 1];
 			continue;
 		}
 		if (current === "") {
-			// Version 1: a single word wider than the line overflows as-is.
+			// A single word wider than the line overflows as-is: version-1
+			// behaviour, and for version 2 the hairline case where the word
+			// fills its column within the float tolerance.
 			current = candidate;
 		} else {
 			lines.push(current);
@@ -572,14 +593,25 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 			});
 			return;
 		}
+		// A label row — only the first column filled, the rest left to complete
+		// on the device ("Slaap (uren) | _") — is the other fill-in shape
+		// (GP_E5_S5 follow-up): the label is drawn, and the row still gets
+		// writing height plus a rule. Typo 3: earlier uploads replay without.
+		const isLabelRow =
+			ts.opts.typo >= 3 &&
+			rowIndex > 0 &&
+			row.length > 1 &&
+			(row[0] ?? "").trim() !== "" &&
+			row.slice(1).every((cell) => (cell ?? "").trim() === "");
 		const font = rowIndex === 0 ? ts.bold : ts.body;
 		const cellLines = row.map((cell, c) =>
 			wrapText(toWinAnsi(cell, ts.opts.typo), font, size, Math.max(widths[c] - pad, 24), ts.opts.typo),
 		);
 		const rowLines = Math.max(1, ...cellLines.map((lines) => lines.length));
+		const rowHeight = isLabelRow ? Math.max(rowLines, 2.4) * step : rowLines * step;
 		// Keep the row on one page when it fits; taller-than-page rows fall
 		// back to a mid-row break via the per-line floor guard below.
-		ensureRoom(ts, Math.min(rowLines * step, PAGE_HEIGHT - 2 * ts.opts.margin));
+		ensureRoom(ts, Math.min(rowHeight, PAGE_HEIGHT - 2 * ts.opts.margin));
 		const top = ts.y;
 		let lowest = top;
 		row.forEach((_cell, c) => {
@@ -592,6 +624,15 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 			lowest = Math.min(lowest, y);
 		});
 		ts.y = lowest;
+		if (isLabelRow) {
+			ts.y = Math.min(ts.y, Math.max(top - rowHeight, ts.opts.margin));
+			ts.page.drawLine({
+				start: { x: ts.opts.margin, y: ts.y },
+				end: { x: ts.opts.margin + total, y: ts.y },
+				thickness: 0.4,
+				color: rgb(0.7, 0.7, 0.7),
+			});
+		}
 		if (rowIndex === 0) {
 			ts.y -= 3;
 			ts.page.drawLine({
