@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.32.1] - 2026-08-13
+
+### Improved
+
+- **Fill-in rows are a touch tighter** (2.0 line steps instead of 2.4 —
+  still ample for a pen line), so a log table more often shares a page with
+  the text it belongs to instead of moving to its own. Documents sent
+  earlier keep their roomier rows on import.
+
 ## [0.32.0] - 2026-08-13
 
 ### Changed

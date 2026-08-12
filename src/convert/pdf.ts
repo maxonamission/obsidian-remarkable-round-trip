@@ -23,10 +23,12 @@ import type { Block, ListItem } from "./mdblocks";
  * every improvement shifts the anchors of previously sent documents
  * (the GP_E3_S15 lesson). Version 1 = pre-0.29 behaviour; version 2 =
  * 0.29.0 (word breaking without float tolerance); version 3 = 0.29.1-0.30.0
- * (float tolerance, label rows); version 4 = current (keep tables together,
- * keep headings with their content).
+ * (float tolerance, label rows); version 4 = 0.31.0 (keep tables together,
+ * keep headings with their content); version 5 = current (fill-in rows at
+ * 2.0 line steps instead of 2.4 — owner feedback: the roomier rows pushed
+ * whole tables away from their text).
  */
-export const TYPO_VERSION = 4;
+export const TYPO_VERSION = 5;
 
 export interface PdfLayoutOptions {
 	/** Base body font size in points. */
@@ -595,13 +597,17 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 	// Plan every row up front: fill-in shapes (GP_E5_S5), wrapped cell lines
 	// and each row's height. The plan feeds the keep-together decision below
 	// AND the drawing loop, so the two can never disagree.
+	// Fill-in rows: enough height to write in with a pen, but not so much
+	// that a log table can no longer share a page with its text (typo 5
+	// trimmed 2.4 to 2.0 on owner feedback; earlier uploads replay 2.4).
+	const writingSteps = ts.opts.typo >= 5 ? 2 : 2.4;
 	const plans = rows.map((row, rowIndex) => {
 		// An all-empty body row is a fill-in row (GP_E5_S5): real writing
 		// height and a faint rule — a one-line sliver is useless under a pen.
 		const writing =
 			ts.opts.typo >= 2 && rowIndex > 0 && row.every((cell) => (cell ?? "").trim() === "");
 		if (writing) {
-			return { writing, label: false, cellLines: [] as string[][], height: 2.4 * step };
+			return { writing, label: false, cellLines: [] as string[][], height: writingSteps * step };
 		}
 		// A label row — only the first column filled, the rest left to
 		// complete on the device — is the other fill-in shape (typo 3+).
@@ -616,7 +622,8 @@ function drawTable(ts: Typesetter, rows: string[][]): void {
 			wrapText(toWinAnsi(cell, ts.opts.typo), font, size, Math.max(widths[c] - pad, 24), ts.opts.typo),
 		);
 		const rowLines = Math.max(1, ...cellLines.map((lines) => lines.length));
-		const height = (label ? Math.max(rowLines, 2.4) : rowLines) * step + (rowIndex === 0 ? 6 : 0);
+		const height =
+			(label ? Math.max(rowLines, writingSteps) : rowLines) * step + (rowIndex === 0 ? 6 : 0);
 		return { writing, label, cellLines, height };
 	});
 
