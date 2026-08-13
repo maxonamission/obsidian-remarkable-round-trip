@@ -38,6 +38,28 @@ export interface ShimOptions {
 	 * loaded into. Defaults to the window this module was loaded in.
 	 */
 	scope?: { fetch: typeof fetch };
+	/**
+	 * Max transport requests in flight at once; the rest wait their turn
+	 * (GP_E5_S9). rmapi-js lists the device tree with an unbounded
+	 * Promise.all — three requests per item, all at once — which desktop
+	 * Electron rejects wholesale with net::ERR_INSUFFICIENT_RESOURCES once
+	 * the tree is a few hundred items. Mobile's native HTTP stacks queue
+	 * instead, which is exactly what this gate gives every platform.
+	 * Clamped to at least 1.
+	 */
+	maxConcurrent?: number;
+	/**
+	 * Ceiling (ms) before a gated request is failed to free its slot. A
+	 * deadlock valve, not a tuning knob: without it one transport call that
+	 * never settles (requestUrl has no timeout of its own) would hold its
+	 * slot forever, and eight of those would silently starve all reMarkable
+	 * traffic until restart. Generous by default — a slow multi-MB upload
+	 * must comfortably fit.
+	 */
+	requestTimeoutMs?: number;
+	/** Timer injection so tests can fire the timeout valve deterministically. */
+	setTimer?: (fn: () => void, ms: number) => number;
+	clearTimer?: (id: number) => void;
 }
 
 /**
@@ -57,7 +79,10 @@ export function isTransientTransportError(error: unknown): boolean {
 		message.includes("epipe") ||
 		message.includes("etimedout") ||
 		message.includes("socket") ||
-		message.includes("network")
+		message.includes("network") ||
+		// Chromium/Electron's "too many requests in flight" — the request never
+		// left, so a retry (behind the concurrency gate) is safe (GP_E5_S9).
+		message.includes("insufficient_resources")
 	);
 }
 
@@ -112,6 +137,59 @@ export function installFetchShim(
 	const backoffMs = options.backoffMs ?? ((attempt: number) => 250 * 2 ** (attempt - 1));
 	const sleep =
 		options.sleep ?? ((ms: number) => new Promise<void>((r) => window.setTimeout(r, ms)));
+	const maxConcurrent = Math.max(1, options.maxConcurrent ?? 8);
+	const requestTimeoutMs = options.requestTimeoutMs ?? 300_000;
+	const setTimer =
+		options.setTimer ?? ((fn: () => void, ms: number) => window.setTimeout(fn, ms));
+	const clearTimer = options.clearTimer ?? ((id: number) => window.clearTimeout(id));
+
+	// Minimal FIFO gate; a slot is held across a request's retries so a
+	// struggling request cannot be overtaken by an ever-growing queue.
+	let inFlight = 0;
+	const waiting: { grant: () => void; reject: (error: Error) => void }[] = [];
+	const acquire = (): Promise<void> =>
+		new Promise((resolve, reject) => {
+			if (inFlight < maxConcurrent) {
+				inFlight++;
+				resolve();
+			} else {
+				waiting.push({
+					grant: () => {
+						inFlight++;
+						resolve();
+					},
+					reject,
+				});
+			}
+		});
+	const release = (): void => {
+		inFlight--;
+		waiting.shift()?.grant();
+	};
+
+	// The valve behind requestTimeoutMs: the abandoned transport call may
+	// still settle later, but its slot is freed and its caller gets an error
+	// instead of an eternal await.
+	const withTimeout = <T>(work: Promise<T>): Promise<T> =>
+		new Promise((resolve, reject) => {
+			const timer = setTimer(() => {
+				reject(
+					new Error(
+						`reMarkable request did not complete within ${Math.round(requestTimeoutMs / 1000)}s and was abandoned.`,
+					),
+				);
+			}, requestTimeoutMs);
+			work.then(
+				(value) => {
+					clearTimer(timer);
+					resolve(value);
+				},
+				(error: unknown) => {
+					clearTimer(timer);
+					reject(error instanceof Error ? error : new Error(String(error)));
+				},
+			);
+		});
 
 	/**
 	 * Every request rmapi-js makes is safe to repeat: reads are GETs, blob
@@ -145,7 +223,13 @@ export function installFetchShim(
 		const rawBody = init?.body ?? (request ? await request.arrayBuffer() : undefined);
 		const body = await bodyToTransportBody(rawBody);
 
-		const response = await sendWithRetry({ url, method, headers, body });
+		await acquire();
+		let response: ShimTransportResponse;
+		try {
+			response = await withTimeout(sendWithRetry({ url, method, headers, body }));
+		} finally {
+			release();
+		}
 		return new Response(response.status === 204 ? null : response.arrayBuffer, {
 			status: response.status,
 			headers: response.headers,
@@ -156,6 +240,16 @@ export function installFetchShim(
 	return {
 		restore: () => {
 			scope.fetch = originalFetch;
+			// Requests that never got a slot must not fire minutes after the
+			// plugin unloaded or the transport was reconfigured — fail them
+			// now, loudly, instead of letting them outlive their shim.
+			for (const waiter of waiting.splice(0)) {
+				waiter.reject(
+					new Error(
+						"reMarkable transport was shut down or reconfigured before this request started; send again.",
+					),
+				);
+			}
 		},
 	};
 }

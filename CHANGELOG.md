@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.33.1] - 2026-08-13
+
+### Fixed
+
+- **Folder mirroring no longer fails on desktop with a large device
+  library.** Listing the device's folder tree fired one burst of requests
+  per document, all at once; with a few hundred items on the device,
+  desktop Obsidian refused the burst (`net::ERR_INSUFFICIENT_RESOURCES`)
+  and sends fell back to the device root. Requests are now queued through
+  a small concurrency gate — the same discipline mobile's network stack
+  applies natively — and that specific error is retried instead of
+  aborting the send. Very likely the same root cause as the Android
+  "unexpected end of stream" failures some users saw.
+- The CORS shim now always patches the window the plugin actually runs
+  in; previously a popped-out window that had focus during a settings
+  change could end up patched instead, breaking folder mirroring on
+  desktop until restart.
+
 ## [0.33.0] - 2026-08-13
 
 ### Added

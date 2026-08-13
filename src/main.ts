@@ -200,6 +200,11 @@ export default class RoundTripPlugin extends Plugin {
 	 * only the reMarkable hosts through requestUrl (see fetchshim.ts, N7).
 	 */
 	private setupFetchShim(): void {
+		// Reinstalling swaps in a fresh concurrency gate; requests already
+		// holding a slot in the old one finish there (briefly allowing up to
+		// 2× the cap in flight), while its queued tail is rejected by
+		// restore() — accepted: a settings change mid-send may abort that
+		// send's remaining mirror calls, which resurface as a clear error.
 		this.fetchShim?.restore();
 		const hosts = [OFFICIAL_ENDPOINTS.authHost, OFFICIAL_ENDPOINTS.docHost, RAW_HOST];
 		if (this.settings.useCustomEndpoint && this.settings.customEndpointUrl !== "") {
@@ -219,9 +224,12 @@ export default class RoundTripPlugin extends Plugin {
 				arrayBuffer: response.arrayBuffer,
 			};
 		};
-		// activeWindow, not the shared global: a popped-out window has its own
-		// fetch, and only the window the plugin runs in should be patched.
-		this.fetchShim = installFetchShim(hosts, transport, { scope: activeWindow });
+		// The default scope: the window this bundle (and rmapi-js inside it)
+		// was loaded in — the only realm whose `fetch` rmapi-js ever calls.
+		// Passing activeWindow here would patch a popped-out window instead
+		// whenever one had focus during a settings save, leaving the real
+		// fetch CORS-bound on desktop (GP_E5_S9).
+		this.fetchShim = installFetchShim(hosts, transport);
 	}
 
 	/** rmapi-js host options; rmfakecloud serves all three from one base (F7). */
