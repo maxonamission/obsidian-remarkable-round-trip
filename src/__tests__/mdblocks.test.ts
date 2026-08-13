@@ -77,6 +77,40 @@ describe("pagebreak marker (GP_E6_S1)", () => {
 	});
 });
 
+describe("styled label paragraphs (GP_E6_S7)", () => {
+	it("marks a whole-bold paragraph as a bold label", () => {
+		expect(parseBlocks("**Doel**")).toEqual([{ type: "paragraph", text: "Doel", style: "bold" }]);
+		expect(parseBlocks("__Doel__")).toEqual([{ type: "paragraph", text: "Doel", style: "bold" }]);
+	});
+
+	it("marks a whole-italic paragraph as an italic label", () => {
+		expect(parseBlocks("*Krachtblok — trekken*")).toEqual([
+			{ type: "paragraph", text: "Krachtblok — trekken", style: "italic" },
+		]);
+		expect(parseBlocks("_cursief_")).toEqual([
+			{ type: "paragraph", text: "cursief", style: "italic" },
+		]);
+	});
+
+	it("keeps mixed or partial styling as a plain paragraph (GP_E6_S8, parked)", () => {
+		expect(parseBlocks("**Doel** van vandaag")).toEqual([
+			{ type: "paragraph", text: "Doel van vandaag" },
+		]);
+		expect(parseBlocks("zie **Doel** hier")).toEqual([
+			{ type: "paragraph", text: "zie Doel hier" },
+		]);
+		expect(parseBlocks("**twee** **spans**")).toEqual([
+			{ type: "paragraph", text: "twee spans" },
+		]);
+	});
+
+	it("keeps a multi-line paragraph that starts bold plain", () => {
+		expect(parseBlocks("**Doel**\nmet vervolgtekst")).toEqual([
+			{ type: "paragraph", text: "Doel met vervolgtekst" },
+		]);
+	});
+});
+
 describe("dropLeadingTitleHeading (GP_E6_S6)", () => {
 	it("drops a first H1 that repeats the title, whatever the case or spacing", () => {
 		const blocks = parseBlocks("# 90-90 Heuprotatie \n\ntekst");

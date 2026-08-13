@@ -21,8 +21,9 @@ const DEVICE_MODEL_LABELS: Record<DeviceModel, string> = {
 	paperpro: "reMarkable Paper Pro",
 };
 
-/** GP_E6_S4: automatic page breaks before headings. */
+/** GP_E6_S4: automatic page breaks before headings; GP_E6_S9 adds smart. */
 const HEADING_BREAK_LABELS: Record<HeadingBreak, string> = {
+	smart: "Smart — new page only when a section won't fit (recommended)",
 	off: "Off — only at \\pagebreak markers",
 	h1: "Before # headings",
 	h2: "Before # and ## headings",
@@ -179,9 +180,11 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 				key: "pageBreakAtHeading",
 				name: "Start a new page at headings",
 				desc:
-					"Automatically turn the page before headings of this level — a " +
-					"weekly log with a heading per day gets each day on its own " +
-					"page. A \\pagebreak line works everywhere, whatever this says.",
+					"Smart measures each # or ## section and turns the page only " +
+					"when it would be split; the level options always break " +
+					"there — a weekly log with a heading per day gets each day " +
+					"on its own page. A \\pagebreak line works everywhere, " +
+					"whatever this says.",
 				control: { type: "dropdown", options: HEADING_BREAK_LABELS },
 				visibleWhen: { key: "outputFormat", equals: "pdf" },
 			},

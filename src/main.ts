@@ -15,6 +15,8 @@ import {
 	RoundTripSettingTab,
 	breakLevelFor,
 	layoutFor,
+	packFor,
+	settingsFrom,
 } from "./settings";
 import { remarkable } from "rmapi-js";
 import { HttpClient } from "./transport/http";
@@ -177,7 +179,7 @@ export default class RoundTripPlugin extends Plugin {
 
 	async loadSettings(): Promise<void> {
 		const stored = ((await this.loadData()) ?? {}) as Partial<RoundTripSettings>;
-		this.settings = { ...DEFAULT_SETTINGS, ...stored };
+		this.settings = settingsFrom(stored);
 	}
 
 	async saveSettings(): Promise<void> {
@@ -409,12 +411,14 @@ export default class RoundTripPlugin extends Plugin {
 						});
 					},
 					// Preset bundle (or the sliders), the page size of the chosen
-					// device screen and the heading-break level (GP_E6_S2/S3/S4);
-					// all of it is recorded per upload for layout reproduction.
+					// device screen, the heading-break level and section packing
+					// (GP_E6_S2/S3/S4/S9); all of it is recorded per upload for
+					// layout reproduction.
 					layout: {
 						...layoutFor(this.settings),
 						...DEVICE_PAGE_SIZES[this.settings.deviceModel],
 						breakAtHeading: breakLevelFor(this.settings),
+						packSections: packFor(this.settings),
 					},
 					frontmatterAsTitleBlock: this.settings.frontmatterAsTitleBlock,
 					skipUnchanged: options.auto === true,

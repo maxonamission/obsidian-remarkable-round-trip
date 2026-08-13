@@ -9,7 +9,7 @@
 
 export type Block =
 	| { type: "heading"; level: number; text: string }
-	| { type: "paragraph"; text: string }
+	| { type: "paragraph"; text: string; style?: "bold" | "italic" }
 	| { type: "list"; items: ListItem[] }
 	| { type: "quote"; lines: string[] }
 	| { type: "code"; lines: string[] }
@@ -31,6 +31,18 @@ const HR_RE = /^(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const PAGEBREAK_RE = /^\\pagebreak$/;
 const FENCE_RE = /^(?:```|~~~)/;
 const TABLE_DIVIDER_RE = /^\s*\|?[\s:|-]+\|[\s:|-]*$/;
+
+/**
+ * A paragraph that is one single bold or italic span — "**Doel**" on its own
+ * line — is a styled label (GP_E6_S7): the typesetter can honour it as a
+ * whole line in one font. Mixed styling mid-sentence stays plain for now
+ * (GP_E6_S8, parked).
+ */
+function paragraphStyle(raw: string): "bold" | "italic" | undefined {
+	if (/^\*\*[^*]+\*\*$/.test(raw) || /^__[^_]+__$/.test(raw)) return "bold";
+	if (/^\*[^*]+\*$/.test(raw) || /^_[^_]+_$/.test(raw)) return "italic";
+	return undefined;
+}
 
 /** Strip inline markdown markers, keeping the readable text. */
 export function stripInline(text: string): string {
@@ -62,7 +74,13 @@ export function parseBlocks(markdown: string): Block[] {
 
 	const flushParagraph = () => {
 		if (paragraph.length > 0) {
-			blocks.push({ type: "paragraph", text: stripInline(paragraph.join(" ").trim()) });
+			const raw = paragraph.join(" ").trim();
+			const style = paragraphStyle(raw);
+			blocks.push(
+				style === undefined
+					? { type: "paragraph", text: stripInline(raw) }
+					: { type: "paragraph", text: stripInline(raw), style },
+			);
 			paragraph = [];
 		}
 	};

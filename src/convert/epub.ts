@@ -105,9 +105,18 @@ export function renderBody(blocks: Block[]): RenderedBody {
 				parts.push(`<h${level} id="${id}">${escapeXml(block.text)}</h${level}>`);
 				break;
 			}
-			case "paragraph":
-				parts.push(`<p>${escapeXml(block.text)}</p>`);
+			case "paragraph": {
+				// Whole-paragraph emphasis survives as real markup (GP_E6_S7).
+				const text = escapeXml(block.text);
+				const inner =
+					block.style === "bold"
+						? `<strong>${text}</strong>`
+						: block.style === "italic"
+							? `<em>${text}</em>`
+							: text;
+				parts.push(`<p>${inner}</p>`);
 				break;
+			}
 			case "list":
 				parts.push(renderList(block.items));
 				break;

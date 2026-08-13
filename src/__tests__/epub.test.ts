@@ -63,6 +63,13 @@ describe("renderBody", () => {
 		for (const entry of toc) expect(xhtml).toContain(`id="${entry.id}"`);
 	});
 
+	it("keeps whole-paragraph emphasis as real markup (GP_E6_S7)", () => {
+		const { xhtml } = renderBody(parseBlocks("**Doel**\n\n*Krachtblok — trekken*\n\ngewoon"));
+		expect(xhtml).toContain("<p><strong>Doel</strong></p>");
+		expect(xhtml).toContain("<p><em>Krachtblok — trekken</em></p>");
+		expect(xhtml).toContain("<p>gewoon</p>");
+	});
+
 	it("escapes content that would otherwise break the document", () => {
 		const { xhtml } = renderBody(parseBlocks("Kosten < 5 & meer"));
 		expect(xhtml).toContain("Kosten &lt; 5 &amp; meer");

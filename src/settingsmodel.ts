@@ -82,11 +82,25 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	deviceBaseFolder: "Obsidian",
 	deviceModel: "rm2",
 	layoutPreset: "custom",
-	pageBreakAtHeading: "off",
+	pageBreakAtHeading: "smart",
 	showUpdateNotice: true,
 	lastSeenVersion: "",
 	mappings: {},
 };
+
+/**
+ * Merge stored settings over the defaults. The smart page-break default is
+ * for fresh installs only (GP_E6_S9): stored data that predates the setting
+ * (any keys, but not this one) keeps the old manual default, so an upgrade
+ * never silently repaginates notes on re-send.
+ */
+export function settingsFrom(stored: Partial<RoundTripSettings>): RoundTripSettings {
+	const settings = { ...DEFAULT_SETTINGS, ...stored };
+	if (Object.keys(stored).length > 0 && stored.pageBreakAtHeading === undefined) {
+		settings.pageBreakAtHeading = "off";
+	}
+	return settings;
+}
 
 /** reMarkable screens the typesetter can target (GP_E6_S2). */
 export type DeviceModel = "rm2" | "paperpro";
@@ -131,10 +145,19 @@ export function layoutFor(settings: RoundTripSettings): {
 	};
 }
 
-/** Automatic page breaks before headings (GP_E6_S4). */
-export type HeadingBreak = "off" | "h1" | "h2";
+/**
+ * Automatic page breaks before headings (GP_E6_S4); "smart" packs instead of
+ * breaking unconditionally (GP_E6_S9): a #/## section starts on a fresh page
+ * only when it does not fit whole in the space left on the current one.
+ */
+export type HeadingBreak = "off" | "h1" | "h2" | "smart";
 
 /** The heading level up to which sends break the page; 0 = manual only. */
 export function breakLevelFor(settings: RoundTripSettings): number {
-	return { off: 0, h1: 1, h2: 2 }[settings.pageBreakAtHeading];
+	return { off: 0, h1: 1, h2: 2, smart: 0 }[settings.pageBreakAtHeading];
+}
+
+/** Whether sends should measure #/## sections and pack them (GP_E6_S9). */
+export function packFor(settings: RoundTripSettings): boolean {
+	return settings.pageBreakAtHeading === "smart";
 }

@@ -5,6 +5,8 @@ import {
 	LAYOUT_PRESETS,
 	breakLevelFor,
 	layoutFor,
+	packFor,
+	settingsFrom,
 } from "../settingsmodel";
 
 describe("layout presets (GP_E6_S3)", () => {
@@ -48,10 +50,32 @@ describe("device page sizes (GP_E6_S2)", () => {
 	});
 });
 
-describe("heading-break level (GP_E6_S4)", () => {
-	it("maps the setting to the typesetter's level, defaulting to manual only", () => {
-		expect(breakLevelFor(DEFAULT_SETTINGS)).toBe(0);
+describe("heading-break level (GP_E6_S4, smart via GP_E6_S9)", () => {
+	it("maps the setting to the typesetter's level; smart breaks no level", () => {
+		expect(breakLevelFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "off" })).toBe(0);
 		expect(breakLevelFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "h1" })).toBe(1);
 		expect(breakLevelFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "h2" })).toBe(2);
+		expect(breakLevelFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "smart" })).toBe(0);
+	});
+
+	it("packs sections only on smart, the default for fresh installs", () => {
+		expect(DEFAULT_SETTINGS.pageBreakAtHeading).toBe("smart");
+		expect(packFor(DEFAULT_SETTINGS)).toBe(true);
+		expect(packFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "off" })).toBe(false);
+		expect(packFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "h1" })).toBe(false);
+		expect(packFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "h2" })).toBe(false);
+	});
+
+	it("gives smart to fresh installs only; an upgrade keeps the manual default", () => {
+		// No stored data at all: a fresh install, the smart default applies.
+		expect(settingsFrom({}).pageBreakAtHeading).toBe("smart");
+		// Stored data from before the setting existed: keep the old default,
+		// so the upgrade never silently repaginates notes on re-send.
+		expect(settingsFrom({ deviceToken: "x" }).pageBreakAtHeading).toBe("off");
+		// An explicit choice always wins.
+		expect(settingsFrom({ pageBreakAtHeading: "h2" }).pageBreakAtHeading).toBe("h2");
+		expect(
+			settingsFrom({ deviceToken: "x", pageBreakAtHeading: "smart" }).pageBreakAtHeading,
+		).toBe("smart");
 	});
 });

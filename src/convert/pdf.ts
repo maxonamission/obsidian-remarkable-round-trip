@@ -25,10 +25,11 @@ import { dropLeadingTitleHeading, type Block, type ListItem } from "./mdblocks";
  * 0.29.0 (word breaking without float tolerance); version 3 = 0.29.1-0.30.0
  * (float tolerance, label rows); version 4 = 0.31.0 (keep tables together,
  * keep headings with their content); version 5 = 0.32.1 (fill-in rows at
- * 2.0 line steps instead of 2.4); version 6 = current (a leading H1 that
- * repeats the document title is dropped — it showed twice).
+ * 2.0 line steps instead of 2.4); version 6 = 0.32.2 (a leading H1 that
+ * repeats the document title is dropped); version 7 = current (a paragraph
+ * that is one whole bold or italic span renders in that font).
  */
-export const TYPO_VERSION = 6;
+export const TYPO_VERSION = 7;
 
 export interface PdfLayoutOptions {
 	/** Base body font size in points. */
@@ -47,6 +48,11 @@ export interface PdfLayoutOptions {
 	 * 0 = only at explicit \pagebreak markers.
 	 */
 	breakAtHeading?: number;
+	/**
+	 * Smart section packing (GP_E6_S9): a #/## section starts on a fresh page
+	 * unless it still fits whole in the space left. Recorded per upload.
+	 */
+	packSections?: boolean;
 }
 
 export interface PdfMetadata {
@@ -119,6 +125,7 @@ const DEFAULTS: Required<PdfLayoutOptions> = {
 	pageWidth: PAGE_WIDTH,
 	pageHeight: PAGE_HEIGHT,
 	breakAtHeading: 0,
+	packSections: false,
 };
 
 /**
@@ -416,16 +423,25 @@ function drawHeading(ts: Typesetter, level: number, text: string): void {
 	drawLines(ts, lines, ts.bold, size, 0, size * 0.35);
 }
 
-function drawParagraph(ts: Typesetter, text: string): void {
+function drawParagraph(ts: Typesetter, text: string, style?: "bold" | "italic"): void {
 	beginBlock(ts, "paragraph");
+	// A whole-span label like "**Doel**" renders in its font (GP_E6_S7,
+	// typo 7): the line stays single-font, so wrapping, the word map and the
+	// projection stay trivially correct. Mixed inline styling is GP_E6_S8.
+	const font =
+		ts.opts.typo >= 7 && style === "bold"
+			? ts.bold
+			: ts.opts.typo >= 7 && style === "italic"
+				? ts.italic
+				: ts.body;
 	const lines = wrapText(
 		toWinAnsi(text, ts.opts.typo),
-		ts.body,
+		font,
 		ts.opts.fontSize,
 		contentWidth(ts),
 		ts.opts.typo,
 	);
-	drawLines(ts, lines, ts.body, ts.opts.fontSize, 0, ts.opts.fontSize * 0.6);
+	drawLines(ts, lines, font, ts.opts.fontSize, 0, ts.opts.fontSize * 0.6);
 }
 
 function drawList(ts: Typesetter, items: ListItem[]): void {
@@ -708,6 +724,105 @@ function drawHr(ts: Typesetter): void {
 	ts.y -= 6;
 }
 
+/** Draw one block through the shared per-type routines. */
+function drawBlock(ts: Typesetter, block: Block): void {
+	switch (block.type) {
+		case "heading":
+			drawHeading(ts, block.level, block.text);
+			break;
+		case "paragraph":
+			drawParagraph(ts, block.text, block.style);
+			break;
+		case "list":
+			drawList(ts, block.items);
+			break;
+		case "quote":
+			drawQuote(ts, block.lines);
+			break;
+		case "code":
+			drawCode(ts, block.lines);
+			break;
+		case "table":
+			drawTable(ts, block.rows);
+			break;
+		case "hr":
+			drawHr(ts);
+			break;
+		case "pagebreak":
+			// Handled by the render loop; never drawn.
+			break;
+	}
+}
+
+/**
+ * Index just past the section that starts at `start`: up to (not including)
+ * the next #/## heading or explicit pagebreak (GP_E6_S9).
+ */
+function sectionEnd(blocks: Block[], start: number): number {
+	for (let i = start + 1; i < blocks.length; i++) {
+		const b = blocks[i];
+		if (b.type === "pagebreak") return i;
+		if (b.type === "heading" && b.level >= 1 && b.level <= 2) return i;
+	}
+	return blocks.length;
+}
+
+/**
+ * Where measurement drawing lands: nowhere. Covers exactly the PDFPage
+ * methods the draw routines use; a routine growing a new method crashes
+ * loudly here (a test failure), never a silent mismeasure. A real scratch
+ * page is deliberately NOT used: pdf-lib's removePage only detaches a page
+ * from the page tree, its leaf and content stream would stay in the saved
+ * document and roughly double the upload's size.
+ */
+const MEASURE_SINK = {
+	drawText: () => undefined,
+	drawLine: () => undefined,
+	drawRectangle: () => undefined,
+} as unknown as PDFPage;
+
+/**
+ * Height the blocks would occupy, measured by running the SAME drawing code
+ * that will render them — never a parallel formula (the GP_E6_S5 lesson) —
+ * against the sink page above, on a page too tall to ever break. Every
+ * piece of typesetter state is restored afterwards, so the layout map, the
+ * anchors and the saved PDF see nothing of the measurement.
+ */
+function measureBlocks(ts: Typesetter, blocks: Block[]): number {
+	const saved = {
+		opts: ts.opts,
+		page: ts.page,
+		pageIndex: ts.pageIndex,
+		placed: ts.placed,
+		block: ts.block,
+		role: ts.role,
+		level: ts.level,
+		ordered: ts.ordered,
+		wordId: ts.wordId,
+		y: ts.y,
+	};
+	const tall = 1_000_000;
+	ts.opts = { ...ts.opts, pageHeight: tall };
+	ts.placed = [];
+	ts.page = MEASURE_SINK;
+	ts.y = tall - ts.opts.margin;
+	for (const block of blocks) {
+		drawBlock(ts, block);
+	}
+	const used = tall - ts.opts.margin - ts.y;
+	ts.opts = saved.opts;
+	ts.page = saved.page;
+	ts.pageIndex = saved.pageIndex;
+	ts.placed = saved.placed;
+	ts.block = saved.block;
+	ts.role = saved.role;
+	ts.level = saved.level;
+	ts.ordered = saved.ordered;
+	ts.wordId = saved.wordId;
+	ts.y = saved.y;
+	return used;
+}
+
 export interface PdfRender {
 	bytes: Uint8Array;
 	/** Where the text landed, for anchoring imported ink (GP_E3_S8). */
@@ -762,46 +877,43 @@ export async function renderPdf(
 	// page behind (GP_E6_S1). Headings up to opts.breakAtHeading get the
 	// same treatment (GP_E6_S4) — except the very first block, which would
 	// otherwise leave the title alone on a near-empty page.
+	//
+	// Smart packing (GP_E6_S9): with packSections on, a #/## section is
+	// pre-measured and moves whole to a fresh page only when it will not
+	// fit in the space left on the current one — small sections keep
+	// flowing, large ones start clean, no per-document markers needed.
 	let pendingBreak = false;
 	let drewContent = false;
-	for (const block of content) {
+	for (let index = 0; index < content.length; index++) {
+		const block = content[index];
 		if (block.type === "pagebreak") {
 			pendingBreak = true;
 			continue;
 		}
+		const startsSection =
+			block.type === "heading" && block.level >= 1 && block.level <= 2;
 		const breakForHeading =
 			block.type === "heading" &&
 			drewContent &&
 			block.level >= 1 &&
 			block.level <= ts.opts.breakAtHeading;
-		if (pendingBreak || breakForHeading) {
+		// Measuring is pointless on a still-fresh page (same guard as the
+		// break itself): whatever the section's height, nothing would move.
+		const breakForPacking =
+			ts.opts.packSections &&
+			startsSection &&
+			drewContent &&
+			!pendingBreak &&
+			!breakForHeading &&
+			ts.y < ts.opts.pageHeight - ts.opts.margin &&
+			measureBlocks(ts, content.slice(index, sectionEnd(content, index))) >
+				ts.y - ts.opts.margin;
+		if (pendingBreak || breakForHeading || breakForPacking) {
 			pendingBreak = false;
 			if (ts.y < ts.opts.pageHeight - ts.opts.margin) newPage(ts);
 		}
 		drewContent = true;
-		switch (block.type) {
-			case "heading":
-				drawHeading(ts, block.level, block.text);
-				break;
-			case "paragraph":
-				drawParagraph(ts, block.text);
-				break;
-			case "list":
-				drawList(ts, block.items);
-				break;
-			case "quote":
-				drawQuote(ts, block.lines);
-				break;
-			case "code":
-				drawCode(ts, block.lines);
-				break;
-			case "table":
-				drawTable(ts, block.rows);
-				break;
-			case "hr":
-				drawHr(ts);
-				break;
-		}
+		drawBlock(ts, block);
 	}
 
 	return {

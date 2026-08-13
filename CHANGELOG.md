@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.33.0] - 2026-08-13
+
+### Added
+
+- **Smart page breaks.** A new default for "Start a new page at headings":
+  the typesetter measures each `#`/`##` section and turns the page only
+  when the section would otherwise be split. A weekly log with a heading
+  per day still gets each day on its own page, while a compact exercise
+  card stays on one — no `\pagebreak` markers or per-note settings needed.
+  The fixed options (off / `#` / `##`) are still there if you prefer them,
+  and `\pagebreak` keeps working everywhere. Existing installs keep their
+  current setting; the packing choice travels with each upload, so
+  annotations on earlier documents stay anchored.
+- **Label paragraphs keep their emphasis.** A paragraph that is entirely
+  bold (`**Goal**`) or entirely italic (`*Strength block*`) — a common way
+  to label sections without headings — is now typeset in bold or italic
+  instead of plain text, in PDF and EPUB alike. Mixed styling inside
+  sentences is still flattened. Documents sent earlier replay the plain
+  look on import, so their annotations stay anchored.
+
 ## [0.32.2] - 2026-08-13
 
 ### Improved

@@ -38,6 +38,8 @@ export interface MappingEntry {
 		pageHeight?: number;
 		/** Heading level up to which pages broke (GP_E6_S4); absent = 0. */
 		breakAtHeading?: number;
+		/** Whether #/## sections were packed (GP_E6_S9); absent = false. */
+		packSections?: boolean;
 	};
 }
 

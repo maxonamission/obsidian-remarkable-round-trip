@@ -278,6 +278,75 @@ describe("renderPdf", () => {
 		).toHaveLength(2);
 	});
 
+	it("draws whole-bold and whole-italic label paragraphs in their own font (GP_E6_S7)", async () => {
+		// The face a text is drawn in: the last Tf operator before it, with
+		// pdf-lib's per-embed suffix stripped ("/Helvetica-Bold-123… 11 Tf").
+		const faceOf = (stream: string, text: string): string | undefined => {
+			const idx = stream.indexOf(text);
+			if (idx === -1) return undefined;
+			const tags = [...stream.slice(0, idx).matchAll(/\/([\w-]+?)-\d+\s+[\d.]+\s+Tf/g)];
+			return tags[tags.length - 1]?.[1];
+		};
+		const md = "**Doel**\n\nGewone tekst eronder.\n\n*Krachtblok*";
+		const modern = await renderPdf(parseBlocks(md), META, {});
+		const stream = inflateContentStreams(modern.bytes);
+		expect(faceOf(stream, "Gewone tekst")).toBe("Helvetica");
+		expect(faceOf(stream, "Doel")).toBe("Helvetica-Bold");
+		expect(faceOf(stream, "Krachtblok")).toBe("Helvetica-Oblique");
+		// Earlier uploads replay plain body text, so their anchors hold.
+		const legacy = await renderPdf(parseBlocks(md), META, { typo: 6 });
+		const legacyStream = inflateContentStreams(legacy.bytes);
+		expect(faceOf(legacyStream, "Doel")).toBe("Helvetica");
+		expect(faceOf(legacyStream, "Krachtblok")).toBe("Helvetica");
+	});
+
+	it("moves a #/## section whole to a fresh page when it cannot fit (GP_E6_S9)", async () => {
+		const filler = Array.from({ length: 4 }, (_, i) => `regel ${i}`).join("\n\n");
+		const section = "## Sectie\n\neen\n\ntwee\n\ndrie\n\nvier\n\nvijf";
+		const md = `${filler}\n\n${section}`;
+		const packed = await renderPdf(parseBlocks(md), META, {
+			pageHeight: 300,
+			packSections: true,
+		});
+		const pageOf = (r: typeof packed, text: string) =>
+			r.layout.lines.find((l) => l.text.includes(text))?.page;
+		expect(pageOf(packed, "Sectie")).toBe(2);
+		expect(pageOf(packed, "vijf")).toBe(2);
+		// The measurement leaves no trace: the map's pages are the real pages.
+		expect(Math.max(...packed.layout.lines.map((l) => l.page))).toBe(packed.layout.pageCount);
+		// Without packing the same document splits the section across pages.
+		const flowing = await renderPdf(parseBlocks(md), META, { pageHeight: 300 });
+		expect(pageOf(flowing, "Sectie")).toBe(1);
+		expect(pageOf(flowing, "vijf")).toBe(2);
+		// The saved PDF carries no orphaned measurement objects either: same
+		// content, so roughly the same size (scratch pages doubled it).
+		expect(packed.bytes.length).toBeLessThan(flowing.bytes.length * 1.3);
+	});
+
+	it("keeps a section flowing when it fits in the remaining space (GP_E6_S9)", async () => {
+		const md = "intro\n\n## Kort\n\nklaar";
+		const packed = await renderPdf(parseBlocks(md), META, {
+			pageHeight: 300,
+			packSections: true,
+		});
+		expect(packed.layout.pageCount).toBe(1);
+	});
+
+	it("packs an exercise card with several small sections onto one page (GP_E6_S9)", async () => {
+		const md = [
+			"*Krachtblok — trekken*",
+			"Horizontale trekbeweging met een elastiek.",
+			"## Uitvoering",
+			"1. Stap een\n2. Stap twee",
+			"## Aandachtspunten",
+			"- Ellebogen langs het lichaam",
+			"## Progressie",
+			"Zwaardere band.",
+		].join("\n\n");
+		const packed = await renderPdf(parseBlocks(md), META, { packSections: true });
+		expect(packed.layout.pageCount).toBe(1);
+	});
+
 	it("sizes the page to the chosen device screen (GP_E6_S2)", async () => {
 		const { layout } = await renderPdf(
 			parseBlocks("Een alinea voor de Paper Pro."),

@@ -67,9 +67,15 @@ What happens to your note on the way:
   column — becomes a fill-in row with room to write: a note with log tables
   turns into a form you complete on the device.
 - A `\pagebreak` line (Pandoc's convention) forces a new page — or let the
-  plugin do it: a setting starts a new page before `#` (or `#` and `##`)
-  headings. Tables that fit on a page stay whole instead of snapping in
-  two, and a heading never dangles at the bottom without its text.
+  plugin decide: the default **Smart** setting measures each `#`/`##`
+  section and turns the page only when it would otherwise be split, so a
+  day-per-heading log gets a page per day while a compact card stays on
+  one. Prefer a fixed rule? A new page before `#` (or `#` and `##`)
+  headings is still there. Tables that fit on a page stay whole instead of
+  snapping in two, and a heading never dangles at the bottom without its
+  text.
+- A paragraph that is entirely bold or italic — `**Goal**` as a label line —
+  keeps its emphasis on the page.
 - It is typeset as a PDF on your reMarkable's own page grid — pick your
   model under *Settings → Page layout* (reMarkable 1/2/Paper Pure or
   Paper Pro) — with a layout preset for what the page is for: easy
