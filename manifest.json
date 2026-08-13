@@ -1,9 +1,9 @@
 {
 	"id": "remarkable-round-trip",
 	"name": "reMarkable Round-Trip",
-	"version": "0.33.1",
+	"version": "0.34.0",
 	"minAppVersion": "1.13.0",
-	"description": "Write in your vault, review on reMarkable, and get your remarks back in the note they came from — as markdown you can actually edit and refine.",
+	"description": "Write notes where writing works best, review on reMarkable and get your remarks back in the note they came from. As markdown you can actually edit and refine.",
 	"author": "Max Kloosterman",
 	"authorUrl": "https://github.com/maxonamission",
 	"isDesktopOnly": false

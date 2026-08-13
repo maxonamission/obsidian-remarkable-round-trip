@@ -161,3 +161,35 @@ export function breakLevelFor(settings: RoundTripSettings): number {
 export function packFor(settings: RoundTripSettings): boolean {
 	return settings.pageBreakAtHeading === "smart";
 }
+
+/**
+ * Per-send layout choices a user can override for one send (GP_E6_S10);
+ * everything else (device model, output format) stays a stored setting.
+ */
+export type LayoutChoice = Pick<
+	RoundTripSettings,
+	"layoutPreset" | "fontSize" | "lineHeight" | "margin" | "pageBreakAtHeading"
+>;
+
+/**
+ * The complete layout a send should use — preset bundle (or sliders), the
+ * chosen device's page size, heading-break level and section packing. The
+ * ONE place this is composed: the settings path and the per-send override
+ * (GP_E6_S10) both go through here, so they can never drift apart.
+ */
+export function sendLayout(settings: RoundTripSettings): {
+	fontSize: number;
+	lineHeight: number;
+	margin: number;
+	pageWidth: number;
+	pageHeight: number;
+	breakAtHeading: number;
+	packSections: boolean;
+} {
+	return {
+		...layoutFor(settings),
+		...DEVICE_PAGE_SIZES[settings.deviceModel],
+		breakAtHeading: breakLevelFor(settings),
+		packSections: packFor(settings),
+	};
+}

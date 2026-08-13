@@ -6,6 +6,7 @@ import {
 	breakLevelFor,
 	layoutFor,
 	packFor,
+	sendLayout,
 	settingsFrom,
 } from "../settingsmodel";
 
@@ -64,6 +65,31 @@ describe("heading-break level (GP_E6_S4, smart via GP_E6_S9)", () => {
 		expect(packFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "off" })).toBe(false);
 		expect(packFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "h1" })).toBe(false);
 		expect(packFor({ ...DEFAULT_SETTINGS, pageBreakAtHeading: "h2" })).toBe(false);
+	});
+
+	it("composes the full send layout from settings — the one truth (GP_E6_S10)", () => {
+		expect(sendLayout({ ...DEFAULT_SETTINGS, deviceModel: "paperpro" })).toEqual({
+			fontSize: 11,
+			lineHeight: 1.5,
+			margin: 40,
+			pageWidth: 509,
+			pageHeight: 679,
+			breakAtHeading: 0,
+			packSections: true,
+		});
+	});
+
+	it("lets a per-send choice override the stored settings via the same path", () => {
+		const overridden = sendLayout({
+			...DEFAULT_SETTINGS,
+			layoutPreset: "compact",
+			pageBreakAtHeading: "h1",
+		});
+		expect(overridden).toMatchObject({
+			...LAYOUT_PRESETS.compact,
+			breakAtHeading: 1,
+			packSections: false,
+		});
 	});
 
 	it("gives smart to fresh installs only; an upgrade keeps the manual default", () => {

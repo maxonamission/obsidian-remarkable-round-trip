@@ -10,14 +10,12 @@ import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, requestUrl } from 
 import { notify, progressNotice, updateProgress } from "./notify";
 import {
 	DEFAULT_SETTINGS,
-	DEVICE_PAGE_SIZES,
 	RoundTripSettings,
 	RoundTripSettingTab,
-	breakLevelFor,
-	layoutFor,
-	packFor,
+	sendLayout,
 	settingsFrom,
 } from "./settings";
+import { LayoutChoiceModal } from "./layoutmodal";
 import { remarkable } from "rmapi-js";
 import { HttpClient } from "./transport/http";
 import {
@@ -128,6 +126,20 @@ export default class RoundTripPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "send-current-note-choose-layout",
+			name: "Send current note to reMarkable (choose layout)",
+			checkCallback: (checking) => {
+				// EPUB reflows: there is no layout to choose (the settings hide
+				// the layout section there for the same reason).
+				if (this.settings.outputFormat !== "pdf") return false;
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== "md") return false;
+				if (!checking) this.sendWithLayoutChoice([file], `"${file.basename}"`);
+				return true;
+			},
+		});
+
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
 				if (file instanceof TFile && file.extension === "md") {
@@ -136,6 +148,15 @@ export default class RoundTripPlugin extends Plugin {
 							.setTitle("Send to reMarkable")
 							.setIcon("send")
 							.onClick(() => void this.sendFiles([file])),
+					);
+					// ONE extra entry that opens the layout modal (GP_E6_S10) —
+					// deliberately not an entry per preset. PDF only: an EPUB
+					// reflows and has no layout to choose.
+					if (this.settings.outputFormat === "pdf") menu.addItem((item) =>
+						item
+							.setTitle("Send to reMarkable (choose layout…)")
+							.setIcon("send")
+							.onClick(() => this.sendWithLayoutChoice([file], `"${file.basename}"`)),
 					);
 				}
 				if (file instanceof TFolder) {
@@ -151,6 +172,18 @@ export default class RoundTripPlugin extends Plugin {
 								void this.sendFiles(collectMarkdownFiles(file), {
 									structureRoot: folderParentPath(file),
 								}),
+							),
+					);
+					if (this.settings.outputFormat === "pdf") menu.addItem((item) =>
+						item
+							.setTitle("Send folder to reMarkable (choose layout…)")
+							.setIcon("send")
+							.onClick(() =>
+								this.sendWithLayoutChoice(
+									collectMarkdownFiles(file),
+									`folder "${file.name}"`,
+									{ structureRoot: folderParentPath(file) },
+								),
 							),
 					);
 				}
@@ -172,6 +205,21 @@ export default class RoundTripPlugin extends Plugin {
 						)
 						.setIcon("send")
 						.onClick(() => void this.sendFiles(notes)),
+				);
+				if (this.settings.outputFormat === "pdf") menu.addItem((item) =>
+					item
+						.setTitle(
+							notes.length === 1
+								? "Send 1 note to reMarkable (choose layout…)"
+								: `Send ${notes.length} notes to reMarkable (choose layout…)`,
+						)
+						.setIcon("send")
+						.onClick(() =>
+							this.sendWithLayoutChoice(
+								notes,
+								notes.length === 1 ? "1 note" : `${notes.length} notes`,
+							),
+						),
 				);
 			}),
 		);
@@ -305,9 +353,41 @@ export default class RoundTripPlugin extends Plugin {
 		}
 	}
 
+	/**
+	 * Open the per-send layout modal, then send with the chosen layout
+	 * (GP_E6_S10). The refusals sendFiles would give (not paired, nothing to
+	 * send) surface BEFORE the modal opens — filling in a dialog first and
+	 * being refused after is the wrong order.
+	 */
+	private sendWithLayoutChoice(
+		files: TFile[],
+		subject: string,
+		options: { structureRoot?: string } = {},
+	): void {
+		if (files.length === 0) {
+			notify("No markdown notes to send.");
+			return;
+		}
+		if (!this.createClient().isRegistered) {
+			notify("Not paired with a reMarkable account yet — open the plugin settings first.");
+			return;
+		}
+		new LayoutChoiceModal(this.app, this.settings, subject, (choice) => {
+			void this.sendFiles(files, {
+				...options,
+				layout: sendLayout({ ...this.settings, ...choice }),
+			});
+		}).open();
+	}
+
 	async sendFiles(
 		files: TFile[],
-		options: { auto?: boolean; structureRoot?: string } = {},
+		options: {
+			auto?: boolean;
+			structureRoot?: string;
+			/** One-send override (GP_E6_S10); omitted = the stored settings. */
+			layout?: ReturnType<typeof sendLayout>;
+		} = {},
 	): Promise<void> {
 		if (files.length === 0) {
 			notify("No markdown notes to send.");
@@ -418,16 +498,10 @@ export default class RoundTripPlugin extends Plugin {
 							(fm as Record<string, unknown>)[DOCID_FRONTMATTER_KEY] = docId;
 						});
 					},
-					// Preset bundle (or the sliders), the page size of the chosen
-					// device screen, the heading-break level and section packing
-					// (GP_E6_S2/S3/S4/S9); all of it is recorded per upload for
-					// layout reproduction.
-					layout: {
-						...layoutFor(this.settings),
-						...DEVICE_PAGE_SIZES[this.settings.deviceModel],
-						breakAtHeading: breakLevelFor(this.settings),
-						packSections: packFor(this.settings),
-					},
+					// The stored settings' layout, or the one-send override from
+					// the layout modal (GP_E6_S10) — both composed by sendLayout,
+					// and always recorded per upload for layout reproduction.
+					layout: options.layout ?? sendLayout(this.settings),
 					frontmatterAsTitleBlock: this.settings.frontmatterAsTitleBlock,
 					skipUnchanged: options.auto === true,
 				},

@@ -1,26 +1,23 @@
 # reMarkable Round-Trip
 
-**Somewhere on your reMarkable is the best idea you had this month.**
+You review documents on your reMarkable because it's more comfortable and
+intuitive than a screen. It simply feels more natural to physically strike
+out a sentence, circle a phrase or mark a paragraph with a line in the
+margin.
 
-You can even picture it: the line through the paragraph that had to go, the
-circle around the one phrase worth keeping, the objection scrawled in the
-margin that would never have occurred to you at a keyboard. Paper does that.
-It slows the text down until you can hear yourself think.
+While reading, thoughts take shape — that's when I would add a remark or
+keyword as a hint for later edits. I wanted the best of both worlds. Writing
+and editing in Markdown with a keyboard or using dictation. Then switch to
+my reMarkable to slow down, review and think.
 
-Then you are back at your desk, and your vault has never heard of any of it.
-The tablet remembers everything and tells your vault nothing — a beautiful
-drawer that locks from the inside. So you prop the tablet next to the screen
-and retype your own thinking. Or you promise yourself you will, later, and a
-month of reading quietly evaporates.
+That is why I built reMarkable Round-Trip. Send your notes to your
+reMarkable with a simple command, review them and import your remarks back
+into the note they came from. The sentence you struck out is struck out. The
+phrase you circled is bold. The objection you scrawled sits under the
+paragraph it belongs to.
 
-**This plugin is the way back.** Send a note to your reMarkable, mark it up,
-run one command. Your note returns with your marks worked into it: the
-sentence you struck out is struck out, the phrase you circled is bold, the
-margin bar became a quote, the highlight kept its colour. And next Tuesday,
-when you search your vault for that idea, it is *there* — in the sentence it
-was about, with your objection sitting underneath.
-
-Markdown you can search, link and edit. Not a photo of a page.
+This is the first version of reMarkable Round-Trip and I hope you'll enjoy
+using it. If you know what it should do next — do let me know.
 
 > **Early days.** Fresh in the community plugin directory and under active
 > development. It is used daily on a real device, and rough edges get fixed
@@ -53,6 +50,10 @@ That is the whole loop. Everything below is detail for when you want it.
   subfolder structure on the device even when folder mirroring is off.
 - **Right-click a multi-selection**: several notes and folders at once;
   duplicates are filtered out.
+- **Choose a layout for one send**: every send entry has a *…(choose
+  layout…)* twin that opens a small dialog — preset, sliders, page breaks,
+  prefilled from your settings — applied to that send only. Your saved
+  settings stay as they are.
 - **Watch folder** (optional, off by default): notes dropped into a folder you
   choose are sent automatically, after a short quiet period. Unchanged notes
   are skipped.
@@ -107,9 +108,9 @@ around it survives a re-import.
 
 ### Which marks are understood
 
-No OCR and no model. The plugin typeset the page itself, so it knows where
-every word sits and can tell from the shape and position of a stroke what it
-did and which words it points at.
+The plugin typeset the page itself, so it knows where every word sits and
+can tell from the shape and position of a stroke what it did and which words
+it points at — read locally, from stroke geometry alone.
 
 | Draw this on the tablet | Recognised as | Default result in your vault |
 |---|---|---|

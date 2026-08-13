@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "../settingsmodel";
+import { sliderSpec } from "../settingschema";
 import {
 	SETTING_SECTIONS,
 	checkEndpoint,
@@ -123,5 +124,21 @@ describe("input cleanup", () => {
 		expect(checkEndpoint("https://rm.example.org")).toBeUndefined();
 		// Empty is fine: the toggle is on but the URL has not been typed yet.
 		expect(checkEndpoint("")).toBeUndefined();
+	});
+});
+
+describe("sliderSpec (GP_E6_S10)", () => {
+	it("finds the three layout sliders the modal depends on", () => {
+		// A schema rename would otherwise only surface when a user opens the
+		// layout modal and picks Custom.
+		for (const key of ["fontSize", "lineHeight", "margin"] as const) {
+			const spec = sliderSpec(key);
+			expect(spec.min).toBeLessThan(spec.max);
+			expect(spec.step).toBeGreaterThan(0);
+		}
+	});
+
+	it("throws loudly for a key that is not a slider", () => {
+		expect(() => sliderSpec("layoutPreset")).toThrow(/No slider spec/);
 	});
 });

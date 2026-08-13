@@ -16,13 +16,13 @@ import type { DeviceModel, HeadingBreak, LayoutPreset } from "./settingsmodel";
 
 /** GP_E6_S2: which screen the PDF page is sized for. Typed against the
  * model union so a new DeviceModel without a label is a compile error. */
-const DEVICE_MODEL_LABELS: Record<DeviceModel, string> = {
+export const DEVICE_MODEL_LABELS: Record<DeviceModel, string> = {
 	rm2: "reMarkable 1 / 2 / Paper Pure",
 	paperpro: "reMarkable Paper Pro",
 };
 
 /** GP_E6_S4: automatic page breaks before headings; GP_E6_S9 adds smart. */
-const HEADING_BREAK_LABELS: Record<HeadingBreak, string> = {
+export const HEADING_BREAK_LABELS: Record<HeadingBreak, string> = {
 	smart: "Smart — new page only when a section won't fit (recommended)",
 	off: "Off — only at \\pagebreak markers",
 	h1: "Before # headings",
@@ -30,7 +30,7 @@ const HEADING_BREAK_LABELS: Record<HeadingBreak, string> = {
 };
 
 /** GP_E6_S3: named typography bundles; custom exposes the sliders. */
-const LAYOUT_PRESET_LABELS: Record<LayoutPreset, string> = {
+export const LAYOUT_PRESET_LABELS: Record<LayoutPreset, string> = {
 	readable: "Easy reading — larger type, roomy lines",
 	form: "Fill-in form — balanced, with writing space",
 	compact: "Compact — as much on a page as fits",
@@ -94,6 +94,20 @@ export function writeSetting<T>(settings: T, key: string, value: unknown): T {
 export function conditionsOf(spec: SettingSpec): VisibleWhen[] {
 	if (spec.visibleWhen === undefined) return [];
 	return Array.isArray(spec.visibleWhen) ? spec.visibleWhen : [spec.visibleWhen];
+}
+
+/**
+ * The slider bounds of a schema entry; the layout modal (GP_E6_S10) reuses
+ * them so bounds are never redeclared. Throws on a non-slider key — covered
+ * by a test so a schema rename cannot silently strand the modal.
+ */
+export function sliderSpec(key: string): { min: number; max: number; step: number } {
+	for (const section of SETTING_SECTIONS) {
+		for (const item of section.items) {
+			if (item.key === key && item.control.type === "slider") return item.control;
+		}
+	}
+	throw new Error(`No slider spec for "${key}" in the settings schema.`);
 }
 
 /** Is this setting shown, given the current values? */

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.34.0] - 2026-08-13
+
+### Added
+
+- **Choose a layout for one send.** A new *…(choose layout…)* entry on the
+  right-click menu — for a note, a folder, or a multi-selection — opens a
+  small dialog with the layout preset, sliders and page-break mode,
+  prefilled from your settings. The choice applies to that send only; your
+  saved settings stay untouched. Also available from the command palette
+  for the current note. Annotations on documents sent this way anchor
+  exactly as always: every upload records the layout it was typeset with.
+
+
 ## [0.33.1] - 2026-08-13
 
 ### Fixed
