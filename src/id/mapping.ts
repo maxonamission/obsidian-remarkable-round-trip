@@ -16,6 +16,12 @@ export interface MappingEntry {
 	/** Simple content hash of the uploaded (preprocessed) markdown. */
 	contentHash: string;
 	/**
+	 * What was delivered (GP_E7_S2): "pdf"/"epub" review copies, or "text" —
+	 * a write-mode notebook whose import is the write-mode route, not the
+	 * annotation pull. Absent = a pre-0.36 upload, always a review copy.
+	 */
+	format?: "pdf" | "epub" | "text";
+	/**
 	 * Device document hash at the last annotation import (F10). Unset until
 	 * the first import; equal to the current device hash means "nothing new".
 	 */

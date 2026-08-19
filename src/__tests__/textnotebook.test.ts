@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-	SpikeEntry,
-	SpikeRawApi,
-	markdownFromParagraphs,
-	paragraphsFromMarkdown,
+	RawEntry,
+	RawSyncApi,
 	readTextNotebook,
+	sendTextNotebook,
 	uploadTextNotebook,
-} from "../spike/writemode";
-import { PARAGRAPH_STYLE } from "../spike/rmtext";
+} from "../transport/textnotebook";
+import { markdownFromParagraphs, paragraphsFromMarkdown } from "../convert/textdoc";
+import { PARAGRAPH_STYLE } from "../convert/rmtext";
 
 const MD = [
 	"## Uitvoering",
@@ -44,16 +44,23 @@ describe("markdown ↔ device paragraphs (F18 subset)", () => {
 });
 
 /** In-memory raw api: content-addressed puts, root hash, entry lists. */
-function fakeApi(): { api: SpikeRawApi; log: string[] } {
+function fakeApi(options: { failRootHashTimes?: number } = {}): {
+	api: RawSyncApi;
+	log: string[];
+	rootList: () => RawEntry[];
+	texts: Map<string, string>;
+} {
 	const files = new Map<string, Uint8Array>();
-	const lists = new Map<string, SpikeEntry[]>();
-	let root: SpikeEntry | null = null;
+	const texts = new Map<string, string>();
+	const lists = new Map<string, RawEntry[]>();
+	let root: RawEntry | null = null;
 	let generation = 1;
+	let rootHashFailures = options.failRootHashTimes ?? 0;
 	const log: string[] = [];
 	let counter = 0;
-	const entry = (id: string): SpikeEntry => ({ id, hash: `h${++counter}` });
+	const entry = (id: string): RawEntry => ({ id, hash: `h${++counter}` });
 
-	const api: SpikeRawApi = {
+	const api: RawSyncApi = {
 		getRootHash: () => {
 			log.push("getRootHash");
 			return Promise.resolve([root?.hash ?? "root0", generation, 3]);
@@ -78,6 +85,7 @@ function fakeApi(): { api: SpikeRawApi; log: string[] } {
 			log.push(`putText ${id}`);
 			const e = entry(id);
 			files.set(e.hash, new TextEncoder().encode(content));
+			texts.set(id, content);
 			return Promise.resolve([e, Promise.resolve()]);
 		},
 		putEntries: (id, entries, _schema) => {
@@ -88,19 +96,25 @@ function fakeApi(): { api: SpikeRawApi; log: string[] } {
 		},
 		putRootHash: (hash, gen) => {
 			log.push("putRootHash");
+			if (rootHashFailures > 0) {
+				rootHashFailures--;
+				return Promise.reject(new Error("precondition failed"));
+			}
 			expect(gen).toBe(generation);
 			root = { id: "root", hash };
 			generation++;
 			return Promise.resolve([hash, generation]);
 		},
 	};
-	return { api, log };
+	return { api, log, rootList: () => (root ? (lists.get(root.hash) ?? []) : []), texts };
 }
 
-describe("spike notebook upload + read-back (aannames 1 en 3)", () => {
+describe("notebook upload + read-back (GP_E7_S2, uit spike GP_E7_S1)", () => {
 	it("uploads the full bundle in rmapi-js' order and reads the text back", async () => {
 		const { api, log } = fakeApi();
-		const { docId, pageId } = await uploadTextNotebook(api, "Spike", MD, () => 1755093600000);
+		const { docId, pageId } = await uploadTextNotebook(api, "Weeklog", MD, {
+			now: () => 1755093600000,
+		});
 
 		// The bundle: content, metadata, pagedata, one page .rm, one entries
 		// list for the doc, a new root list, then the root hash swap.
@@ -120,22 +134,68 @@ describe("spike notebook upload + read-back (aannames 1 en 3)", () => {
 		// 2026-08-19: fileType "" validated in NO branch of rmapi-js' content
 		// union, so every listItems — folder mirroring included — crashed on
 		// the spike document the moment it existed in the account.
-		const { api, log } = fakeApi();
-		const put: string[] = [];
-		const spy: typeof api.putText = (id, content) => {
-			put.push(content);
-			return api.putText(id, content);
-		};
-		await uploadTextNotebook({ ...api, putText: spy }, "Spike", MD, () => 1755093600000);
-		const content = JSON.parse(put.find((c) => c.includes("fileType")) ?? "{}") as {
+		const { api, texts } = fakeApi();
+		const { docId } = await uploadTextNotebook(api, "Weeklog", MD, {
+			now: () => 1755093600000,
+		});
+		const content = JSON.parse(texts.get(`${docId}.content`) ?? "{}") as {
 			fileType?: string;
 		};
 		expect(content.fileType).toBe("notebook");
-		expect(log.length).toBeGreaterThan(0);
+	});
+
+	it("files the notebook under the given collection (folder mirroring)", async () => {
+		const { api, texts } = fakeApi();
+		const { docId } = await uploadTextNotebook(api, "Weeklog", MD, {
+			parentId: "collection-42",
+			now: () => 1755093600000,
+		});
+		const metadata = JSON.parse(texts.get(`${docId}.metadata`) ?? "{}") as {
+			parent?: string;
+			visibleName?: string;
+		};
+		expect(metadata.parent).toBe("collection-42");
+		expect(metadata.visibleName).toBe("Weeklog");
+	});
+
+	it("re-uploading the same docId replaces the root entry, never duplicates", async () => {
+		const { api, rootList } = fakeApi();
+		const fixed = { docId: "doc-1", pageId: "page-1", now: () => 1755093600000 };
+		await uploadTextNotebook(api, "Weeklog", MD, fixed);
+		await uploadTextNotebook(api, "Weeklog", `${MD}\nextra regel`, fixed);
+		expect(rootList().filter((entry) => entry.id === "doc-1")).toHaveLength(1);
+		const result = await readTextNotebook(api, "doc-1");
+		expect(result.markdown).toContain("extra regel");
 	});
 
 	it("fails loudly when the notebook is gone from the account", async () => {
 		const { api } = fakeApi();
 		await expect(readTextNotebook(api, "bestaat-niet")).rejects.toThrow(/not found/);
+	});
+});
+
+describe("sendTextNotebook: production retry (N3)", () => {
+	it("retries a generation conflict and keeps one document", async () => {
+		const { api, log, rootList } = fakeApi({ failRootHashTimes: 1 });
+		const result = await sendTextNotebook(api, "Weeklog", MD, {
+			retry: { sleep: () => Promise.resolve() },
+			now: () => 1755093600000,
+		});
+		expect(log.filter((l) => l === "putRootHash")).toHaveLength(2);
+		expect(rootList().filter((entry) => entry.id === result.deviceDocId)).toHaveLength(1);
+	});
+
+	it("gives up on a non-conflict error without retrying", async () => {
+		const { api, log } = fakeApi();
+		const failing: RawSyncApi = {
+			...api,
+			putFile: () => Promise.reject(new Error("disk on fire")),
+		};
+		await expect(
+			sendTextNotebook(failing, "Weeklog", MD, {
+				retry: { sleep: () => Promise.resolve() },
+			}),
+		).rejects.toThrow(/disk on fire/);
+		expect(log.filter((l) => l === "putRootHash")).toHaveLength(0);
 	});
 });

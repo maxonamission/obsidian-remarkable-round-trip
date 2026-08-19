@@ -91,6 +91,25 @@ What happens to your note on the way:
   file path — is how a document finds its note again, so you can move and
   rename freely.
 
+## Write on it, too
+
+Reviewing with the pen is one half of the tablet; writing without
+distraction is the other. Send a note as **editable text** — right-click →
+*Send to reMarkable as editable text*, or run the command — and it arrives
+as a typed-text notebook you edit with the keyboard, not as a fixed page
+you annotate.
+
+- Headings, bold label lines, bullets and task checkboxes arrive as real
+  device paragraph styles. Everything else — links, tables, code — travels
+  along as literal text, so nothing of your markdown is lost.
+- Frontmatter stays home: properties are vault metadata, not text to edit.
+  The note on the device is exactly the note body.
+- Re-sending replaces the previous copy (the old one goes to the device
+  trash), and the annotation import knows to leave these documents alone.
+- **Bringing the edited text back into your note is the next step on the
+  roadmap.** Today the trip is one-way: treat the device copy as your
+  working copy until you copy changes back yourself.
+
 ## Getting your thinking back
 
 Run **Import annotations from reMarkable**. The plugin finds the documents you

@@ -114,6 +114,69 @@ describe("sendNote output format", () => {
 		expect(Object.values(table)[0].pdfLayout).toBeUndefined();
 	});
 
+	it("sends write-mode as the note body: no frontmatter, no embed inlining", async () => {
+		// GP_E7_S2: the note itself is the working copy. Frontmatter is vault
+		// metadata (the note keeps its own on import) and an inlined embed
+		// could never route an edit back to the right file — so the body
+		// travels exactly as it is on disk.
+		const texts: { visibleName: string; markdown: string; parentId?: string }[] = [];
+		const { deps } = makeDeps({ format: "text" });
+		deps.client.uploadText = (visibleName, markdown, uploadOptions) => {
+			texts.push({ visibleName, markdown, parentId: uploadOptions.parentId });
+			return Promise.resolve({ deviceDocId: "device-text-1" });
+		};
+		deps.resolveParent = () => Promise.resolve("collection-7");
+		const note = {
+			...NOTE,
+			content: "---\ntitle: X\n---\nInhoud met ![[Oefening]] embed.",
+		};
+		const { result, table } = await sendNote(note, {}, deps);
+		if (!result.ok) throw new Error(`unexpected failure: ${result.error}`);
+
+		expect(texts).toEqual([
+			{
+				visibleName: "Nota",
+				markdown: "Inhoud met ![[Oefening]] embed.",
+				parentId: "collection-7",
+			},
+		]);
+		const entry = Object.values(table)[0];
+		expect(entry.format).toBe("text");
+		expect(entry.pdfLayout).toBeUndefined();
+		expect(entry.deviceDocId).toBe("device-text-1");
+	});
+
+	it("records the format of review uploads too", async () => {
+		const { deps } = makeDeps();
+		const { table } = await sendNote(NOTE, {}, deps);
+		expect(Object.values(table)[0].format).toBe("pdf");
+	});
+
+	it("fails a text send clearly when the sync API is not wired", async () => {
+		const { deps, uploads } = makeDeps({ format: "text" });
+		const { result } = await sendNote(NOTE, {}, deps);
+		expect(result).toMatchObject({ ok: false });
+		if (result.ok) throw new Error("unexpected success");
+		expect(result.error).toContain("sync API");
+		expect(uploads).toHaveLength(0);
+	});
+
+	it("skips an unchanged write-mode note in auto mode by its body hash", async () => {
+		const texts: string[] = [];
+		const { deps } = makeDeps({ format: "text", skipUnchanged: true });
+		deps.client.uploadText = (_name, markdown) => {
+			texts.push(markdown);
+			return Promise.resolve({ deviceDocId: "device-text-1" });
+		};
+		const note = { ...NOTE, existingDocId: "0f8fad5b-d9cb-469f-a165-70867728950e" };
+		const first = await sendNote(note, {}, deps);
+		if (!first.result.ok) throw new Error("unexpected failure");
+		const second = await sendNote(note, first.table, deps);
+		if (!second.result.ok) throw new Error("unexpected failure");
+		expect(second.result.skipped).toBe(true);
+		expect(texts).toHaveLength(1);
+	});
+
 	it("defaults to PDF when no format is given", async () => {
 		const { deps, uploads } = makeDeps();
 		await sendNote(NOTE, {}, deps);

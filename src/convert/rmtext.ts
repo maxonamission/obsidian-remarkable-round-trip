@@ -1,6 +1,8 @@
 /**
- * Spike GP_E7_S1 (PRD F16/K6): write a v6 `.rm` page whose content is typed
- * text, and read it back.
+ * The v6 `.rm` text-page format: writer and minimal reader in one module
+ * (PRD F16/K6). Born as spike GP_E7_S1, promoted to the production path in
+ * GP_E7_S2 after all three device assumptions held (Paper Pro + Type Folio,
+ * 2026-08-19 — see docs/ontwerp-schrijfmodus.md §4/§6).
  *
  * The v6 format is undocumented; this follows rmscene (MIT, Rick Lupton) —
  * the same reference our stroke reader (rmlines.ts) was verified against.
@@ -8,8 +10,6 @@
  * open and edit: one text item carrying the whole document text, plus a
  * paragraph-style map (K6/F18 subset). Writing NEW documents only — the safe
  * side of an undocumented format.
- *
- * Spike code: not wired into any user-facing command or the release path.
  */
 
 /** Paragraph styles as the device stores them (rmscene ParagraphStyle). */

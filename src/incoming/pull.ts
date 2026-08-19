@@ -156,7 +156,7 @@ export interface PullSuccess {
 	/** True when nothing changed on the device and the note was left alone. */
 	skipped?: boolean;
 	/** Why it was skipped, for the diagnostic report. */
-	skipReason?: "unchanged" | "not-on-device";
+	skipReason?: "unchanged" | "not-on-device" | "write-mode";
 	scan?: DocumentScan;
 }
 
@@ -563,7 +563,20 @@ export async function pullAnnotations(
 		let result: PullResult;
 		try {
 			deps.log?.(`${entry.notePath} → device ${entry.deviceDocId}`);
-			if (hash === undefined) {
+			if (entry.format === "text") {
+				// A write-mode notebook (GP_E7_S2) carries typed text, not
+				// annotations on a review copy; its import is the write-mode
+				// route (GP_E7_S3), and reading it as ink would find nothing.
+				deps.log?.("  editable-text document — the annotation import does not apply");
+				result = {
+					ok: true,
+					docId: entry.docId,
+					notePath: entry.notePath,
+					highlightCount: 0,
+					skipped: true,
+					skipReason: "write-mode",
+				};
+			} else if (hash === undefined) {
 				// The document is gone from the device (deleted or moved out of
 				// reach): not an error, just nothing to import.
 				deps.log?.("  not on the account — skipped");

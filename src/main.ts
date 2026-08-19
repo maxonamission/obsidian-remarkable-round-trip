@@ -30,7 +30,7 @@ import { MirrorTransport, toTransportError } from "./transport/mirror";
 import { describeDiagnosis, diagnoseCloud } from "./transport/diagnose";
 import { EmbedContent } from "./preprocess/preprocess";
 import { DOCID_FRONTMATTER_KEY } from "./id/docid";
-import { NoteInput, sendBatch, SendResult } from "./sync/send";
+import { NoteInput, SendFormat, sendBatch, SendResult } from "./sync/send";
 import {
 	DocumentFile,
 	ImportedMark,
@@ -52,7 +52,7 @@ import {
 	upsertAnnotationBlock,
 } from "./incoming/annotationnote";
 import { WatchQueue } from "./sync/watcher";
-import { readTextNotebook, uploadTextNotebook } from "./spike/writemode";
+import { RawSyncApi, sendTextNotebook } from "./transport/textnotebook";
 import { flattenSelection, relativeFolderPath } from "./sync/selection";
 import { shouldAnnounceUpdate } from "./updatenotice";
 
@@ -69,11 +69,8 @@ export default class RoundTripPlugin extends Plugin {
 	settings: RoundTripSettings = { ...DEFAULT_SETTINGS };
 	private watchQueue: WatchQueue | null = null;
 	private fetchShim: { restore: () => void } | null = null;
-	/** GP_E7_S1: spike commands exist only when data.json says so. */
-	private spikeEnabled = false;
 	/** Unknown data.json keys, preserved across saves (see extrasFrom). */
 	private extraData: Record<string, unknown> = {};
-	private lastSpikeDoc: string | null = null;
 	/** Layouts rebuilt during one import run, by document id (GP_E3_S12). */
 	private readonly layoutCache = new Map<string, PdfLayout | null>();
 
@@ -148,7 +145,19 @@ export default class RoundTripPlugin extends Plugin {
 			},
 		});
 
-		if (this.spikeEnabled) this.registerSpikeCommands();
+		// Write-mode (F16, GP_E7_S2): an explicit per-send choice, never a
+		// default — the note travels as a typed-text notebook you edit with
+		// the keyboard, not as a review copy you annotate with the pen.
+		this.addCommand({
+			id: "send-current-note-editable-text",
+			name: "Send current note to reMarkable as editable text",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== "md") return false;
+				if (!checking) void this.sendFiles([file], { format: "text" });
+				return true;
+			},
+		});
 
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
@@ -167,6 +176,15 @@ export default class RoundTripPlugin extends Plugin {
 							.setTitle("Send to reMarkable (choose layout…)")
 							.setIcon("send")
 							.onClick(() => this.sendWithLayoutChoice([file], `"${file.basename}"`)),
+					);
+					// Write-mode (GP_E7_S2): per note, on purpose — an editable
+					// text document is a working copy you pick deliberately, not
+					// a bulk format, so folders keep review sends only.
+					menu.addItem((item) =>
+						item
+							.setTitle("Send to reMarkable as editable text")
+							.setIcon("pencil")
+							.onClick(() => void this.sendFiles([file], { format: "text" })),
 					);
 				}
 				if (file instanceof TFolder) {
@@ -238,22 +256,18 @@ export default class RoundTripPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const stored = ((await this.loadData()) ?? {}) as Partial<RoundTripSettings>;
 		this.settings = settingsFrom(stored);
-		// Not a setting: the spike flag is added to data.json by hand. It and
-		// every other unknown key ride along in extraData so a save does not
-		// destroy them — the first version of this comment said "never
-		// written back", which meant every send erased the flag (bevinding
-		// eigenaar 2026-08-13).
+		// Unknown data.json keys — a newer version's settings, hand-added
+		// flags — ride along in extraData so a save does not destroy them
+		// (bevinding eigenaar 2026-08-13; the spike flag that surfaced it is
+		// gone since GP_E7_S2, the preservation stays).
 		this.extraData = extrasFrom(stored);
-		this.spikeEnabled = this.extraData["spikeSchrijfmodus"] === true;
 	}
 
 	/**
 	 * Obsidian calls this when data.json changed outside this running plugin
-	 * — Obsidian Sync, or a hand edit while the app runs (the spike flag,
-	 * GP_E7_S1). Without it, the next save would write the stale in-memory
-	 * snapshot back and erase that edit (reviewvondst 0.35.1). Command
-	 * registration still happens at load only: a flag flip needs a restart
-	 * to show or hide the spike commands, but it survives until then.
+	 * — Obsidian Sync, or a hand edit while the app runs. Without it, the
+	 * next save would write the stale in-memory snapshot back and erase that
+	 * edit (reviewvondst 0.35.1).
 	 */
 	async onExternalSettingsChange(): Promise<void> {
 		await this.loadSettings();
@@ -385,94 +399,6 @@ export default class RoundTripPlugin extends Plugin {
 	}
 
 	/**
-	 * GP_E7_S1 spike commands — only registered when data.json carries
-	 * `"spikeSchrijfmodus": true`. Throwaway by design: they validate the
-	 * three write-mode assumptions on a real device and nothing more.
-	 */
-	private registerSpikeCommands(): void {
-		this.addCommand({
-			id: "spike-send-editable-text",
-			name: "Spike: send current note as editable text",
-			checkCallback: (checking) => {
-				const file = this.app.workspace.getActiveFile();
-				if (!file || file.extension !== "md") return false;
-				if (!checking) void this.spikeSend(file);
-				return true;
-			},
-		});
-		this.addCommand({
-			id: "spike-read-edited-text",
-			name: "Spike: read edited text back (console)",
-			callback: () => void this.spikeRead(),
-		});
-	}
-
-	private async spikeSend(file: TFile): Promise<void> {
-		try {
-			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
-			const markdown = await this.app.vault.cachedRead(file);
-			// A short id in the name: two test sends must be tellable apart on
-			// the device, and the read-back names which one it will read.
-			const suffix = Math.random().toString(36).slice(2, 6);
-			const result = await uploadTextNotebook(
-				api.raw,
-				`${file.basename} (spike ${suffix})`,
-				markdown,
-			);
-			this.lastSpikeDoc = result.docId;
-			console.warn(
-				`reMarkable Round-Trip spike: uploaded ${result.docId} (page ${result.pageId})`,
-			);
-			notify(
-				`Spike: "${file.basename}" sent as editable text as "(spike ${suffix})". ` +
-					"Edit THAT copy on the device, let it sync, then run the read-back command " +
-					"— it reads the most recently sent spike document.",
-				10000,
-			);
-		} catch (error) {
-			console.error("reMarkable Round-Trip spike: upload failed", error);
-			notify(
-				`Spike upload failed: ${error instanceof Error ? error.message : String(error)}`,
-				8000,
-			);
-		}
-	}
-
-	private async spikeRead(): Promise<void> {
-		if (this.lastSpikeDoc === null) {
-			notify("Spike: nothing sent this session — run the send command first.");
-			return;
-		}
-		try {
-			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
-			const result = await readTextNotebook(
-				api.raw,
-				this.lastSpikeDoc,
-			);
-			console.warn(
-				`reMarkable Round-Trip spike: read back ${result.paragraphCount} paragraph(s)` +
-					(result.missing ? " (NO root text found!)" : "") +
-					`
----
-${result.markdown}
----`,
-			);
-			notify(
-				result.missing
-					? "Spike: the page has no typed text (see console)."
-					: `Spike: read ${result.paragraphCount} paragraph(s) back — full text in the console.`,
-				8000,
-			);
-		} catch (error) {
-			console.error("reMarkable Round-Trip spike: read-back failed", error);
-			notify(
-				`Spike read-back failed: ${error instanceof Error ? error.message : String(error)}`,
-				8000,
-			);
-		}
-	}
-
-	/**
 	 * Open the per-send layout modal, then send with the chosen layout
 	 * (GP_E6_S10). The refusals sendFiles would give (not paired, nothing to
 	 * send) surface BEFORE the modal opens — filling in a dialog first and
@@ -506,6 +432,12 @@ ${result.markdown}
 			structureRoot?: string;
 			/** One-send override (GP_E6_S10); omitted = the stored settings. */
 			layout?: ReturnType<typeof sendLayout>;
+			/**
+			 * One-send format override (GP_E7_S2): "text" sends the note as an
+			 * editable typed-text notebook instead of a review copy. Only ever
+			 * set explicitly — the stored settings cannot choose it.
+			 */
+			format?: SendFormat;
 		} = {},
 	): Promise<void> {
 		if (files.length === 0) {
@@ -517,6 +449,7 @@ ${result.markdown}
 			notify("Not paired with a reMarkable account yet — open the plugin settings first.");
 			return;
 		}
+		const format: SendFormat = options.format ?? this.settings.outputFormat;
 
 		// Folder mirroring (GP_E2_S7): one rmapi-js session per send-run so the
 		// folder listing is fetched once and reused across the batch. When the
@@ -525,20 +458,37 @@ ${result.markdown}
 		// GP_E2_S12). A folder send keeps its internal structure even with
 		// vault mirroring off (GP_E5_S2): the folder tree then goes to the
 		// device root, without the base folder or the full vault path.
+		//
+		// A write-mode send (GP_E7_S2) needs the same session for the upload
+		// itself — there is no simple-endpoint fallback for typed text, so
+		// where a review send degrades to root uploads, a text send refuses
+		// with the reason instead of silently delivering the wrong format.
 		const structureOnly = !this.settings.mirrorFolders && options.structureRoot !== undefined;
+		const mirrorFoldersActive = this.settings.mirrorFolders || structureOnly;
 		let mirror: MirrorTransport | null = null;
+		let rawApi: RawSyncApi | null = null;
 		let mirroringDegraded = false;
 		let mirroringDegradedReason: string | null = null;
-		if (this.settings.mirrorFolders || structureOnly) {
+		if (mirrorFoldersActive || format === "text") {
 			try {
 				const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
+				rawApi = api.raw;
 				mirror = new MirrorTransport(
 					api,
 					structureOnly ? "" : this.settings.deviceBaseFolder,
 				);
 			} catch (error) {
+				console.error("reMarkable Round-Trip: sync API unavailable", error);
+				if (format === "text") {
+					notify(
+						`Could not reach the reMarkable sync API, which editable-text sends need — nothing was sent. (${
+							toTransportError(error).message
+						})`,
+						8000,
+					);
+					return;
+				}
 				mirroringDegraded = true;
-				console.error("reMarkable Round-Trip: folder mirroring unavailable", error);
 				notify(
 					"Could not reach the reMarkable folder API — sending to the device root instead. " +
 						"Your notes are still delivered.",
@@ -565,22 +515,31 @@ ${result.markdown}
 			}
 
 			const activeMirror = mirror;
+			const activeRaw = rawApi;
 			const { results, table } = await sendBatch(
 				notes,
 				this.settings.mappings,
 				{
-					client: activeMirror
-						? {
-								upload: (fileName, bytes, uploadOptions) =>
-									activeMirror
+					client: {
+						upload: (fileName, bytes, uploadOptions) =>
+							activeMirror && mirrorFoldersActive
+								? activeMirror
 										.upload(fileName, bytes, uploadOptions)
 										.catch((error: unknown) => {
 											throw toTransportError(error);
-										}),
-							}
-						: client,
-					format: this.settings.outputFormat,
-					resolveParent: activeMirror
+										})
+								: client.upload(fileName, bytes, uploadOptions),
+						uploadText: activeRaw
+							? (visibleName, markdown, uploadOptions) =>
+									sendTextNotebook(activeRaw, visibleName, markdown, {
+										parentId: uploadOptions.parentId,
+									}).catch((error: unknown) => {
+										throw toTransportError(error);
+									})
+							: undefined,
+					},
+					format,
+					resolveParent: activeMirror && mirrorFoldersActive
 						? (notePath) => {
 								const dir = notePath.split("/").slice(0, -1).join("/");
 								const target = structureOnly

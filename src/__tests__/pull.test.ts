@@ -255,6 +255,23 @@ describe("pullAnnotations", () => {
 		expect(table["doc-a"].importedHash).toBe("hash-1");
 	});
 
+	it("skips a write-mode document: typed text is not annotation ink (GP_E7_S2)", async () => {
+		const { deps, written } = makeDeps();
+		const table: MappingTable = {
+			"doc-a": { ...TABLE["doc-a"], format: "text" },
+		};
+		const { results, table: after } = await pullAnnotations(table, deps);
+		expect(results[0]).toMatchObject({
+			ok: true,
+			skipped: true,
+			skipReason: "write-mode",
+		});
+		expect(written).toHaveLength(0);
+		// No importedHash recorded either: the write-mode import (GP_E7_S3)
+		// must not find the document marked as already seen.
+		expect(after["doc-a"].importedHash).toBeUndefined();
+	});
+
 	it("skips a document whose device hash is unchanged", async () => {
 		const { deps, written } = makeDeps();
 		const seen: MappingTable = {

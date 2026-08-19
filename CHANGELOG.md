@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.36.0] - 2026-08-19
+
+### Added
+
+- **Send a note as editable text.** A new per-send choice — right-click →
+  "Send to reMarkable as editable text", or the command palette — delivers
+  the note as a typed-text notebook you edit on the device with the
+  keyboard, instead of a fixed page you annotate. Headings, bold label
+  lines, bullets and task checkboxes arrive as real device paragraph
+  styles; everything else travels as literal text, so nothing of your
+  markdown is lost. Frontmatter stays home, folder mirroring applies as
+  usual, re-sending replaces the previous copy, and the annotation import
+  leaves these documents alone. Bringing the edited text back into your
+  note is the next step on the roadmap — today the trip is one-way.
+
+### Removed
+
+- The hidden write-mode spike commands (and their manual `data.json` flag)
+  made way for the real feature above.
+
+
 ## [0.35.3] - 2026-08-19
 
 ### Fixed

@@ -344,6 +344,22 @@ describe("renderImportReport", () => {
 		expect(report).toContain("Re-import all annotations");
 	});
 
+	it("names a write-mode document as out of scope for the annotation import", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 0,
+				skipped: true,
+				skipReason: "write-mode",
+			},
+		];
+		expect(renderImportReport({ ...base, results })).toContain(
+			"sent as editable text",
+		);
+	});
+
 	it("distinguishes a document that is no longer on the account", () => {
 		const results: PullResult[] = [
 			{

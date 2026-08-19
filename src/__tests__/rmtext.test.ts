@@ -4,7 +4,7 @@ import {
 	buildTextPageRm,
 	readTextPageRm,
 	type TextParagraph,
-} from "../spike/rmtext";
+} from "../convert/rmtext";
 import { RM_V6_HEADER } from "../incoming/rmlines";
 
 const SAMPLE: TextParagraph[] = [

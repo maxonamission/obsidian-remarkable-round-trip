@@ -39,7 +39,9 @@ export function renderImportReport(input: ImportReportInput): string {
 			lines.push(
 				result.skipReason === "not-on-device"
 					? `– ${result.notePath}: no longer on the reMarkable account`
-					: `– ${result.notePath}: unchanged since the last import`,
+					: result.skipReason === "write-mode"
+						? `– ${result.notePath}: sent as editable text — the annotation import does not apply`
+						: `– ${result.notePath}: unchanged since the last import`,
 			);
 			continue;
 		}
