@@ -651,30 +651,32 @@ export default class RoundTripPlugin extends Plugin {
 		}
 		const notice = progressNotice(`Reading "${file.basename}" from the reMarkable…`);
 		// Filled by readDeviceText below; a mobile user cannot open a console
-		// (devicecheck 2026-08-19, twice), so anchoring trouble must reach
-		// them through the outcome notice and the vault log instead.
-		const diagnosis = { unanchored: 0, report: "" };
+		// (devicecheck 2026-08-19, twice), so what the device file looks like
+		// must reach them through the vault log — ALWAYS, not only on
+		// anchoring trouble: the third failed phone test delivered an old log
+		// because the trouble-only guard had nothing to say, and left us
+		// unable to tell "old plugin" from "anchors resolved yet still
+		// wrong". Every text import now leaves its full trace.
+		const diagnosis = { unanchored: 0, lines: [] as string[] };
 		try {
 			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
 			const { outcome, entry: updated } = await importEditedText(entry, {
 				readDeviceText: async (target) => {
 					try {
 						const result = await readTextNotebook(api.raw, target.deviceDocId);
+						diagnosis.unanchored = result.unanchored;
+						diagnosis.lines = [
+							`device ${target.deviceDocId}`,
+							`${result.topology.length} item(s), ${result.unanchored} unanchored (unanchored items sit at the END of the text)`,
+							"Item map (ids, anchors and lengths only — no content):",
+							...result.topology.map((line) => `  ${line}`),
+							"",
+							`.rm files in the document (first one is read): ${result.pageFiles.join(", ")}`,
+						];
 						if (result.unanchored > 0) {
 							console.warn(
 								`reMarkable Round-Trip: ${result.unanchored} text item(s) had unresolvable anchors and were appended in file order`,
 							);
-							diagnosis.unanchored = result.unanchored;
-							diagnosis.report = [
-									`reMarkable Round-Trip — text import diagnosis (${new Date().toISOString().slice(0, 16).replace("T", " ")})`,
-									`plugin ${this.manifest.version} · "${file.basename}" · device ${target.deviceDocId}`,
-									"",
-									`${result.unanchored} of ${result.topology.length} item(s) could not be anchored and sit at the END of the text.`,
-									"Item map (ids, anchors and lengths only — no content):",
-									...result.topology.map((line) => `  ${line}`),
-									"",
-									`.rm files in the document (first one is read): ${result.pageFiles.join(", ")}`,
-								].join("\n");
 						}
 						return result;
 					} catch (error) {
@@ -705,12 +707,20 @@ export default class RoundTripPlugin extends Plugin {
 				};
 				await this.saveSettings();
 			}
-			if (diagnosis.unanchored > 0) await this.deliverReport(diagnosis.report);
+			await this.deliverReport(
+				[
+					`reMarkable Round-Trip — text import diagnosis (${new Date().toISOString().slice(0, 16).replace("T", " ")})`,
+					`plugin ${this.manifest.version} · "${file.basename}"`,
+					`outcome: ${outcome.kind}`,
+					...diagnosis.lines,
+				].join("\n"),
+			);
 			notify(
 				describeTextImport(file.basename, outcome) +
 					(diagnosis.unanchored === 0
 						? ""
-						: ` Note: ${diagnosis.unanchored} edit(s) could not be anchored and sit at the END of the text — diagnosis in "reMarkable Round-Trip log.md".`),
+						: ` Note: ${diagnosis.unanchored} edit(s) could not be anchored and sit at the END of the text.`) +
+					' Diagnosis written to "reMarkable Round-Trip log.md".',
 				diagnosis.unanchored === 0 ? 10000 : 20000,
 			);
 		} catch (error) {

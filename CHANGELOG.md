@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.38.3] - 2026-08-19
+
+### Changed
+
+- **Every text import now writes its diagnosis.** "Get edited text back"
+  leaves a full trace in `reMarkable Round-Trip log.md` on every run —
+  plugin version, outcome, and the document's internal item map (ids,
+  anchors, lengths; never your text) — not only when something could not
+  be placed. One failed test now tells the whole story, also on mobile
+  where there is no console.
+
+
 ## [0.38.2] - 2026-08-19
 
 ### Fixed
