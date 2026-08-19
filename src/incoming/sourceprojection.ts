@@ -239,9 +239,55 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 		[];
 	let placed = 0;
 
+	// Task gestures (GP_E5_S12): a tick in a drawn checkbox marks the task
+	// line done; a strike-through covering most of a task line cancels it
+	// instead of striking its words. Both rewrite the marker, so they leave
+	// the span machinery entirely. Strike coverage is aggregated per source
+	// line first: a wrapped task is struck in one gesture per visual row,
+	// and each gesture alone would stay under any threshold (reviewvondst).
+	const lineOf = lineIndexer(input.source);
+	const sourceLines = input.source.split("\n");
+	const done = new Set<number>();
+	const cancelled = new Set<number>();
+	const struckPerLine = new Map<number, Set<number>>();
+
+	for (const mark of input.marks) {
+		if (mark.kind !== "strikethrough") continue;
+		for (const id of mark.words ?? []) {
+			const range = ranges.get(id);
+			if (range === undefined) continue;
+			const line = lineOf(range.start);
+			if (!TASK_LINE_RE.test(sourceLines[line])) continue;
+			const set = struckPerLine.get(line) ?? new Set<number>();
+			set.add(id);
+			struckPerLine.set(line, set);
+		}
+	}
+	for (const [line, struck] of struckPerLine) {
+		const onLine = words.filter((word) => {
+			const range = ranges.get(word.id);
+			return range !== undefined && lineOf(range.start) === line;
+		}).length;
+		// Strictly more than half: striking one word of a two-word task is a
+		// word-level strike, not a cancellation.
+		if (onLine > 0 && struck.size > onLine / 2) cancelled.add(line);
+	}
+
 	for (const mark of input.marks) {
 		const covered = (mark.words ?? []).map((id) => ranges.get(id)).filter(isRange);
 		if (covered.length === 0) continue;
+		const line = lineOf(Math.min(...covered.map((range) => range.start)));
+		if (mark.kind === "checkbox") {
+			if (TASK_LINE_RE.test(sourceLines[line])) {
+				done.add(line);
+				placed++;
+			}
+			continue;
+		}
+		if (mark.kind === "strikethrough" && cancelled.has(line)) {
+			placed++; // absorbed by the line's cancellation
+			continue;
+		}
 		spans.push({
 			kind: mark.kind,
 			start: Math.min(...covered.map((range) => range.start)),
@@ -269,6 +315,10 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 	}
 
 	let markdown = applySpans(input.source, spans, input.styles);
+	// Before applyBlockMarks: that step inserts lines, and the task-state
+	// rewrite addresses lines by their untouched-source index (applySpans
+	// only inserts inline, so those indices still hold here).
+	markdown = applyTaskStates(markdown, done, cancelled);
 	markdown = applyBlockMarks(markdown, input, words, ranges);
 
 	if (unplaced.length > 0) {
@@ -279,6 +329,27 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 		}
 	}
 	return { markdown: markdown.trimEnd(), placed, unplaced };
+}
+
+/** A markdown task line: bullet, then a checkbox marker. */
+const TASK_LINE_RE = /^\s*[-*+]\s+\[( |x|X)\]/;
+
+/**
+ * Rewrite task markers in the annotated copy (GP_E5_S12): `[ ]` becomes
+ * `[x]` for a ticked box, `[-]` for a struck (cancelled) task — cancelled
+ * wins when one line somehow carries both. Same-length replacements, so no
+ * offset in the document shifts.
+ */
+function applyTaskStates(markdown: string, done: Set<number>, cancelled: Set<number>): string {
+	if (done.size === 0 && cancelled.size === 0) return markdown;
+	const lines = markdown.split("\n");
+	const apply = (index: number, state: string) => {
+		if (index >= lines.length) return;
+		lines[index] = lines[index].replace(/^(\s*[-*+]\s+)\[( |x|X)\]/, `$1[${state}]`);
+	};
+	for (const index of done) if (!cancelled.has(index)) apply(index, "x");
+	for (const index of cancelled) apply(index, "-");
+	return lines.join("\n");
 }
 
 function isRange(range: Range | undefined): range is Range {

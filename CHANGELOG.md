@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.35.0] - 2026-08-13
+
+### Added
+
+- **Tick a checkbox with your pen.** Draw a tick or a cross in a task's
+  drawn checkbox on the tablet, and the import marks that task done
+  (`- [x]`) in the annotated copy. Strike a task line through and it comes
+  back cancelled (`- [-]`). Pure geometry, no AI: the plugin typeset the
+  page, so it knows exactly where every box sits — this also works for
+  documents you sent with earlier versions. A partial strike over just a
+  word or two keeps its usual meaning.
+
+
 ## [0.34.0] - 2026-08-13
 
 ### Added

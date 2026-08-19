@@ -350,7 +350,16 @@ function lastLineOf(layout: PdfLayout | null, page: number): string | undefined 
 }
 
 /** Kinds the text says everything about; a picture of the ink adds nothing. */
-const TEXT_ONLY_KINDS = new Set<MarkKind>(["strikethrough", "underline", "circle", "margin"]);
+const TEXT_ONLY_KINDS = new Set<MarkKind>([
+	"strikethrough",
+	"underline",
+	"circle",
+	"margin",
+	// A tick rewrites its task's marker (GP_E5_S12); an image of the tick
+	// itself would be noise — and without this entry the whole feature
+	// vanished when handwriting import was off (reviewvondst).
+	"checkbox",
+]);
 
 /**
  * Read every annotated page: marks come back as typed text, handwriting as an

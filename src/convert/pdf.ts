@@ -97,6 +97,13 @@ export interface LaidOutLine {
 	level?: number;
 	/** Numbered list marker, when the item had one. */
 	ordered?: number;
+	/**
+	 * The drawn checkbox of a task item, on the item's first line
+	 * (GP_E5_S12). In PDF points, y is the box's bottom edge. Lives only in
+	 * the rebuilt layout — never persisted — so it needs no typo version and
+	 * exists for every upload that drew checkboxes.
+	 */
+	checkbox?: { x: number; y: number; size: number; checked: boolean };
 }
 
 /**
@@ -479,6 +486,15 @@ function drawList(ts: Typesetter, items: ListItem[]): void {
 		}
 		if (lines.length > 0) {
 			put(ts, lines[0], ts.opts.margin + indent, ts.y, size, ts.body);
+			// The import needs to know where the box sits to read a pen tick
+			// in it (GP_E5_S12); checkboxRect is the same function drawCheckbox
+			// draws from, so the two cannot drift.
+			if (task) {
+				ts.placed[ts.placed.length - 1].checkbox = {
+					...checkboxRect(ts.opts.margin + indent - 12, ts.y, size),
+					checked: task.checked,
+				};
+			}
 		}
 		for (const line of lines.slice(1)) {
 			ensureRoom(ts, step);
@@ -496,19 +512,35 @@ export function parseTaskMarker(text: string): { checked: boolean; rest: string 
 	return { checked: match[1] !== " ", rest: match[2] };
 }
 
+/**
+ * The box geometry shared by drawing (drawCheckbox) and the layout map
+ * (GP_E5_S12): one function, so tick detection can never drift from what
+ * was actually drawn. `y` is the text baseline; the result's `y` is the
+ * box's bottom edge.
+ */
+export function checkboxRect(
+	x: number,
+	y: number,
+	size: number,
+): { x: number; y: number; size: number } {
+	const box = size * 0.75;
+	return { x, y: y - box * 0.08, size: box };
+}
+
 /** A drawn checkbox at the bullet position; ticked with a check for [x]. */
 function drawCheckbox(ts: Typesetter, x: number, y: number, size: number, checked: boolean): void {
-	const box = size * 0.75;
+	const rect = checkboxRect(x, y, size);
+	const box = rect.size;
 	ts.page.drawRectangle({
-		x,
-		y: y - box * 0.08,
+		x: rect.x,
+		y: rect.y,
 		width: box,
 		height: box,
 		borderWidth: 0.8,
 		borderColor: rgb(0.25, 0.25, 0.25),
 	});
 	if (checked) {
-		const y0 = y - box * 0.08;
+		const y0 = rect.y;
 		ts.page.drawLine({
 			start: { x: x + box * 0.2, y: y0 + box * 0.45 },
 			end: { x: x + box * 0.42, y: y0 + box * 0.2 },

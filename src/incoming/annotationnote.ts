@@ -170,6 +170,12 @@ function renderMark(mark: ImportedMark, styles: MarkStyles): string[] {
 			return styled("circle", "circled");
 		case "margin":
 			return ["Marked in the margin:", `> ${mark.quote}`, ...image];
+		case "checkbox":
+			// The summary cannot rewrite the source's marker (that is the
+			// annotated copy's job, GP_E5_S12), and it must not introduce a
+			// second, live task line that task-query tooling would index — so
+			// it reports the tick as plain prose.
+			return [`Ticked on the reMarkable: “${mark.target ?? mark.quote ?? "task"}”`];
 		default:
 			if (mark.addedPage !== undefined) {
 				return [`**Page added on the reMarkable** (page ${mark.addedPage})`, ...image];

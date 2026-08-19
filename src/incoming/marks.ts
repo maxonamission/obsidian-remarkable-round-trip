@@ -18,11 +18,19 @@ import { Bounds, deviceBoundsToPdf, strokeBounds } from "./anchor";
 import { Stroke } from "./rmlines";
 
 /**
- * Owner decision 2026-07-26: only four shapes are read. Anything else — an
- * arrow, a scribble, a written word — is a remark at that spot. Guessing at
- * more kinds produced more wrong answers than useful ones.
+ * Owner decision 2026-07-26: only four freehand shapes are read. Anything
+ * else — an arrow, a scribble, a written word — is a remark at that spot;
+ * guessing at more kinds produced more wrong answers than useful ones.
+ * GP_E5_S12 adds "checkbox", which is not a shape judgement at all: any ink
+ * inside a box the plugin drew itself counts, whatever it looks like.
  */
-export type MarkKind = "strikethrough" | "underline" | "circle" | "margin" | "note";
+export type MarkKind =
+	| "strikethrough"
+	| "underline"
+	| "circle"
+	| "margin"
+	| "note"
+	| "checkbox";
 
 export interface Mark {
 	kind: MarkKind;
@@ -258,6 +266,25 @@ function classify(
 	const length = candidate.length * scale;
 	const base = { strokes: [stroke], bounds: device, orderY: pdf.maxY };
 
+	// Ink in a drawn checkbox is a tick (GP_E5_S12) — tested before the
+	// too-small gate below, because a tick IS small. A tick or a cross both
+	// mean "done"; the shape inside the box is deliberately not judged.
+	const ticked = checkboxUnder(rows, pdf);
+	if (ticked !== null && Math.hypot(width, height) < step * 2.5) {
+		return {
+			mark: {
+				...base,
+				kind: "checkbox",
+				target: ticked.text,
+				words: ticked.lines.flatMap((line) => line.words).map((word) => word.id),
+				quote: ticked.text,
+			},
+			// The row rides along so joinFlatMarks can fold a cross (two
+			// strokes) or a re-traced tick into ONE mark per box.
+			row: ticked,
+		};
+	}
+
 	// Smaller than a line: that is a pen stroke inside a letter, not a mark.
 	if (Math.hypot(width, height) < step * 0.8) return null;
 
@@ -338,6 +365,33 @@ function classify(
 }
 
 /**
+ * The task row whose drawn checkbox the ink sits in (GP_E5_S12). The box is
+ * matched with a generous rim — people tick outside the lines — but the ink
+ * CENTRE must be in it, so a stroke that merely starts near the box (the
+ * first word of a strike-through) does not count as a tick.
+ */
+function checkboxUnder(rows: Row[], ink: Bounds): Row | null {
+	const cx = (ink.minX + ink.maxX) / 2;
+	const cy = (ink.minY + ink.maxY) / 2;
+	for (const row of rows) {
+		for (const line of row.lines) {
+			const box = line.checkbox;
+			if (box === undefined) continue;
+			const rim = box.size * 0.6;
+			if (
+				cx >= box.x - rim &&
+				cx <= box.x + box.size + rim &&
+				cy >= box.y - rim &&
+				cy <= box.y + box.size + rim
+			) {
+				return row;
+			}
+		}
+	}
+	return null;
+}
+
+/**
  * One gesture, one mark.
  *
  * A strike-through is rarely a single stroke: people go back over it, and the
@@ -354,7 +408,22 @@ function joinFlatMarks(classified: Classified[]): Mark[] {
 	const out: Mark[] = [];
 	const groups: { row: Row; pdf: Bounds; members: Mark[] }[] = [];
 
+	// One box, one tick (GP_E5_S12): a cross is two strokes and a tick often
+	// gets a second pass — every stroke in the same row's box is one gesture.
+	const ticksByRow = new Map<Row, Mark>();
 	for (const entry of classified) {
+		if (entry.mark.kind === "checkbox" && entry.row !== undefined) {
+			const existing = ticksByRow.get(entry.row);
+			if (existing === undefined) {
+				ticksByRow.set(entry.row, entry.mark);
+				out.push(entry.mark);
+			} else {
+				existing.strokes.push(...entry.mark.strokes);
+				existing.bounds = merge(existing.bounds, entry.mark.bounds);
+				existing.orderY = Math.max(existing.orderY, entry.mark.orderY);
+			}
+			continue;
+		}
 		if (entry.row === undefined || entry.pdf === undefined || !FLAT.has(entry.mark.kind)) {
 			out.push(entry.mark);
 			continue;

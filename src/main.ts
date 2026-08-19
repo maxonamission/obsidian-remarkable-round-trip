@@ -50,6 +50,7 @@ import {
 	upsertAnnotationBlock,
 } from "./incoming/annotationnote";
 import { WatchQueue } from "./sync/watcher";
+import { readTextNotebook, uploadTextNotebook } from "./spike/writemode";
 import { flattenSelection, relativeFolderPath } from "./sync/selection";
 import { shouldAnnounceUpdate } from "./updatenotice";
 
@@ -66,6 +67,9 @@ export default class RoundTripPlugin extends Plugin {
 	settings: RoundTripSettings = { ...DEFAULT_SETTINGS };
 	private watchQueue: WatchQueue | null = null;
 	private fetchShim: { restore: () => void } | null = null;
+	/** GP_E7_S1: spike commands exist only when data.json says so. */
+	private spikeEnabled = false;
+	private lastSpikeDoc: string | null = null;
 	/** Layouts rebuilt during one import run, by document id (GP_E3_S12). */
 	private readonly layoutCache = new Map<string, PdfLayout | null>();
 
@@ -139,6 +143,8 @@ export default class RoundTripPlugin extends Plugin {
 				return true;
 			},
 		});
+
+		if (this.spikeEnabled) this.registerSpikeCommands();
 
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
@@ -228,6 +234,10 @@ export default class RoundTripPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const stored = ((await this.loadData()) ?? {}) as Partial<RoundTripSettings>;
 		this.settings = settingsFrom(stored);
+		// Not a setting: the spike flag is added to data.json by hand and
+		// never written back (saveData persists this.settings only).
+		this.spikeEnabled =
+			(stored as Record<string, unknown>)["spikeSchrijfmodus"] === true;
 	}
 
 	async saveSettings(): Promise<void> {
@@ -350,6 +360,90 @@ export default class RoundTripPlugin extends Plugin {
 		if (current !== prev) {
 			this.settings.lastSeenVersion = current;
 			await this.saveSettings();
+		}
+	}
+
+	/**
+	 * GP_E7_S1 spike commands — only registered when data.json carries
+	 * `"spikeSchrijfmodus": true`. Throwaway by design: they validate the
+	 * three write-mode assumptions on a real device and nothing more.
+	 */
+	private registerSpikeCommands(): void {
+		this.addCommand({
+			id: "spike-send-editable-text",
+			name: "Spike: send current note as editable text",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== "md") return false;
+				if (!checking) void this.spikeSend(file);
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "spike-read-edited-text",
+			name: "Spike: read edited text back (console)",
+			callback: () => void this.spikeRead(),
+		});
+	}
+
+	private async spikeSend(file: TFile): Promise<void> {
+		try {
+			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
+			const markdown = await this.app.vault.cachedRead(file);
+			const result = await uploadTextNotebook(
+				api.raw,
+				`${file.basename} (spike)`,
+				markdown,
+			);
+			this.lastSpikeDoc = result.docId;
+			console.warn(
+				`reMarkable Round-Trip spike: uploaded ${result.docId} (page ${result.pageId})`,
+			);
+			notify(
+				`Spike: "${file.basename}" sent as editable text. Open it on the device, ` +
+					"edit, sync, then run the read-back command.",
+				8000,
+			);
+		} catch (error) {
+			console.error("reMarkable Round-Trip spike: upload failed", error);
+			notify(
+				`Spike upload failed: ${error instanceof Error ? error.message : String(error)}`,
+				8000,
+			);
+		}
+	}
+
+	private async spikeRead(): Promise<void> {
+		if (this.lastSpikeDoc === null) {
+			notify("Spike: nothing sent this session — run the send command first.");
+			return;
+		}
+		try {
+			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
+			const result = await readTextNotebook(
+				api.raw,
+				this.lastSpikeDoc,
+			);
+			console.warn(
+				`reMarkable Round-Trip spike: read back ${result.paragraphCount} paragraph(s)` +
+					(result.missing ? " (NO root text found!)" : "") +
+					`
+---
+${result.markdown}
+---`,
+			);
+			notify(
+				result.missing
+					? "Spike: the page has no typed text (see console)."
+					: `Spike: read ${result.paragraphCount} paragraph(s) back — full text in the console.`,
+				8000,
+			);
+		} catch (error) {
+			console.error("reMarkable Round-Trip spike: read-back failed", error);
+			notify(
+				`Spike read-back failed: ${error instanceof Error ? error.message : String(error)}`,
+				8000,
+			);
 		}
 	}
 

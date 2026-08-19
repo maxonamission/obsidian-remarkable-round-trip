@@ -119,6 +119,8 @@ it points at — read locally, from stroke geometry alone.
 | A **loop around** a word or phrase | Circle | `**the circled phrase**` |
 | A **vertical bar in the margin** | Margin bar | The lines it ran alongside, as a `>` quote |
 | The **text highlighter** | Highlight | `<mark>` in the colour you used |
+| A **tick or cross in a drawn checkbox** | Task done | `- [x]` on that task line |
+| A **strike through a whole task line** | Task cancelled | `- [-]` on that task line |
 | Anything else — handwriting, arrows, scribbles | Remark | A cropped image in a callout, under the line it was written against |
 | **A page you added** on the tablet to write on | Added page | The whole page as an image, placed after the text it follows |
 
