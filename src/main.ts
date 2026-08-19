@@ -655,7 +655,17 @@ export default class RoundTripPlugin extends Plugin {
 			const { outcome, entry: updated } = await importEditedText(entry, {
 				readDeviceText: async (target) => {
 					try {
-						return await readTextNotebook(api.raw, target.deviceDocId);
+						const result = await readTextNotebook(api.raw, target.deviceDocId);
+						// Field diagnosability (GP_E5_S1): when an edit could not
+						// be anchored, its text is at the end of the document —
+						// a user reporting "my text is in the wrong place" plus
+						// this trail tells us it is the anchor topology.
+						if (result.unanchored > 0) {
+							console.warn(
+								`reMarkable Round-Trip: ${result.unanchored} text item(s) had unresolvable anchors and were appended in file order`,
+							);
+						}
+						return result;
 					} catch (error) {
 						if (error instanceof Error && error.message.includes("not found")) {
 							return null;
@@ -1209,7 +1219,7 @@ function describeTextImport(name: string, outcome: TextImportOutcome): string {
 		case "unchanged":
 			return `No differences — "${name}" and the reMarkable copy say the same.`;
 		case "device-unchanged":
-			return `The reMarkable copy has no edits and "${name}" is newer — nothing to import.`;
+			return `The reMarkable copy of "${name}" has no edits — nothing to import.`;
 		case "no-text":
 			return "That document carries no typed text, so there is nothing to bring back.";
 		case "not-on-device":

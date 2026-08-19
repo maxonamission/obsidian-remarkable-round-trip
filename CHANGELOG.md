@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.38.1] - 2026-08-19
+
+### Fixed
+
+- **Text added in the reMarkable mobile app now comes back where you typed
+  it.** The phone app stores its edits in an order the import read
+  front-to-back, so an addition whose anchor point appeared later in the
+  file fell back to "append at the end" — your new paragraph landed at the
+  bottom of the note. Placement now keeps resolving anchors until
+  everything has found its spot, uses the right-hand anchor as a fallback
+  when the left one points at text that was later cleaned up, and if
+  something truly cannot be placed it is still kept (at the end) and noted
+  in the console rather than lost.
+
+
+## [0.38.0] - 2026-08-19
+
+### Added
+
+- **Nested bullets in editable text.** A tab-indented `- ` line arrives as
+  a real second-level bullet on the device and comes back tab-indented. A
+  nested task keeps its depth too, with the `[ ]` marker travelling as
+  text.
+
+### Changed
+
+- **The editable-text round-trip is now exact for everything.** Only the
+  precise canonical spelling of each form maps to a device style — `## `
+  headings, whole-line `**bold**`, `- ` bullets, `- [ ]`/`- [x]` tasks —
+  and everything else travels literally, byte for byte. In particular a
+  single-`#` heading no longer comes back as `##`: the device has one
+  heading level, so `# ` now stays literal instead of being silently
+  renamed. Documents sent as editable text with 0.36/0.37 are unaffected
+  until you actually edit them on the device; re-send them once under the
+  new rules to give them the exact round-trip too.
+
+
 ## [0.37.0] - 2026-08-19
 
 ### Added

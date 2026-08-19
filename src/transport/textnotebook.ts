@@ -182,6 +182,9 @@ export interface TextReadResult {
 	paragraphCount: number;
 	/** True when the page carried no root-text block (pure ink page). */
 	missing: boolean;
+	/** Items appended in file order because their anchors never resolved
+	 * (see ReadTextResult.unanchored); 0 = everything found its place. */
+	unanchored: number;
 }
 
 /**
@@ -201,10 +204,11 @@ export async function readTextNotebook(
 	const page = entries.find((entry) => entry.id.endsWith(".rm"));
 	if (!page) throw new Error(`Notebook ${docId} has no .rm page.`);
 	const bytes = await api.getHash(page.id, page.hash);
-	const { paragraphs, missing } = readTextPageRm(bytes);
+	const { paragraphs, missing, unanchored } = readTextPageRm(bytes);
 	return {
 		markdown: markdownFromParagraphs(paragraphs),
 		paragraphCount: paragraphs.length,
 		missing: missing === true,
+		unanchored: unanchored ?? 0,
 	};
 }

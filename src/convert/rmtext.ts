@@ -421,6 +421,13 @@ export interface ReadTextResult {
 	paragraphs: TextParagraph[];
 	/** Present when the page carried no root-text block at all. */
 	missing?: boolean;
+	/**
+	 * Items whose anchors could not be resolved and were appended in file
+	 * order as a last resort (GP_E7_S3 nazorg). Zero or absent = every item
+	 * found its place; non-zero means the text is complete but some of it
+	 * may sit in the wrong spot — worth a console trail at the caller.
+	 */
+	unanchored?: number;
 }
 
 /**
@@ -428,12 +435,20 @@ export interface ReadTextResult {
  * RootTextBlock reader for the subset the writer produces, tolerating the
  * device's own edits: multiple text items, deleted stretches, and items
  * that sit elsewhere in the file than in the document (GP_E7_S3) — each
- * item is placed after the character its LEFT anchor names, the way the
- * device's own CRDT does. Deleted stretches keep their character ids in
- * the sequence as invisible entries, because a later edit may anchor to a
- * character that was deleted afterwards. Single-writer histories (one
- * person, one device, sessions in sequence) are fully determined by the
- * anchors; an unresolvable anchor falls back to file order.
+ * item is placed at its CRDT anchors, the way the device's own CRDT does.
+ * Deleted stretches keep their character ids in the sequence as invisible
+ * entries, because a later edit may anchor to a character that was deleted
+ * afterwards.
+ *
+ * Placement runs in passes until nothing moves (devicecheck 2026-08-19,
+ * reMarkable phone app): an item's anchor may live in an item LATER in the
+ * file, so one pass in file order is not enough — the phone app's edits
+ * ended up appended at the end that way. The LEFT anchor decides ("sits
+ * after this character"); when only the RIGHT anchor resolves ("sits
+ * before this character") that decides instead — it is what remains when
+ * a left anchor pointed into a stretch the device has since cleaned up.
+ * Items whose anchors never resolve are appended in file order and
+ * counted in `unanchored`: complete text over correct position.
  */
 export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 	const headerLength = HEADER.length;
@@ -457,11 +472,11 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 		const itemsInner = subCursor(itemsOuter, 1);
 		const itemCount = itemsInner.varuint();
 
-		// Reassemble the text with per-character ids so the style keys can be
-		// located even after on-device edits inserted or removed characters.
-		// ch === null marks a deleted character: an anchor target, not text.
-		const sequence: { id: CrdtId; ch: string | null }[] = [];
+		// Parse first: reassembly needs every item's anchors before placing
+		// any of them. ch === null marks a deleted character: an anchor
+		// target, not text.
 		const sameId = (a: CrdtId, b: CrdtId) => a.part1 === b.part1 && a.part2 === b.part2;
+		const isStart = (a: CrdtId) => a.part1 === 0 && a.part2 === 0;
 		// CRDT character ids are unique by construction; a page where two
 		// items claim the same id is corrupt or crafted, and anchoring into
 		// it could silently reorder the text. Refuse loudly instead — the
@@ -469,6 +484,12 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 		// (security-review 2026-08-19).
 		const seen = new Set<string>();
 		const decoder = new TextDecoder();
+		interface ParsedItem {
+			left: CrdtId;
+			right: CrdtId;
+			entries: { id: CrdtId; ch: string | null }[];
+		}
+		const parsed: ParsedItem[] = [];
 		for (let i = 0; i < itemCount; i++) {
 			const item = subCursor(itemsInner, 0);
 			item.tag();
@@ -476,7 +497,7 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 			item.tag();
 			const left = item.crdtId();
 			item.tag();
-			item.crdtId(); // right
+			const right = item.crdtId();
 			item.tag();
 			const deletedLength = item.u32();
 			let value = "";
@@ -498,15 +519,62 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 				seen.add(key);
 				entries.push({ id: charId, ch: deletedLength > 0 ? null : value[k] });
 			}
-			let at = sequence.length;
-			if (left.part1 === 0 && left.part2 === 0) {
-				at = 0;
-			} else {
-				const anchor = sequence.findIndex((entry) => sameId(entry.id, left));
-				if (anchor !== -1) at = anchor + 1;
-			}
-			sequence.splice(at, 0, ...entries);
+			parsed.push({ left, right, entries });
 		}
+
+		// Place items by their anchors, in passes until nothing moves.
+		const sequence: { id: CrdtId; ch: string | null }[] = [];
+		const indexOf = (target: CrdtId) =>
+			sequence.findIndex((entry) => sameId(entry.id, target));
+		const placeAt = (item: ParsedItem): number => {
+			if (!isStart(item.left)) {
+				const left = indexOf(item.left);
+				return left === -1 ? -1 : left + 1;
+			}
+			// Anchored at the document start: before the right anchor when it
+			// names a character, at position 0 when it is the end marker (our
+			// own writer's whole-document item).
+			if (isStart(item.right)) return 0;
+			return indexOf(item.right);
+		};
+		// The right anchor only comes into play once no left anchor can make
+		// progress anymore: a left anchor that arrives late in the file must
+		// always win from a right-anchor guess made too early.
+		let pending = parsed;
+		let allowRightFallback = false;
+		while (pending.length > 0) {
+			let progressed = false;
+			const next: ParsedItem[] = [];
+			for (const item of pending) {
+				let at = placeAt(item);
+				if (at === -1 && allowRightFallback && !isStart(item.right)) {
+					// The left anchor never resolved (it can point into a
+					// stretch the device has since cleaned up); the right
+					// anchor still pins the position.
+					at = indexOf(item.right);
+				}
+				if (at === -1) {
+					next.push(item);
+					continue;
+				}
+				sequence.splice(at, 0, ...item.entries);
+				progressed = true;
+			}
+			pending = next;
+			if (progressed) {
+				allowRightFallback = false;
+			} else if (!allowRightFallback) {
+				allowRightFallback = true;
+			} else {
+				break;
+			}
+		}
+		// Last resort: anchors that never resolved. Complete text beats
+		// correct position — append in file order and say so in the result.
+		for (const item of pending) {
+			sequence.push(...item.entries);
+		}
+		const unanchored = pending.length;
 		const chars = sequence.filter(
 			(entry): entry is { id: CrdtId; ch: string } => entry.ch !== null,
 		);
@@ -543,7 +611,7 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 			}
 		}
 		flush();
-		return { paragraphs };
+		return unanchored > 0 ? { paragraphs, unanchored } : { paragraphs };
 	}
 	return { paragraphs: [], missing: true };
 }

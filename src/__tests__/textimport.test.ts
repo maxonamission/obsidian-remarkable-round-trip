@@ -93,9 +93,10 @@ describe("importEditedText (GP_E7_S3)", () => {
 		expect(entry).toBe(ENTRY);
 	});
 
-	it("normalises # to ## without calling that an edit", async () => {
-		// The device has ONE heading style; a sent `# Kop` reads back as
-		// `## Kop`. That alone is not an edit and must not touch the note.
+	it("treats the canonical round-trip of a `# ` note as no edit", async () => {
+		// Since GP_E7_S4 the subset maps only `## ` (the device's single
+		// heading level); `# Kop` travels literal and the canonical form is
+		// the identity — so an unedited copy can never look like an edit.
 		const body = "# Kop\ninhoud";
 		const note = `---\na: b\n---\n${body}`;
 		const { deps, written } = makeDeps({
@@ -109,6 +110,27 @@ describe("importEditedText (GP_E7_S3)", () => {
 		};
 		const { outcome } = await importEditedText(entry, deps);
 		expect(outcome).toEqual({ kind: "unchanged" });
+		expect(written).toHaveLength(0);
+	});
+
+	it("leaves an unedited 0.36-mapping document alone after the rules changed", async () => {
+		// Sent when `# ` still mapped to the heading style: the device reads
+		// back "## Kop" without anyone touching it. textHash proves the device
+		// was never edited, so nothing is imported — the note waits for a real
+		// edit (or a re-send under the new rules).
+		const body = "# Kop\ninhoud";
+		const oldCanonical = "## Kop\ninhoud";
+		const { deps, written } = makeDeps({
+			readNote: () => Promise.resolve(`---\na: b\n---\n${body}`),
+			readDeviceText: () => Promise.resolve({ markdown: oldCanonical, missing: false }),
+		});
+		const entry = {
+			...ENTRY,
+			contentHash: contentHash(body),
+			textHash: contentHash(oldCanonical),
+		};
+		const { outcome } = await importEditedText(entry, deps);
+		expect(outcome).toEqual({ kind: "device-unchanged" });
 		expect(written).toHaveLength(0);
 	});
 

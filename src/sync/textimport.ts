@@ -129,7 +129,11 @@ export async function importEditedText(
 		textHash: contentHash(device.markdown),
 	};
 
-	if (!deviceEdited && vaultChanged) {
+	// No device edits → nothing to import, full stop. This also covers a
+	// mapping-rule change between send and import (an 0.36-sent `# Kop`
+	// reads back as `## Kop` without anyone touching it): the note is left
+	// alone until the device copy is genuinely edited.
+	if (!deviceEdited) {
 		return { outcome: { kind: "device-unchanged" }, entry };
 	}
 	if (!vaultChanged) {

@@ -90,17 +90,49 @@ describe("v6 reader against simulated device edits (GP_E7_S3)", () => {
 	];
 	const texts = (bytes: Uint8Array) => readTextPageRm(bytes).paragraphs.map((p) => p.text);
 
-	it("places a mid-paragraph insertion at its anchor, not at file order", () => {
+	it("places a mid-paragraph insertion at its anchor, whatever the file order", () => {
 		// Session edit: " heel" typed after "alles" (char 25 = the 's').
-		// The device may store the new item anywhere in the file; anchor wins.
+		// The device may store the new item anywhere in the file — the phone
+		// app does exactly that (devicecheck 2026-08-19) — so placement runs
+		// in passes until every anchor resolves.
 		const insert: TextItemSpec = { id: id(2, 100), left: id(1, 25), right: id(1, 26), text: " heel" };
 		const inOrder = buildTextPageRmItems([BASE, insert], STYLES);
 		const outOfOrder = buildTextPageRmItems([insert, BASE], STYLES);
 		expect(texts(inOrder)).toEqual(["Doel", "alles heel rustig"]);
-		// File order reversed: the insert arrives before its anchor exists and
-		// falls back to file order — wrong position, but never lost text. The
-		// in-order case is what the device write of 2026-08-19 produced.
-		expect(texts(outOfOrder).join("\n")).toContain("alles");
+		expect(texts(outOfOrder)).toEqual(["Doel", "alles heel rustig"]);
+		expect(readTextPageRm(outOfOrder).unanchored).toBeUndefined();
+	});
+
+	it("resolves a chain of forward references across passes", () => {
+		// A anchors into B, B anchors into the base — and the file stores
+		// them in exactly the wrong order.
+		const b: TextItemSpec = { id: id(2, 100), left: id(1, 32), right: START, text: " en" };
+		const a: TextItemSpec = { id: id(3, 200), left: id(2, 102), right: START, text: " zo" };
+		const bytes = buildTextPageRmItems([a, b, BASE], STYLES);
+		expect(texts(bytes)).toEqual(["Doel", "alles rustig en zo"]);
+	});
+
+	it("falls back to the right anchor when the left one is gone", () => {
+		// The left anchor points into a stretch the device cleaned up (no
+		// item carries id (9,9) anymore); the right anchor still pins the
+		// insert before "rustig" (char 27 = the 'r').
+		const insert: TextItemSpec = { id: id(2, 100), left: id(9, 9), right: id(1, 27), text: "heel " };
+		const bytes = buildTextPageRmItems([BASE, insert], STYLES);
+		expect(texts(bytes)).toEqual(["Doel", "alles heel rustig"]);
+		expect(readTextPageRm(bytes).unanchored).toBeUndefined();
+	});
+
+	it("prepends an item anchored between document start and the first character", () => {
+		const insert: TextItemSpec = { id: id(2, 100), left: START, right: id(1, 16), text: "Mijn " };
+		const bytes = buildTextPageRmItems([BASE, insert], STYLES);
+		expect(texts(bytes)[0]).toBe("Mijn Doel");
+	});
+
+	it("appends unresolvable items at the end and counts them, never dropping text", () => {
+		const lost: TextItemSpec = { id: id(2, 100), left: id(9, 9), right: id(8, 8), text: "zwevend" };
+		const result = readTextPageRm(buildTextPageRmItems([BASE, lost], STYLES));
+		expect(result.unanchored).toBe(1);
+		expect(result.paragraphs.map((p) => p.text).join("\n")).toContain("zwevend");
 	});
 
 	it("merges paragraphs when a deletion spans the newline between them", () => {

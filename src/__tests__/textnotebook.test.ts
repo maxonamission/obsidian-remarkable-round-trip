@@ -6,7 +6,7 @@ import {
 	sendTextNotebook,
 	uploadTextNotebook,
 } from "../transport/textnotebook";
-import { markdownFromParagraphs, paragraphsFromMarkdown } from "../convert/textdoc";
+import { canonicalText, markdownFromParagraphs, paragraphsFromMarkdown } from "../convert/textdoc";
 import { PARAGRAPH_STYLE } from "../convert/rmtext";
 
 const MD = [
@@ -14,12 +14,13 @@ const MD = [
 	"**Krachtblok — trekken**",
 	"Horizontale trekbeweging met een elastiek.",
 	"- Ellebogen langs het lichaam",
+	"\t- schouderbladen laag houden",
 	"- [ ] elastiek controleren",
 	"- [x] 2 × 15 gedaan",
 	"gewone [[wikilink]] blijft letterlijk staan",
 ].join("\n");
 
-describe("markdown ↔ device paragraphs (F18 subset)", () => {
+describe("markdown ↔ device paragraphs (F18 subset, GP_E7_S4)", () => {
 	it("maps the style subset both ways without loss", () => {
 		const paragraphs = paragraphsFromMarkdown(MD);
 		expect(paragraphs.map((p) => p.style)).toEqual([
@@ -27,11 +28,11 @@ describe("markdown ↔ device paragraphs (F18 subset)", () => {
 			PARAGRAPH_STYLE.bold,
 			PARAGRAPH_STYLE.plain,
 			PARAGRAPH_STYLE.bullet,
+			PARAGRAPH_STYLE.bullet2,
 			PARAGRAPH_STYLE.checkbox,
 			PARAGRAPH_STYLE.checkboxChecked,
 			PARAGRAPH_STYLE.plain,
 		]);
-		// The round-trip: # becomes ## (single mapping), the rest is exact.
 		expect(markdownFromParagraphs(paragraphs)).toBe(MD);
 	});
 
@@ -40,6 +41,36 @@ describe("markdown ↔ device paragraphs (F18 subset)", () => {
 		const [paragraph] = paragraphsFromMarkdown(literal);
 		expect(paragraph).toEqual({ text: literal, style: PARAGRAPH_STYLE.plain });
 		expect(markdownFromParagraphs([paragraph])).toBe(literal);
+	});
+
+	it("is the identity for EVERY input: variants stay literal (GP_E7_S4)", () => {
+		// The watertight F17 rule: only the exact canonical spelling maps to
+		// a style; every variant travels as literal text. So one trip through
+		// the subset changes nothing, whatever comes in.
+		const corpus = [
+			"# eén hekje: het formaat kent maar één kopniveau",
+			"### drie hekjes",
+			"##geen spatie",
+			"* ster-bullet",
+			"+ plus-bullet",
+			"- [X] hoofdletter-marker",
+			"- [/] eigen marker",
+			"- [-] geannuleerd",
+			"  - met spaties genest",
+			"\t\t- twee tabs diep",
+			"\t- [ ] geneste taak houdt haar diepte, marker letterlijk",
+			"**half** vet met een staart",
+			"*hele regel cursief*",
+			"| tabel | rij |",
+			"",
+			"- ",
+			"## ",
+		];
+		for (const line of corpus) {
+			expect(canonicalText(line)).toBe(line);
+		}
+		expect(canonicalText(corpus.join("\n"))).toBe(corpus.join("\n"));
+		expect(canonicalText(MD)).toBe(MD);
 	});
 });
 
@@ -127,7 +158,7 @@ describe("notebook upload + read-back (GP_E7_S2, uit spike GP_E7_S1)", () => {
 		const result = await readTextNotebook(api, docId);
 		expect(result.missing).toBe(false);
 		expect(result.markdown).toBe(MD);
-		expect(result.paragraphCount).toBe(7);
+		expect(result.paragraphCount).toBe(8);
 	});
 
 	it("writes content rmapi-js' reader accepts: fileType notebook (device-bevinding)", async () => {

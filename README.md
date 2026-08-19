@@ -99,9 +99,11 @@ distraction is the other. Send a note as **editable text** — right-click →
 as a typed-text notebook you edit with the keyboard, not as a fixed page
 you annotate.
 
-- Headings, bold label lines, bullets and task checkboxes arrive as real
-  device paragraph styles. Everything else — links, tables, code — travels
-  along as literal text, so nothing of your markdown is lost.
+- `##` headings, bold label lines, bullets (nested one level deep) and
+  task checkboxes arrive as real device paragraph styles. Everything else
+  — links, tables, code, single-`#` headings, inline styling — travels
+  along as literal text, byte for byte, so nothing of your markdown is
+  ever lost or renamed.
 - Frontmatter stays home: properties are vault metadata, not text to edit.
   The note on the device is exactly the note body.
 - Re-sending replaces the previous copy (the old one goes to the device
