@@ -559,35 +559,45 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 		);
 
 		// Place items by their anchors, in passes until nothing moves.
+		//
+		// The RIGHT anchor decides the position whenever it names a character
+		// (devicecheck 2026-08-19, "Racefietsonderhoud" diagnosis): an editor
+		// that inserts mid-item SPLITS that item, and the tail keeps the SAME
+		// left anchor as the insert — left-only placement then puts the tail
+		// before the insert and the insert drifts to the end. "I sit before
+		// character X" is unambiguous where "I sit after character Y" is
+		// shared. An item whose right anchor is the end marker has no
+		// successor and places after its left anchor.
+		//
+		// An item whose real right anchor never resolves would deadlock (two
+		// items can even wait on each other across a deleted stretch), so a
+		// stalled round relaxes ONE placement to left-only, then returns to
+		// strict. Items with no resolvable anchor at all are appended in
+		// file order and counted.
 		const sequence: { id: CrdtId; ch: string | null }[] = [];
 		const indexOf = (target: CrdtId) =>
 			sequence.findIndex((entry) => sameId(entry.id, target));
-		const placeAt = (item: ParsedItem): number => {
-			if (!isStart(item.left)) {
-				const left = indexOf(item.left);
-				return left === -1 ? -1 : left + 1;
-			}
-			// Anchored at the document start: before the right anchor when it
-			// names a character, at position 0 when it is the end marker (our
-			// own writer's whole-document item).
-			if (isStart(item.right)) return 0;
-			return indexOf(item.right);
+		const afterLeft = (item: ParsedItem): number => {
+			if (isStart(item.left)) return 0;
+			const left = indexOf(item.left);
+			return left === -1 ? -1 : left + 1;
 		};
-		// The right anchor only comes into play once no left anchor can make
-		// progress anymore: a left anchor that arrives late in the file must
-		// always win from a right-anchor guess made too early.
 		let pending = parsed;
-		let allowRightFallback = false;
+		let relaxed = false;
 		while (pending.length > 0) {
 			let progressed = false;
 			const next: ParsedItem[] = [];
 			for (const item of pending) {
-				let at = placeAt(item);
-				if (at === -1 && allowRightFallback && !isStart(item.right)) {
-					// The left anchor never resolved (it can point into a
-					// stretch the device has since cleaned up); the right
-					// anchor still pins the position.
+				let at = -1;
+				if (isStart(item.right)) {
+					at = afterLeft(item);
+				} else {
 					at = indexOf(item.right);
+					if (at === -1 && relaxed && !progressed) {
+						// One left-only placement per stalled round; often the
+						// right anchor of the NEXT pending item resolves off it.
+						at = afterLeft(item);
+					}
 				}
 				if (at === -1) {
 					next.push(item);
@@ -598,9 +608,9 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 			}
 			pending = next;
 			if (progressed) {
-				allowRightFallback = false;
-			} else if (!allowRightFallback) {
-				allowRightFallback = true;
+				relaxed = false;
+			} else if (!relaxed) {
+				relaxed = true;
 			} else {
 				break;
 			}

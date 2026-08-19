@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.38.4] - 2026-08-19
+
+### Fixed
+
+- **Mobile-app edits now land where you typed them — root cause found.**
+  The always-on diagnosis of 0.38.3 showed exactly what the reMarkable
+  mobile app writes: it splits the existing text at the edit point, and
+  the tail keeps the SAME left anchor as the inserted text. Placement
+  that only followed left anchors put the tail before the insert, pushing
+  your edit to the end of the note — with every anchor "resolved", which
+  is why earlier fixes missed it. The right-hand anchor ("I sit before
+  this character") is unambiguous and now decides placement, with the
+  left anchor as fallback. A regression test carries the exact structure
+  from the field diagnosis.
+
+
 ## [0.38.3] - 2026-08-19
 
 ### Changed

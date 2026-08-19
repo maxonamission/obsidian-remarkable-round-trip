@@ -103,6 +103,28 @@ describe("v6 reader against simulated device edits (GP_E7_S3)", () => {
 		expect(readTextPageRm(outOfOrder).unanchored).toBeUndefined();
 	});
 
+	it("places a phone-app edit between the halves of the item it split", () => {
+		// The REAL topology from the 0.38.3 field diagnosis (devicecheck
+		// 2026-08-19, "Racefietsonderhoud"): the app split the original item
+		// at the edit point and the TAIL keeps the same left anchor as the
+		// edit — only the right anchor ("I sit before char (0,20)") tells the
+		// edit and the tail apart. Left-only placement sent the edit to the
+		// end of the document, three device tests in a row.
+		const items: TextItemSpec[] = [
+			{ id: id(0, 16), left: START, right: START, text: "Voor" },
+			{ id: id(1, 100), left: id(0, 19), right: id(0, 20), text: " en na" },
+			{ id: id(0, 20), left: id(0, 19), right: START, text: " het poetsen" },
+		];
+		const styles: StyleSpec[] = [
+			{ key: START, timestamp: id(1, 200), style: PARAGRAPH_STYLE.plain },
+		];
+		const result = readTextPageRm(buildTextPageRmItems(items, styles));
+		expect(result.paragraphs).toEqual([
+			{ text: "Voor en na het poetsen", style: PARAGRAPH_STYLE.plain },
+		]);
+		expect(result.unanchored).toBeUndefined();
+	});
+
 	it("resolves a chain of forward references across passes", () => {
 		// A anchors into B, B anchors into the base — and the file stores
 		// them in exactly the wrong order.
