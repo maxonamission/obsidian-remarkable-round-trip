@@ -31,6 +31,31 @@ export interface TextParagraph {
 	style: ParagraphStyleValue;
 }
 
+/**
+ * One CRDT text item as the device stores it (GP_E7_S3). Our own writer
+ * emits a single item carrying the whole text; a device that edited the
+ * page writes several, each anchored between existing characters. Exported
+ * so tests can build pages that look like on-device edit histories.
+ */
+export interface TextItemSpec {
+	id: CrdtId;
+	/** Character this item sits after; (0,0) anchors at the very start. */
+	left: CrdtId;
+	/** Character this item sits before; (0,0) means the very end. */
+	right: CrdtId;
+	/** Visible text; omit for a deleted stretch. */
+	text?: string;
+	/** How many characters the (deleted) stretch once carried. */
+	deletedLength?: number;
+}
+
+/** One paragraph-style entry: keyed by the newline that opens the paragraph. */
+export interface StyleSpec {
+	key: CrdtId;
+	timestamp: CrdtId;
+	style: ParagraphStyleValue;
+}
+
 const HEADER = "reMarkable .lines file, version=6          ";
 
 // Tag nibbles (rmscene TagType).
@@ -52,7 +77,7 @@ const GROUP_ITEM_TYPE = 0x02;
 /** First explicit character id; ids 16..16+len-1 are the text's characters. */
 const FIRST_CHAR_ID = 16;
 
-interface CrdtId {
+export interface CrdtId {
 	part1: number;
 	part2: number;
 }
@@ -196,6 +221,42 @@ class ByteWriter {
  */
 export function buildTextPageRm(paragraphs: TextParagraph[]): Uint8Array {
 	const text = paragraphs.map((p) => p.text).join("\n");
+
+	// One item carries the whole text; character ids are implicit (char i has
+	// id (1, FIRST_CHAR_ID + i)). Styles are keyed by the newline character
+	// that starts their paragraph — the first by the (0,0) end marker.
+	const styleKeys: CrdtId[] = [END_MARKER];
+	let offset = 0;
+	for (let i = 0; i < paragraphs.length - 1; i++) {
+		offset += paragraphs[i].text.length;
+		styleKeys.push(id(1, FIRST_CHAR_ID + offset));
+		offset += 1; // the newline itself
+	}
+	// Timestamps must be unique ids outside the character range.
+	const timestampBase = FIRST_CHAR_ID + text.length + 1;
+
+	return buildTextPageRmItems(
+		[{ id: id(1, FIRST_CHAR_ID), left: END_MARKER, right: END_MARKER, text }],
+		paragraphs.map((paragraph, index) => ({
+			key: styleKeys[index],
+			timestamp: id(1, timestampBase + index),
+			style: paragraph.style,
+		})),
+	);
+}
+
+/**
+ * Build a page from explicit CRDT items and style entries — the generalised
+ * writer behind buildTextPageRm. Production sends always write one item;
+ * this shape exists so tests can construct pages that look like on-device
+ * edit histories (GP_E7_S3): items out of file order, deleted stretches,
+ * several editing sessions.
+ */
+export function buildTextPageRmItems(
+	items: TextItemSpec[],
+	styles: StyleSpec[],
+): Uint8Array {
+	const text = items.map((item) => item.text ?? "").join("");
 	const encoder = new TextEncoder();
 	const w = new ByteWriter();
 	w.raw(encoder.encode(HEADER));
@@ -232,46 +293,34 @@ export function buildTextPageRm(paragraphs: TextParagraph[]): Uint8Array {
 		b.subblock(4, (s) => s.taggedId(1, id(0, 1)));
 	});
 
-	// Root text: ONE text item carrying the whole text (character ids are
-	// implicit: char i has id (1, FIRST_CHAR_ID + i)), plus one style entry
-	// per paragraph, keyed by the newline character that starts it — the
-	// first paragraph is keyed by the (0,0) end marker.
-	const styleKeys: CrdtId[] = [END_MARKER];
-	let offset = 0;
-	for (let i = 0; i < paragraphs.length - 1; i++) {
-		offset += paragraphs[i].text.length;
-		styleKeys.push(id(1, FIRST_CHAR_ID + offset));
-		offset += 1; // the newline itself
-	}
-	// Timestamps must be unique ids outside the character range.
-	const timestampBase = FIRST_CHAR_ID + text.length + 1;
-
 	w.block(BLOCK_ROOT_TEXT, 1, 1, (b) => {
 		b.taggedId(1, END_MARKER);
 		b.subblock(2, (outer) => {
 			outer.subblock(1, (s) => {
 				s.subblock(1, (t) => {
-					t.varuint(1); // one text item
-					t.subblock(0, (item) => {
-						item.taggedId(2, id(1, FIRST_CHAR_ID));
-						item.taggedId(3, END_MARKER);
-						item.taggedId(4, END_MARKER);
-						item.taggedInt(5, 0);
-						item.taggedString(6, text);
-					});
+					t.varuint(items.length);
+					for (const spec of items) {
+						t.subblock(0, (item) => {
+							item.taggedId(2, spec.id);
+							item.taggedId(3, spec.left);
+							item.taggedId(4, spec.right);
+							item.taggedInt(5, spec.deletedLength ?? 0);
+							if (spec.text !== undefined) item.taggedString(6, spec.text);
+						});
+					}
 				});
 			});
 			outer.subblock(2, (s) => {
 				s.subblock(1, (f) => {
-					f.varuint(paragraphs.length);
-					paragraphs.forEach((paragraph, index) => {
-						f.crdtId(styleKeys[index]);
-						f.taggedId(1, id(1, timestampBase + index));
+					f.varuint(styles.length);
+					for (const style of styles) {
+						f.crdtId(style.key);
+						f.taggedId(1, style.timestamp);
 						f.subblock(2, (v) => {
 							v.u8(17); // constant rmscene writes; meaning unknown
-							v.u8(paragraph.style);
+							v.u8(style.style);
 						});
-					});
+					}
 				});
 			});
 		});
@@ -377,8 +426,14 @@ export interface ReadTextResult {
 /**
  * Read the typed text of a v6 page back into paragraphs. Follows rmscene's
  * RootTextBlock reader for the subset the writer produces, tolerating the
- * device's own edits: multiple text items (in CRDT document order for the
- * simple appends/edits the spike cares about) and deleted stretches.
+ * device's own edits: multiple text items, deleted stretches, and items
+ * that sit elsewhere in the file than in the document (GP_E7_S3) — each
+ * item is placed after the character its LEFT anchor names, the way the
+ * device's own CRDT does. Deleted stretches keep their character ids in
+ * the sequence as invisible entries, because a later edit may anchor to a
+ * character that was deleted afterwards. Single-writer histories (one
+ * person, one device, sessions in sequence) are fully determined by the
+ * anchors; an unresolvable anchor falls back to file order.
  */
 export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 	const headerLength = HEADER.length;
@@ -404,14 +459,22 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 
 		// Reassemble the text with per-character ids so the style keys can be
 		// located even after on-device edits inserted or removed characters.
-		const chars: { id: CrdtId; ch: string }[] = [];
+		// ch === null marks a deleted character: an anchor target, not text.
+		const sequence: { id: CrdtId; ch: string | null }[] = [];
+		const sameId = (a: CrdtId, b: CrdtId) => a.part1 === b.part1 && a.part2 === b.part2;
+		// CRDT character ids are unique by construction; a page where two
+		// items claim the same id is corrupt or crafted, and anchoring into
+		// it could silently reorder the text. Refuse loudly instead — the
+		// import then reports the error and touches nothing
+		// (security-review 2026-08-19).
+		const seen = new Set<string>();
 		const decoder = new TextDecoder();
 		for (let i = 0; i < itemCount; i++) {
 			const item = subCursor(itemsInner, 0);
 			item.tag();
 			const itemId = item.crdtId();
 			item.tag();
-			item.crdtId(); // left
+			const left = item.crdtId();
 			item.tag();
 			item.crdtId(); // right
 			item.tag();
@@ -425,11 +488,28 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 				// A trailing tagged int marks a formatting placeholder; the
 				// spike's subset does not use it.
 			}
-			if (deletedLength > 0) continue;
-			for (let k = 0; k < value.length; k++) {
-				chars.push({ id: { part1: itemId.part1, part2: itemId.part2 + k }, ch: value[k] });
+			const entries: { id: CrdtId; ch: string | null }[] = [];
+			for (let k = 0; k < Math.max(value.length, deletedLength); k++) {
+				const charId = { part1: itemId.part1, part2: itemId.part2 + k };
+				const key = `${charId.part1}:${charId.part2}`;
+				if (seen.has(key)) {
+					throw new Error("Malformed text page: two items claim the same character.");
+				}
+				seen.add(key);
+				entries.push({ id: charId, ch: deletedLength > 0 ? null : value[k] });
 			}
+			let at = sequence.length;
+			if (left.part1 === 0 && left.part2 === 0) {
+				at = 0;
+			} else {
+				const anchor = sequence.findIndex((entry) => sameId(entry.id, left));
+				if (anchor !== -1) at = anchor + 1;
+			}
+			sequence.splice(at, 0, ...entries);
 		}
+		const chars = sequence.filter(
+			(entry): entry is { id: CrdtId; ch: string } => entry.ch !== null,
+		);
 
 		const stylesOuter = subCursor(outer, 2);
 		const stylesInner = subCursor(stylesOuter, 1);

@@ -22,6 +22,14 @@ export interface MappingEntry {
 	 */
 	format?: "pdf" | "epub" | "text";
 	/**
+	 * Hash of the canonical form of the sent text (GP_E7_S3): exactly what
+	 * an UNEDITED device copy reads back as. Lets the import tell "the
+	 * device was never edited" apart from "the device and the vault both
+	 * changed" — only the latter is a conflict. Text sends only; absent on
+	 * 0.36.0 uploads, where that distinction degrades to the conflict ask.
+	 */
+	textHash?: string;
+	/**
 	 * Device document hash at the last annotation import (F10). Unset until
 	 * the first import; equal to the current device hash means "nothing new".
 	 */

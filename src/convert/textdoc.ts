@@ -34,6 +34,16 @@ export function paragraphsFromMarkdown(markdown: string): TextParagraph[] {
 		});
 }
 
+/**
+ * What markdown looks like after one trip through the style subset — the
+ * text an UNEDITED device copy reads back as. `# ` normalises to `## `
+ * (the device has one heading style); everything else survives verbatim.
+ * Stable under repetition: canonicalText(canonicalText(x)) === canonicalText(x).
+ */
+export function canonicalText(markdown: string): string {
+	return markdownFromParagraphs(paragraphsFromMarkdown(markdown));
+}
+
 /** Device paragraphs → markdown, the reverse of `paragraphsFromMarkdown`. */
 export function markdownFromParagraphs(paragraphs: TextParagraph[]): string {
 	const line = (p: TextParagraph): string => {

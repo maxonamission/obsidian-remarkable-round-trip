@@ -52,7 +52,9 @@ import {
 	upsertAnnotationBlock,
 } from "./incoming/annotationnote";
 import { WatchQueue } from "./sync/watcher";
-import { RawSyncApi, sendTextNotebook } from "./transport/textnotebook";
+import { RawSyncApi, readTextNotebook, sendTextNotebook } from "./transport/textnotebook";
+import { TextImportOutcome, importEditedText, splitFrontmatter } from "./sync/textimport";
+import { TextConflictModal } from "./textconflictmodal";
 import { flattenSelection, relativeFolderPath } from "./sync/selection";
 import { shouldAnnounceUpdate } from "./updatenotice";
 
@@ -159,6 +161,20 @@ export default class RoundTripPlugin extends Plugin {
 			},
 		});
 
+		// The way back (F17, GP_E7_S3): equally explicit, equally per note —
+		// only offered for notes whose last send was a write-mode send.
+		this.addCommand({
+			id: "import-edited-text-current-note",
+			name: "Get edited text back from reMarkable (current note)",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				const entry = file === null ? undefined : this.writeModeEntry(file);
+				if (!file || entry === undefined) return false;
+				if (!checking) void this.importEditedTextFor(file);
+				return true;
+			},
+		});
+
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
 				if (file instanceof TFile && file.extension === "md") {
@@ -185,6 +201,13 @@ export default class RoundTripPlugin extends Plugin {
 							.setTitle("Send to reMarkable as editable text")
 							.setIcon("pencil")
 							.onClick(() => void this.sendFiles([file], { format: "text" })),
+					);
+					// …and the way back (GP_E7_S3), only where it applies.
+					if (this.writeModeEntry(file) !== undefined) menu.addItem((item) =>
+						item
+							.setTitle("Get edited text from reMarkable")
+							.setIcon("pencil")
+							.onClick(() => void this.importEditedTextFor(file)),
 					);
 				}
 				if (file instanceof TFolder) {
@@ -596,6 +619,118 @@ export default class RoundTripPlugin extends Plugin {
 		} finally {
 			notice.hide();
 		}
+	}
+
+	/** The mapping entry of a note whose LAST send was write-mode, if any. */
+	private writeModeEntry(file: TFile): MappingEntry | undefined {
+		const docId = getFrontmatterValue(
+			this.app.metadataCache.getFileCache(file)?.frontmatter,
+			DOCID_FRONTMATTER_KEY,
+		);
+		if (typeof docId !== "string") return undefined;
+		const entry = this.settings.mappings[docId];
+		return entry?.format === "text" ? entry : undefined;
+	}
+
+	/**
+	 * Import the edited text of a write-mode note back into the note itself
+	 * (F17, GP_E7_S3). The N5 guarantees — backup before touching, conflict
+	 * ask, no silent merges — live in importEditedText; this edge only wires
+	 * vault, transport and the conflict modal together. The note the user
+	 * invoked this on IS the target, so a moved note needs no path chase.
+	 */
+	private async importEditedTextFor(file: TFile): Promise<void> {
+		const entry = this.writeModeEntry(file);
+		if (entry === undefined) {
+			notify("This note's last send was not an editable-text send.");
+			return;
+		}
+		if (this.settings.deviceToken === "") {
+			notify("Not paired with a reMarkable account yet — open the plugin settings first.");
+			return;
+		}
+		const notice = progressNotice(`Reading "${file.basename}" from the reMarkable…`);
+		try {
+			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
+			const { outcome, entry: updated } = await importEditedText(entry, {
+				readDeviceText: async (target) => {
+					try {
+						return await readTextNotebook(api.raw, target.deviceDocId);
+					} catch (error) {
+						if (error instanceof Error && error.message.includes("not found")) {
+							return null;
+						}
+						throw error;
+					}
+				},
+				readNote: () => this.app.vault.read(file),
+				writeNote: (_target, content) => this.app.vault.modify(file, content),
+				writeBackup: (target, content) => this.writePreviousVersion(file, target, content),
+				writeAside: async (_target, markdown) => {
+					const dir = file.parent === null || file.parent.path === "/" ? "" : file.parent.path;
+					const path = `${dir === "" ? "" : `${dir}/`}${file.basename} (from reMarkable).md`;
+					await this.writeVaultFile(path, markdown);
+					return path;
+				},
+				chooseOnConflict: () =>
+					new Promise((resolve) => {
+						new TextConflictModal(this.app, file.basename, resolve).open();
+					}),
+			});
+			if (outcome.kind === "imported" || outcome.kind === "conflict-replaced") {
+				this.settings.mappings = {
+					...this.settings.mappings,
+					[updated.docId]: { ...updated, notePath: file.path },
+				};
+				await this.saveSettings();
+			}
+			notify(describeTextImport(file.basename, outcome), 10000);
+		} catch (error) {
+			notify(toTransportError(error).message, 10000);
+		} finally {
+			notice.hide();
+		}
+	}
+
+	/**
+	 * The safety-net copy (N5): the full previous note, in a `previous`
+	 * folder under the import folder, named deterministically so a second
+	 * import overwrites its own backup instead of piling up copies. The
+	 * docId key is renamed in the copy — resolveNote finds notes by that id,
+	 * and a backup carrying the live id could hijack a lookup after the
+	 * original moved.
+	 */
+	private async writePreviousVersion(
+		file: TFile,
+		entry: MappingEntry,
+		content: string,
+	): Promise<string> {
+		const base = this.settings.annotationFolder.replace(/^\/+|\/+$/g, "");
+		const folder = base === "" ? "previous" : `${base}/previous`;
+		const { head, body } = splitFrontmatter(content);
+		const safeHead = head.replace(
+			new RegExp(`^${DOCID_FRONTMATTER_KEY}(?=\\s*:)`, "m"),
+			`${DOCID_FRONTMATTER_KEY}-previous`,
+		);
+		const path = `${folder}/${file.basename} (${entry.docId.slice(0, 8)}).md`;
+		await this.writeVaultFile(path, safeHead + body);
+		return path;
+	}
+
+	/** Create or overwrite a vault file, creating missing folders on the way. */
+	private async writeVaultFile(path: string, content: string): Promise<void> {
+		const dir = path.split("/").slice(0, -1).join("/");
+		const segments = dir.split("/").filter((segment) => segment !== "");
+		let prefix = "";
+		for (const segment of segments) {
+			prefix = prefix === "" ? segment : `${prefix}/${segment}`;
+			if (this.app.vault.getFolderByPath(prefix) === null) {
+				await this.app.vault.createFolder(prefix);
+			}
+		}
+		const existing = this.app.vault.getFileByPath(path);
+		if (existing !== null) await this.app.vault.modify(existing, content);
+		else await this.app.vault.create(path, content);
 	}
 
 	/**
@@ -1058,6 +1193,32 @@ function collectMarkdownFiles(folder: TFolder): TFile[] {
 		else if (child instanceof TFolder) files.push(...collectMarkdownFiles(child));
 	}
 	return files;
+}
+
+/** One honest sentence per write-mode import outcome (GP_E7_S3). */
+function describeTextImport(name: string, outcome: TextImportOutcome): string {
+	switch (outcome.kind) {
+		case "imported":
+			return `"${name}" now carries the reMarkable text. Previous version: ${outcome.backupPath}`;
+		case "conflict-replaced":
+			return `"${name}" now carries the reMarkable text. The newer vault version is kept at ${outcome.backupPath}`;
+		case "conflict-kept":
+			return `"${name}" kept as it is. The reMarkable text is at ${outcome.asidePath}`;
+		case "cancelled":
+			return "Nothing changed.";
+		case "unchanged":
+			return `No differences — "${name}" and the reMarkable copy say the same.`;
+		case "device-unchanged":
+			return `The reMarkable copy has no edits and "${name}" is newer — nothing to import.`;
+		case "no-text":
+			return "That document carries no typed text, so there is nothing to bring back.";
+		case "not-on-device":
+			return "The document is no longer on the reMarkable account — nothing was changed.";
+		case "note-missing":
+			return `Could not read "${name}" from the vault — nothing was changed.`;
+		case "not-write-mode":
+			return "This note's last send was not an editable-text send.";
+	}
 }
 
 function reportResults(

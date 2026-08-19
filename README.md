@@ -106,9 +106,20 @@ you annotate.
   The note on the device is exactly the note body.
 - Re-sending replaces the previous copy (the old one goes to the device
   trash), and the annotation import knows to leave these documents alone.
-- **Bringing the edited text back into your note is the next step on the
-  roadmap.** Today the trip is one-way: treat the device copy as your
-  working copy until you copy changes back yourself.
+
+And the text comes back. Run **Get edited text back from reMarkable** (or
+right-click the note) and the edited text lands **in the note itself**,
+frontmatter untouched. With guard rails, because this is the one place the
+plugin replaces your own text:
+
+- It only ever runs when you ask, per note.
+- Before the note is touched, the previous version is saved to a
+  `previous` folder — the message tells you where.
+- If the note changed in your vault *and* on the device, nothing is merged
+  silently: a dialog lets you pick which version the note keeps, and the
+  other one is saved either way.
+- If only your note changed, or nothing changed, the note is left alone
+  and the message says so.
 
 ## Getting your thinking back
 

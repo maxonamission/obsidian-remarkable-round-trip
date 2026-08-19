@@ -5,6 +5,7 @@
  */
 
 import { preprocess, parseFrontmatter, EmbedResolver } from "../preprocess/preprocess";
+import { canonicalText } from "../convert/textdoc";
 import { parseBlocks } from "../convert/mdblocks";
 import { renderPdf, resolveLayoutOptions, PdfLayoutOptions } from "../convert/pdf";
 import { renderEpub } from "../convert/epub";
@@ -177,6 +178,9 @@ export async function sendNote(
 			// The import routes branch on this: annotation pull skips "text"
 			// documents (their import is the write-mode route, GP_E7_S3).
 			format,
+			// What an unedited device copy reads back as (GP_E7_S3) — the
+			// import's "was the device actually edited?" reference.
+			textHash: format === "text" ? contentHash(canonicalText(markdown)) : undefined,
 			// EPUB reflows and a text notebook has no fixed page geometry, so
 			// only PDF records layout to anchor imported ink against (GP_E3_S8).
 			pdfLayout: format === "pdf" ? resolveLayoutOptions(deps.layout) : undefined,

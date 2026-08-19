@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.37.0] - 2026-08-19
+
+### Added
+
+- **The way back: your edited text returns to the note it came from.** For
+  a note sent as editable text, a new command — "Get edited text back from
+  reMarkable", also in the note's right-click menu — reads the edited
+  document and updates the note itself, keeping its frontmatter untouched.
+  Nothing is ever lost: the previous version is saved to a `previous`
+  folder before the note is touched, and the message names where. When the
+  note changed in your vault *and* on the device, the plugin never merges
+  silently — a dialog lets you pick which version the note keeps, and the
+  other one is saved either way. If only your note changed, or nothing
+  changed, the note is left alone and the message says so.
+
+### Improved
+
+- The text reader now reassembles device edits by their internal anchors
+  instead of file order, so insertions in the middle of a paragraph,
+  deletions across paragraphs and multiple editing sessions all come back
+  in the right place.
+
+
 ## [0.36.0] - 2026-08-19
 
 ### Added
