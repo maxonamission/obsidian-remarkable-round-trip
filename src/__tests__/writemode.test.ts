@@ -116,6 +116,24 @@ describe("spike notebook upload + read-back (aannames 1 en 3)", () => {
 		expect(result.paragraphCount).toBe(7);
 	});
 
+	it("writes content rmapi-js' reader accepts: fileType notebook (device-bevinding)", async () => {
+		// 2026-08-19: fileType "" validated in NO branch of rmapi-js' content
+		// union, so every listItems — folder mirroring included — crashed on
+		// the spike document the moment it existed in the account.
+		const { api, log } = fakeApi();
+		const put: string[] = [];
+		const spy: typeof api.putText = (id, content) => {
+			put.push(content);
+			return api.putText(id, content);
+		};
+		await uploadTextNotebook({ ...api, putText: spy }, "Spike", MD, () => 1755093600000);
+		const content = JSON.parse(put.find((c) => c.includes("fileType")) ?? "{}") as {
+			fileType?: string;
+		};
+		expect(content.fileType).toBe("notebook");
+		expect(log.length).toBeGreaterThan(0);
+	});
+
 	it("fails loudly when the notebook is gone from the account", async () => {
 		const { api } = fakeApi();
 		await expect(readTextNotebook(api, "bestaat-niet")).rejects.toThrow(/not found/);

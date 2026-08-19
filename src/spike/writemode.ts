@@ -5,8 +5,8 @@
  * The bundle mirrors what rmapi-js' own putPdf uploads — content, metadata,
  * pagedata, the payload file, one entries list, root update — with two
  * notebook-specific differences: the payload is a `{docId}/{pageId}.rm` page
- * (not `{docId}.pdf`) and the content JSON says `fileType: ""` with the page
- * listed in `pages`. Content goes up via putText, not putContent: the spike
+ * (not `{docId}.pdf`) and the content JSON says `fileType: "notebook"` with
+ * the page listed in `pages`. Content goes up via putText, not putContent: the spike
  * must learn what the DEVICE accepts, not what rmapi-js' validator expects.
  *
  * Spike code: exercised only by the hidden spike command; not part of any
@@ -127,13 +127,15 @@ export async function uploadTextNotebook(
 		lastOpened: timestamp,
 		lastOpenedPage: 0,
 	};
-	// A notebook's content: fileType "" (the device's own notebooks carry the
-	// empty string), the page in the legacy pages list, no redirection.
+	// A notebook's content: fileType "notebook" — the device-bevinding van
+	// 2026-08-19: een lege string valideert in geen enkele tak van rmapi-js'
+	// content-union, waardoor elke listItems (mapspiegeling!) op het
+	// spike-document stukliep zodra het in het account stond.
 	const content = {
 		coverPageNumber: -1,
 		documentMetadata: {},
 		extraMetadata: {},
-		fileType: "",
+		fileType: "notebook",
 		fontName: "",
 		formatVersion: 1,
 		lineHeight: -1,

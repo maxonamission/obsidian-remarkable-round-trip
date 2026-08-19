@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.35.2] - 2026-08-19
+
+### Fixed
+
+- Internal test documents written by the (hidden, experimental) write-mode
+  spike carried a content field the cloud tree reader rejects, which made
+  folder mirroring fall back to root uploads for ALL sends while such a
+  document existed in the account. The spike now writes valid content. If
+  folder mirroring stopped working for you after experimenting with the
+  spike flag: delete the "(spike …)" documents on your device (and empty
+  the device trash), and mirroring recovers on the next send.
+
+
 ## [0.35.1] - 2026-08-13
 
 ### Fixed

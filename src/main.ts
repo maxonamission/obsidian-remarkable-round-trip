@@ -411,9 +411,12 @@ export default class RoundTripPlugin extends Plugin {
 		try {
 			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
 			const markdown = await this.app.vault.cachedRead(file);
+			// A short id in the name: two test sends must be tellable apart on
+			// the device, and the read-back names which one it will read.
+			const suffix = Math.random().toString(36).slice(2, 6);
 			const result = await uploadTextNotebook(
 				api.raw,
-				`${file.basename} (spike)`,
+				`${file.basename} (spike ${suffix})`,
 				markdown,
 			);
 			this.lastSpikeDoc = result.docId;
@@ -421,9 +424,10 @@ export default class RoundTripPlugin extends Plugin {
 				`reMarkable Round-Trip spike: uploaded ${result.docId} (page ${result.pageId})`,
 			);
 			notify(
-				`Spike: "${file.basename}" sent as editable text. Open it on the device, ` +
-					"edit, sync, then run the read-back command.",
-				8000,
+				`Spike: "${file.basename}" sent as editable text as "(spike ${suffix})". ` +
+					"Edit THAT copy on the device, let it sync, then run the read-back command " +
+					"— it reads the most recently sent spike document.",
+				10000,
 			);
 		} catch (error) {
 			console.error("reMarkable Round-Trip spike: upload failed", error);
