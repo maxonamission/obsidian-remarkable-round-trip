@@ -428,6 +428,13 @@ export interface ReadTextResult {
 	 * may sit in the wrong spot — worth a console trail at the caller.
 	 */
 	unanchored?: number;
+	/**
+	 * One line per item: ids, anchors and lengths — NO text content. The
+	 * phone-app devicecheck of 2026-08-19 failed twice without a way to see
+	 * what that app actually writes; this makes the next failed test its
+	 * own diagnosis (deliverable via the vault log, no console needed).
+	 */
+	topology: string[];
 }
 
 /**
@@ -485,29 +492,51 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 		const seen = new Set<string>();
 		const decoder = new TextDecoder();
 		interface ParsedItem {
+			itemId: CrdtId;
 			left: CrdtId;
 			right: CrdtId;
+			deletedLength: number;
 			entries: { id: CrdtId; ch: string | null }[];
 		}
 		const parsed: ParsedItem[] = [];
 		for (let i = 0; i < itemCount; i++) {
 			const item = subCursor(itemsInner, 0);
-			item.tag();
-			const itemId = item.crdtId();
-			item.tag();
-			const left = item.crdtId();
-			item.tag();
-			const right = item.crdtId();
-			item.tag();
-			const deletedLength = item.u32();
+			// Fields by their TAG, not by position (rmscene's discipline): a
+			// client that omits a field or adds one this reader has never
+			// seen — the phone app is a different writer than the tablet —
+			// must shift nothing. Unknown tags are skipped by their type.
+			let itemId = END_MARKER;
+			let left = END_MARKER;
+			let right = END_MARKER;
+			let deletedLength = 0;
 			let value = "";
-			if (!item.done) {
-				const str = subCursor(item, 6);
-				const byteLength = str.varuint();
-				str.u8(); // ascii flag
-				value = decoder.decode(str.bytes(byteLength));
-				// A trailing tagged int marks a formatting placeholder; the
-				// spike's subset does not use it.
+			while (!item.done) {
+				const tag = item.tag();
+				if (tag.type === TAG_ID) {
+					const v = item.crdtId();
+					if (tag.index === 2) itemId = v;
+					else if (tag.index === 3) left = v;
+					else if (tag.index === 4) right = v;
+				} else if (tag.type === TAG_BYTE4) {
+					const v = item.u32();
+					if (tag.index === 5) deletedLength = v;
+				} else if (tag.type === TAG_BYTE1) {
+					item.u8();
+				} else if (tag.type === TAG_LENGTH4) {
+					const sub = new Cursor(new DataView(item.bytes(item.u32()).buffer));
+					if (tag.index === 6) {
+						const byteLength = sub.varuint();
+						sub.u8(); // ascii flag
+						value = decoder.decode(sub.bytes(byteLength));
+						// A trailing tagged int inside the subblock marks a
+						// formatting placeholder; the subset does not use it.
+					}
+				} else {
+					// A tag type whose size this reader does not know: the
+					// rest of the item is unreadable, but everything parsed
+					// so far stands.
+					break;
+				}
 			}
 			const entries: { id: CrdtId; ch: string | null }[] = [];
 			for (let k = 0; k < Math.max(value.length, deletedLength); k++) {
@@ -519,8 +548,15 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 				seen.add(key);
 				entries.push({ id: charId, ch: deletedLength > 0 ? null : value[k] });
 			}
-			parsed.push({ left, right, entries });
+			parsed.push({ itemId, left, right, deletedLength, entries });
 		}
+		// Ids, anchors and lengths only — never text content (N1).
+		const asId = (v: CrdtId) => `(${v.part1},${v.part2})`;
+		const topology = parsed.map(
+			(p, i) =>
+				`item ${i}: id=${asId(p.itemId)} L=${asId(p.left)} R=${asId(p.right)} ` +
+				(p.deletedLength > 0 ? `deleted=${p.deletedLength}` : `chars=${p.entries.length}`),
+		);
 
 		// Place items by their anchors, in passes until nothing moves.
 		const sequence: { id: CrdtId; ch: string | null }[] = [];
@@ -611,7 +647,9 @@ export function readTextPageRm(bytes: Uint8Array): ReadTextResult {
 			}
 		}
 		flush();
-		return unanchored > 0 ? { paragraphs, unanchored } : { paragraphs };
+		return unanchored > 0
+			? { paragraphs, unanchored, topology }
+			: { paragraphs, topology };
 	}
-	return { paragraphs: [], missing: true };
+	return { paragraphs: [], missing: true, topology: [] };
 }

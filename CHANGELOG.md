@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.38.2] - 2026-08-19
+
+### Fixed
+
+- The text-item reader now reads fields by their tag instead of by
+  position, matching how the format actually works — a client that writes
+  an extra or missing field (different reMarkable apps write these files
+  differently) can no longer shift the anchor values that decide where
+  edited text lands.
+
+### Added
+
+- **Diagnosis without a console.** When an edit cannot be anchored (its
+  text then sits at the end of the note), the import now says so in the
+  message and writes a compact map of the document's internal structure —
+  ids, anchors and lengths, never your text — to
+  `reMarkable Round-Trip log.md` in your vault. If placement is still
+  wrong on your device, that note tells us exactly why.
+
+
 ## [0.38.1] - 2026-08-19
 
 ### Fixed

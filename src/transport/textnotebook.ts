@@ -185,6 +185,11 @@ export interface TextReadResult {
 	/** Items appended in file order because their anchors never resolved
 	 * (see ReadTextResult.unanchored); 0 = everything found its place. */
 	unanchored: number;
+	/** Ids/anchors/lengths per item — no text content (ReadTextResult.topology). */
+	topology: string[];
+	/** The document's .rm entries, first one read (diagnosis: a client that
+	 * adds pages would make "the first .rm" the wrong one to read). */
+	pageFiles: string[];
 }
 
 /**
@@ -201,14 +206,19 @@ export async function readTextNotebook(
 	const docEntry = rootEntries.find((entry) => entry.id === docId);
 	if (!docEntry) throw new Error(`Notebook ${docId} not found in the account root.`);
 	const { entries } = await api.getEntries(`${docId}.docSchema`, docEntry.hash);
+	const pageFiles = entries
+		.filter((entry) => entry.id.endsWith(".rm"))
+		.map((entry) => entry.id);
 	const page = entries.find((entry) => entry.id.endsWith(".rm"));
 	if (!page) throw new Error(`Notebook ${docId} has no .rm page.`);
 	const bytes = await api.getHash(page.id, page.hash);
-	const { paragraphs, missing, unanchored } = readTextPageRm(bytes);
+	const { paragraphs, missing, unanchored, topology } = readTextPageRm(bytes);
 	return {
 		markdown: markdownFromParagraphs(paragraphs),
 		paragraphCount: paragraphs.length,
 		missing: missing === true,
 		unanchored: unanchored ?? 0,
+		topology,
+		pageFiles,
 	};
 }

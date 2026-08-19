@@ -650,20 +650,31 @@ export default class RoundTripPlugin extends Plugin {
 			return;
 		}
 		const notice = progressNotice(`Reading "${file.basename}" from the reMarkable…`);
+		// Filled by readDeviceText below; a mobile user cannot open a console
+		// (devicecheck 2026-08-19, twice), so anchoring trouble must reach
+		// them through the outcome notice and the vault log instead.
+		const diagnosis = { unanchored: 0, report: "" };
 		try {
 			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
 			const { outcome, entry: updated } = await importEditedText(entry, {
 				readDeviceText: async (target) => {
 					try {
 						const result = await readTextNotebook(api.raw, target.deviceDocId);
-						// Field diagnosability (GP_E5_S1): when an edit could not
-						// be anchored, its text is at the end of the document —
-						// a user reporting "my text is in the wrong place" plus
-						// this trail tells us it is the anchor topology.
 						if (result.unanchored > 0) {
 							console.warn(
 								`reMarkable Round-Trip: ${result.unanchored} text item(s) had unresolvable anchors and were appended in file order`,
 							);
+							diagnosis.unanchored = result.unanchored;
+							diagnosis.report = [
+									`reMarkable Round-Trip — text import diagnosis (${new Date().toISOString().slice(0, 16).replace("T", " ")})`,
+									`plugin ${this.manifest.version} · "${file.basename}" · device ${target.deviceDocId}`,
+									"",
+									`${result.unanchored} of ${result.topology.length} item(s) could not be anchored and sit at the END of the text.`,
+									"Item map (ids, anchors and lengths only — no content):",
+									...result.topology.map((line) => `  ${line}`),
+									"",
+									`.rm files in the document (first one is read): ${result.pageFiles.join(", ")}`,
+								].join("\n");
 						}
 						return result;
 					} catch (error) {
@@ -694,7 +705,14 @@ export default class RoundTripPlugin extends Plugin {
 				};
 				await this.saveSettings();
 			}
-			notify(describeTextImport(file.basename, outcome), 10000);
+			if (diagnosis.unanchored > 0) await this.deliverReport(diagnosis.report);
+			notify(
+				describeTextImport(file.basename, outcome) +
+					(diagnosis.unanchored === 0
+						? ""
+						: ` Note: ${diagnosis.unanchored} edit(s) could not be anchored and sit at the END of the text — diagnosis in "reMarkable Round-Trip log.md".`),
+				diagnosis.unanchored === 0 ? 10000 : 20000,
+			);
 		} catch (error) {
 			notify(toTransportError(error).message, 10000);
 		} finally {
