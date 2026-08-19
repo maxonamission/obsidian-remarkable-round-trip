@@ -24,6 +24,9 @@ const SOURCE = [
 	"- [x] Kuitrek beide kanten",
 	"- [ ] Melk kopen",
 	`- [ ] ${LONG_TASK}`,
+	"- [ ] Push-ups veertig totaal",
+	"\t- [ ] eerste set van acht",
+	"\t- [ ] tweede set van acht",
 	"- gewone bullet zonder taak",
 ].join("\n");
 
@@ -80,6 +83,26 @@ function tickIn(phrase: string): Stroke {
 	]);
 }
 
+/**
+ * A tick the way people actually draw one (device check 2026-08-19): a short
+ * arm down to a vertex aimed at the box, then a tail sweeping two to three
+ * text lines up and to the right — many times the size of the box itself.
+ */
+function naturalTickIn(phrase: string, vertexShift = { x: 0, y: 0 }): Stroke {
+	const box = lineFor(phrase).checkbox;
+	if (box === undefined) throw new Error(`no checkbox on: ${phrase}`);
+	const step = lineFor(phrase).size * 1.5;
+	const vertex = {
+		x: box.x + box.size * 0.5 + vertexShift.x,
+		y: box.y + box.size * 0.2 + vertexShift.y,
+	};
+	return strokeThrough([
+		{ x: vertex.x - box.size * 0.8, y: vertex.y + box.size },
+		vertex,
+		{ x: vertex.x + step * 2.0, y: vertex.y + step * 2.6 },
+	]);
+}
+
 describe("checkbox geometry in the layout map (GP_E5_S12)", () => {
 	it("records a box on task lines, with the task's state", () => {
 		const open = lineFor("Warming-up vijf minuten").checkbox;
@@ -97,6 +120,12 @@ describe("checkbox geometry in the layout map (GP_E5_S12)", () => {
 	it("records no box on ordinary bullets or paragraphs", () => {
 		expect(lineFor("gewone bullet zonder taak").checkbox).toBeUndefined();
 		expect(lineFor("Afvinken na de training").checkbox).toBeUndefined();
+	});
+
+	it("records a box on indented subtasks too", () => {
+		const sub = lineFor("eerste set van acht");
+		expect(sub.checkbox).toBeDefined();
+		expect(sub.checkbox!.x).toBeLessThan(sub.x);
 	});
 });
 
@@ -144,6 +173,92 @@ describe("reading pen ticks (GP_E5_S12)", () => {
 		);
 		expect(marks).toHaveLength(1);
 		expect(marks[0].kind).toBe("strikethrough");
+	});
+
+	it("reads a natural tick with a long tail as a checkbox mark", () => {
+		// The device check of 2026-08-19: three real ticks, all with tails
+		// sweeping lines upward, all imported as note images. The bounding-box
+		// centre hangs mid-tail far above the box, and the old size cap of 2.5
+		// line steps rejected the gesture outright.
+		const marks = readMarks([naturalTickIn("Warming-up vijf minuten")], 1, layout);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox");
+		expect(marks[0].quote).toContain("Warming-up vijf minuten");
+	});
+
+	it("accepts a tick whose vertex lands just under the box", () => {
+		const box = lineFor("Melk kopen").checkbox!;
+		const marks = readMarks(
+			[naturalTickIn("Melk kopen", { x: 0, y: -box.size * 0.6 })],
+			1,
+			layout,
+		);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox");
+		expect(marks[0].quote).toContain("Melk kopen");
+	});
+
+	it("resolves a tick between stacked subtasks to the nearest box", () => {
+		const marks = readMarks([naturalTickIn("tweede set van acht")], 1, layout);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox");
+		expect(marks[0].quote).toContain("tweede set van acht");
+	});
+
+	it("reads a cross larger than the box as ONE checkbox mark", () => {
+		const box = lineFor("Band row twee keer vijftien").checkbox!;
+		const reach = box.size * 1.6;
+		const cross = [
+			strokeThrough([
+				{ x: box.x - box.size * 0.3, y: box.y + reach },
+				{ x: box.x + reach, y: box.y - box.size * 0.3 },
+			]),
+			strokeThrough([
+				{ x: box.x - box.size * 0.3, y: box.y - box.size * 0.3 },
+				{ x: box.x + reach, y: box.y + reach },
+			]),
+		];
+		const marks = readMarks(cross, 1, layout);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox");
+		expect(marks[0].strokes).toHaveLength(2);
+	});
+
+	it("keeps a strike dipping lowest at the task's first word a strike", () => {
+		// A strike-through's leftmost point sits close to the box; anchoring
+		// on the lowest point must not turn a left-dipping strike into a tick.
+		const line = lineFor("Band row twee keer vijftien");
+		const first = line.words[0];
+		const last = line.words[line.words.length - 1];
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x: first.x, y: line.y + line.size * 0.3 },
+					{ x: last.x + last.width, y: line.y + line.size * 0.45 },
+				]),
+			],
+			1,
+			layout,
+		);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("strikethrough");
+	});
+
+	it("does not read a page-scale diagonal slash as a tick", () => {
+		const line = lineFor("Band row twee keer vijftien");
+		const box = line.checkbox!;
+		const last = line.words[line.words.length - 1];
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x: box.x, y: box.y },
+					{ x: last.x + last.width, y: line.y + line.size * 4 },
+				]),
+			],
+			1,
+			layout,
+		);
+		expect(marks.every((mark) => mark.kind !== "checkbox")).toBe(true);
 	});
 
 	it("keeps small ink away from any box a plain note", () => {

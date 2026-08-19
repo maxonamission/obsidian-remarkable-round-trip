@@ -14,7 +14,7 @@
  */
 
 import { LaidOutLine, PdfLayout } from "../convert/pdf";
-import { Bounds, deviceBoundsToPdf, strokeBounds } from "./anchor";
+import { Bounds, deviceBoundsToPdf, devicePointToPdf, strokeBounds } from "./anchor";
 import { Stroke } from "./rmlines";
 
 /**
@@ -22,7 +22,7 @@ import { Stroke } from "./rmlines";
  * else — an arrow, a scribble, a written word — is a remark at that spot;
  * guessing at more kinds produced more wrong answers than useful ones.
  * GP_E5_S12 adds "checkbox", which is not a shape judgement at all: any ink
- * inside a box the plugin drew itself counts, whatever it looks like.
+ * anchored on a box the plugin drew itself counts, whatever it looks like.
  */
 export type MarkKind =
 	| "strikethrough"
@@ -192,6 +192,8 @@ interface Candidate {
 	device: Bounds;
 	pdf: Bounds;
 	length: number;
+	/** Where the pen dipped lowest on the page, in PDF points. */
+	low: { x: number; y: number };
 }
 
 /**
@@ -209,11 +211,19 @@ export function readMarks(
 	for (const stroke of strokes) {
 		const device = strokeBounds([stroke]);
 		if (device === null) continue;
+		// Device y grows downwards, so the lowest point on the page is the
+		// finite point with the largest y.
+		let lowest: { x: number; y: number } | undefined;
+		for (const point of stroke.points) {
+			if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+			if (lowest === undefined || point.y > lowest.y) lowest = point;
+		}
 		candidates.push({
 			stroke,
 			device,
 			pdf: layout === null ? device : deviceBoundsToPdf(device, layout),
 			length: pathLength(stroke),
+			low: layout === null ? lowest! : devicePointToPdf(lowest!, layout),
 		});
 	}
 	if (candidates.length === 0) return [];
@@ -266,11 +276,18 @@ function classify(
 	const length = candidate.length * scale;
 	const base = { strokes: [stroke], bounds: device, orderY: pdf.maxY };
 
-	// Ink in a drawn checkbox is a tick (GP_E5_S12) — tested before the
-	// too-small gate below, because a tick IS small. A tick or a cross both
-	// mean "done"; the shape inside the box is deliberately not judged.
-	const ticked = checkboxUnder(rows, pdf);
-	if (ticked !== null && Math.hypot(width, height) < step * 2.5) {
+	// Ink anchored on a drawn checkbox is a tick (GP_E5_S12) — tested before
+	// the too-small gate below, because a tick CAN be small. The shape is
+	// deliberately not judged: a tick, a cross or a scribble all mean "done".
+	// Two guards keep other gestures out. The flat-and-wide signature of a
+	// strike-through/underline, whose leftmost dip can land on its own task
+	// line's box; and a size cap against page-scale gestures, wide enough for
+	// a natural tick whose tail sweeps several lines up (device check
+	// 2026-08-19 — the old cap of 2.5 steps rejected every real tick).
+	const flatAndWide = height <= step * 0.55 && width >= step * 2;
+	const oversized = Math.hypot(width, height) >= step * 5;
+	const ticked = flatAndWide || oversized ? null : checkboxUnder(rows, pdf, candidate.low);
+	if (ticked !== null) {
 		return {
 			mark: {
 				...base,
@@ -365,30 +382,40 @@ function classify(
 }
 
 /**
- * The task row whose drawn checkbox the ink sits in (GP_E5_S12). The box is
- * matched with a generous rim — people tick outside the lines — but the ink
- * CENTRE must be in it, so a stroke that merely starts near the box (the
- * first word of a strike-through) does not count as a tick.
+ * The task row whose drawn checkbox the ink is anchored on (GP_E5_S12).
+ *
+ * The anchor is the ink's LOWEST point, not its centre (device check
+ * 2026-08-19): a natural tick is a vertex aimed at the box with a tail
+ * sweeping lines upward, so its centre hangs mid-air far above the box —
+ * but the vertex, the foot of a cross and the bottom of a scribble all sit
+ * where the writer was pointing. Flat ink — a dash or dot IN the box — has
+ * no meaningful lowest point and is anchored at its centre instead; that
+ * also keeps a short strike over a task's first word out, whose lowest dip
+ * lands near the box while its centre sits over the text.
+ *
+ * The rim is generous — the drawn box is barely three millimetres on the
+ * device and people tick well outside its lines — and stacked subtasks sit
+ * closer together than two rims, so among matching boxes the nearest wins.
  */
-function checkboxUnder(rows: Row[], ink: Bounds): Row | null {
-	const cx = (ink.minX + ink.maxX) / 2;
-	const cy = (ink.minY + ink.maxY) / 2;
+function checkboxUnder(rows: Row[], ink: Bounds, low: { x: number; y: number }): Row | null {
+	const height = ink.maxY - ink.minY;
+	const centre = { x: (ink.minX + ink.maxX) / 2, y: (ink.minY + ink.maxY) / 2 };
+	let best: { row: Row; distance: number } | null = null;
 	for (const row of rows) {
 		for (const line of row.lines) {
 			const box = line.checkbox;
 			if (box === undefined) continue;
-			const rim = box.size * 0.6;
-			if (
-				cx >= box.x - rim &&
-				cx <= box.x + box.size + rim &&
-				cy >= box.y - rim &&
-				cy <= box.y + box.size + rim
-			) {
-				return row;
-			}
+			const rim = box.size * 1.2;
+			const anchor = height >= box.size * 0.8 ? low : centre;
+			const boxCentreX = box.x + box.size / 2;
+			const boxCentreY = box.y + box.size / 2;
+			if (Math.abs(anchor.x - boxCentreX) > box.size / 2 + rim) continue;
+			if (Math.abs(anchor.y - boxCentreY) > box.size / 2 + rim) continue;
+			const distance = Math.hypot(anchor.x - boxCentreX, anchor.y - boxCentreY);
+			if (best === null || distance < best.distance) best = { row, distance };
 		}
 	}
-	return null;
+	return best === null ? null : best.row;
 }
 
 /**

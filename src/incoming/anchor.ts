@@ -97,6 +97,17 @@ export function deviceBoundsToPdf(bounds: Bounds, layout: PdfLayout): Bounds {
 	};
 }
 
+/** One device point → PDF points, the same mapping as deviceBoundsToPdf. */
+export function devicePointToPdf(
+	point: { x: number; y: number },
+	layout: PdfLayout,
+): { x: number; y: number } {
+	return {
+		x: (point.x + DEVICE_WIDTH / 2) * (layout.pageWidth / DEVICE_WIDTH),
+		y: layout.pageHeight - point.y * (layout.pageHeight / DEVICE_HEIGHT),
+	};
+}
+
 /** Vertical band a laid-out line occupies, baseline plus ascender/descender. */
 function bandOf(line: LaidOutLine): { low: number; high: number } {
 	return { low: line.y - line.size * 0.3, high: line.y + line.size * 0.85 };

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.35.3] - 2026-08-19
+
+### Fixed
+
+- **Ticks drawn the way people actually draw them are now recognized.**
+  A natural tick — a small vertex on the checkbox with a tail sweeping a
+  few lines upward — came back as a handwriting image instead of marking
+  the task done: recognition looked at the ink's centre (which hangs
+  mid-air above the box) and rejected anything larger than about a
+  centimetre. Recognition now anchors on the ink's lowest point — the
+  vertex of a tick, the foot of a cross — with a wider rim around the
+  box, so generously sized ticks, crosses and scribbles all count. On
+  stacked subtasks the nearest box wins. Strike-throughs, underlines and
+  page-scale gestures are still kept apart.
+
+
 ## [0.35.2] - 2026-08-19
 
 ### Fixed
