@@ -12,8 +12,10 @@ import {
 	DEFAULT_SETTINGS,
 	RoundTripSettings,
 	RoundTripSettingTab,
+	extrasFrom,
 	sendLayout,
 	settingsFrom,
+	storedFrom,
 } from "./settings";
 import { LayoutChoiceModal } from "./layoutmodal";
 import { remarkable } from "rmapi-js";
@@ -69,6 +71,8 @@ export default class RoundTripPlugin extends Plugin {
 	private fetchShim: { restore: () => void } | null = null;
 	/** GP_E7_S1: spike commands exist only when data.json says so. */
 	private spikeEnabled = false;
+	/** Unknown data.json keys, preserved across saves (see extrasFrom). */
+	private extraData: Record<string, unknown> = {};
 	private lastSpikeDoc: string | null = null;
 	/** Layouts rebuilt during one import run, by document id (GP_E3_S12). */
 	private readonly layoutCache = new Map<string, PdfLayout | null>();
@@ -234,14 +238,31 @@ export default class RoundTripPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const stored = ((await this.loadData()) ?? {}) as Partial<RoundTripSettings>;
 		this.settings = settingsFrom(stored);
-		// Not a setting: the spike flag is added to data.json by hand and
-		// never written back (saveData persists this.settings only).
-		this.spikeEnabled =
-			(stored as Record<string, unknown>)["spikeSchrijfmodus"] === true;
+		// Not a setting: the spike flag is added to data.json by hand. It and
+		// every other unknown key ride along in extraData so a save does not
+		// destroy them — the first version of this comment said "never
+		// written back", which meant every send erased the flag (bevinding
+		// eigenaar 2026-08-13).
+		this.extraData = extrasFrom(stored);
+		this.spikeEnabled = this.extraData["spikeSchrijfmodus"] === true;
+	}
+
+	/**
+	 * Obsidian calls this when data.json changed outside this running plugin
+	 * — Obsidian Sync, or a hand edit while the app runs (the spike flag,
+	 * GP_E7_S1). Without it, the next save would write the stale in-memory
+	 * snapshot back and erase that edit (reviewvondst 0.35.1). Command
+	 * registration still happens at load only: a flag flip needs a restart
+	 * to show or hide the spike commands, but it survives until then.
+	 */
+	async onExternalSettingsChange(): Promise<void> {
+		await this.loadSettings();
+		this.setupWatcher();
+		this.setupFetchShim();
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.saveData(this.settings);
+		await this.saveData(storedFrom(this.settings, this.extraData));
 		this.setupWatcher();
 		this.setupFetchShim();
 	}

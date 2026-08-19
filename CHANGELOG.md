@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.35.1] - 2026-08-13
+
+### Fixed
+
+- **The plugin no longer erases keys it does not know from its own
+  `data.json`.** Saving settings used to rewrite the file wholesale, which
+  silently destroyed anything added by hand and any newer version's
+  settings after a downgrade. Unknown keys now ride along untouched.
+
+
 ## [0.35.0] - 2026-08-13
 
 ### Added

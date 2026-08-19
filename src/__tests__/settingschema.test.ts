@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS } from "../settingsmodel";
+import { DEFAULT_SETTINGS, extrasFrom, settingsFrom, storedFrom } from "../settingsmodel";
 import { sliderSpec } from "../settingschema";
 import {
 	SETTING_SECTIONS,
@@ -140,5 +140,27 @@ describe("sliderSpec (GP_E6_S10)", () => {
 
 	it("throws loudly for a key that is not a slider", () => {
 		expect(() => sliderSpec("layoutPreset")).toThrow(/No slider spec/);
+	});
+});
+
+describe("unknown data.json keys survive a save (GP_E7_S1 bevinding, 0.35.1)", () => {
+	it("carries hand-added keys through the exact save composition", () => {
+		const stored = { deviceToken: "t", spikeSchrijfmodus: true, toekomstig: 42 };
+		const extras = extrasFrom(stored);
+		expect(extras).toEqual({ spikeSchrijfmodus: true, toekomstig: 42 });
+		// storedFrom IS the save path (main.ts saveSettings calls it): extras
+		// first, settings win on overlap.
+		const saved = storedFrom(settingsFrom(stored), extras);
+		expect(saved.spikeSchrijfmodus).toBe(true);
+		expect(saved.deviceToken).toBe("t");
+	});
+
+	it("lets a later-learned setting win over a stale extra of the same name", () => {
+		const saved = storedFrom(settingsFrom({}), { deviceToken: "stale" });
+		expect(saved.deviceToken).toBe("");
+	});
+
+	it("returns nothing for a data.json holding only known settings", () => {
+		expect(extrasFrom({ ...DEFAULT_SETTINGS })).toEqual({});
 	});
 });

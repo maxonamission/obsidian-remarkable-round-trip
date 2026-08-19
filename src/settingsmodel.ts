@@ -96,10 +96,38 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
  */
 export function settingsFrom(stored: Partial<RoundTripSettings>): RoundTripSettings {
 	const settings = { ...DEFAULT_SETTINGS, ...stored };
-	if (Object.keys(stored).length > 0 && stored.pageBreakAtHeading === undefined) {
+	// Count KNOWN keys only: a data.json holding nothing but a hand-added
+	// extra (the spike flag) is still a fresh install, not an upgrade
+	// (reviewvondst 0.35.1).
+	const knownStored = Object.keys(stored).filter((key) => key in DEFAULT_SETTINGS);
+	if (knownStored.length > 0 && stored.pageBreakAtHeading === undefined) {
 		settings.pageBreakAtHeading = "off";
 	}
 	return settings;
+}
+
+/**
+ * Keys in stored data the settings model does not know — a hand-added spike
+ * flag, or a newer version's settings after a downgrade. The save path
+ * spreads these back in FIRST, so saving settings never destroys them
+ * (GP_E7_S1 bevinding: elke save wiste de handmatige spike-vlag).
+ */
+export function extrasFrom(stored: Record<string, unknown>): Record<string, unknown> {
+	const known = new Set(Object.keys(DEFAULT_SETTINGS));
+	return Object.fromEntries(Object.entries(stored).filter(([key]) => !known.has(key)));
+}
+
+/**
+ * What a save writes to data.json: the settings, with unknown keys riding
+ * along. Extras FIRST so a key the model later learns wins over a stale
+ * extra — this spread order is the invariant the 0.35.1 fix is about, so
+ * it lives here, under test, not inline at the save call.
+ */
+export function storedFrom(
+	settings: RoundTripSettings,
+	extras: Record<string, unknown>,
+): Record<string, unknown> {
+	return { ...extras, ...settings };
 }
 
 /** reMarkable screens the typesetter can target (GP_E6_S2). */

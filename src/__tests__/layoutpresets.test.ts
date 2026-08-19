@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { RoundTripSettings } from "../settingsmodel";
 import {
 	DEFAULT_SETTINGS,
 	DEVICE_PAGE_SIZES,
@@ -102,6 +103,12 @@ describe("heading-break level (GP_E6_S4, smart via GP_E6_S9)", () => {
 		expect(settingsFrom({ pageBreakAtHeading: "h2" }).pageBreakAtHeading).toBe("h2");
 		expect(
 			settingsFrom({ deviceToken: "x", pageBreakAtHeading: "smart" }).pageBreakAtHeading,
+		).toBe("smart");
+		// A data.json holding only unknown extras (the hand-added spike flag)
+		// is still a fresh install (reviewvondst 0.35.1).
+		expect(
+			settingsFrom({ spikeSchrijfmodus: true } as Partial<RoundTripSettings>)
+				.pageBreakAtHeading,
 		).toBe("smart");
 	});
 });
