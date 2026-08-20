@@ -16,6 +16,7 @@
 import { LaidOutLine, PdfLayout } from "../convert/pdf";
 import { Bounds, deviceBoundsToPdf, devicePointToPdf, strokeBounds } from "./anchor";
 import { Stroke } from "./rmlines";
+import { deviceGridFor } from "./strokerender";
 
 /**
  * Owner decision 2026-07-26: only four freehand shapes are read. Anything
@@ -236,9 +237,9 @@ export function readMarks(
 		const step = lineStepOf(rows);
 		const textLeft = Math.min(...rows.map((row) => row.left));
 		const textRight = Math.max(...rows.map((row) => row.right));
-		// The device grid is ~3.14× the PDF grid, so lengths measured in
+		// The device grid is ~3.14–3.18× the PDF grid, so lengths measured in
 		// device units need the same scale before comparing to a line step.
-		const scale = layout === null ? 1 : layout.pageHeight / 1872;
+		const scale = layout === null ? 1 : layout.pageHeight / deviceGridFor(layout).height;
 
 		const classified: Classified[] = [];
 		for (const candidate of candidates) {

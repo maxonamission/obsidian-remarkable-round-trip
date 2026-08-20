@@ -14,6 +14,33 @@ import { Stroke } from "./rmlines";
 export const PAGE_WIDTH = 1404;
 export const PAGE_HEIGHT = 1872;
 
+/** The grid a device writes its stroke coordinates on. */
+export interface DeviceGrid {
+	width: number;
+	height: number;
+}
+
+/** rM1, rM2 and Paper Pure: 1404×1872 px @ 226 dpi. */
+export const RM2_GRID: DeviceGrid = { width: PAGE_WIDTH, height: PAGE_HEIGHT };
+
+/** Paper Pro: 1620×2160 px @ 229 dpi. */
+export const PAPER_PRO_GRID: DeviceGrid = { width: 1620, height: 2160 };
+
+/**
+ * Which grid a page's ink lives on. Every device writes strokes in its own
+ * screen pixels, and the Paper Pro's screen is larger — same 3:4 shape, more
+ * pixels. The PDF was typeset at the device's physical page size (509 pt wide
+ * for the Paper Pro, 447 pt for the others), so the layout's page width says
+ * which screen the ink came from; 478 splits the two. Devicecheck 2026-08-20:
+ * on a Paper Pro, ink converted with the rM2 grid landed a uniform 1620/1404
+ * past every task box — multiplied back, all three gestures sat exactly on
+ * their boxes.
+ */
+export function deviceGridFor(layout: { pageWidth: number } | null): DeviceGrid {
+	if (layout === null) return RM2_GRID;
+	return layout.pageWidth >= 478 ? PAPER_PRO_GRID : RM2_GRID;
+}
+
 export interface RenderedPath {
 	points: { x: number; y: number }[];
 	/** Line width in image pixels. */

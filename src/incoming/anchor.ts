@@ -12,7 +12,7 @@
 
 import { LaidOutLine, PdfLayout } from "../convert/pdf";
 import { Stroke } from "./rmlines";
-import { PAGE_HEIGHT as DEVICE_HEIGHT, PAGE_WIDTH as DEVICE_WIDTH } from "./strokerender";
+import { deviceGridFor } from "./strokerender";
 
 export interface Bounds {
 	minX: number;
@@ -81,16 +81,18 @@ export function clusterStrokes(strokes: Stroke[], gap = 90): InkCluster[] {
 }
 
 /**
- * Device page coordinates → PDF points. The device grid (1404×1872, x centred
- * on zero, y downwards) maps 1:1 onto our page size, which is exactly why the
- * PDF is typeset on it (K1).
+ * Device page coordinates → PDF points. The device grid (x centred on zero,
+ * y downwards) maps 1:1 onto our page size, which is exactly why the PDF is
+ * typeset on it (K1). Which grid that is depends on the device the page was
+ * sent to — the layout's page size tells (see deviceGridFor).
  */
 export function deviceBoundsToPdf(bounds: Bounds, layout: PdfLayout): Bounds {
-	const scaleX = layout.pageWidth / DEVICE_WIDTH;
-	const scaleY = layout.pageHeight / DEVICE_HEIGHT;
+	const grid = deviceGridFor(layout);
+	const scaleX = layout.pageWidth / grid.width;
+	const scaleY = layout.pageHeight / grid.height;
 	return {
-		minX: (bounds.minX + DEVICE_WIDTH / 2) * scaleX,
-		maxX: (bounds.maxX + DEVICE_WIDTH / 2) * scaleX,
+		minX: (bounds.minX + grid.width / 2) * scaleX,
+		maxX: (bounds.maxX + grid.width / 2) * scaleX,
 		// PDF y grows upwards, device y downwards: the extremes swap.
 		minY: layout.pageHeight - bounds.maxY * scaleY,
 		maxY: layout.pageHeight - bounds.minY * scaleY,
@@ -102,9 +104,10 @@ export function devicePointToPdf(
 	point: { x: number; y: number },
 	layout: PdfLayout,
 ): { x: number; y: number } {
+	const grid = deviceGridFor(layout);
 	return {
-		x: (point.x + DEVICE_WIDTH / 2) * (layout.pageWidth / DEVICE_WIDTH),
-		y: layout.pageHeight - point.y * (layout.pageHeight / DEVICE_HEIGHT),
+		x: (point.x + grid.width / 2) * (layout.pageWidth / grid.width),
+		y: layout.pageHeight - point.y * (layout.pageHeight / grid.height),
 	};
 }
 

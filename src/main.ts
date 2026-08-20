@@ -122,6 +122,19 @@ export default class RoundTripPlugin extends Plugin {
 			callback: () => void this.pullAnnotations({ force: true }),
 		});
 
+		// One note, not the whole account (GP_E5_S14): checking a single
+		// freshly-reviewed note deserves the same precision as sending one.
+		this.addCommand({
+			id: "import-annotations-current-note",
+			name: "Import annotations from reMarkable (current note)",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || this.annotationEntry(file) === undefined) return false;
+				if (!checking) void this.pullAnnotations({ only: file });
+				return true;
+			},
+		});
+
 		this.addCommand({
 			id: "send-current-note",
 			name: "Send current note to reMarkable",
@@ -208,6 +221,14 @@ export default class RoundTripPlugin extends Plugin {
 							.setTitle("Get edited text from reMarkable")
 							.setIcon("pencil")
 							.onClick(() => void this.importEditedTextFor(file)),
+					);
+					// Annotations of exactly this note (GP_E5_S14) — only shown
+					// once the note has a review copy on the device.
+					if (this.annotationEntry(file) !== undefined) menu.addItem((item) =>
+						item
+							.setTitle("Import annotations from reMarkable")
+							.setIcon("import")
+							.onClick(() => void this.pullAnnotations({ only: file })),
 					);
 				}
 				if (file instanceof TFolder) {
@@ -844,12 +865,39 @@ export default class RoundTripPlugin extends Plugin {
 		}
 	}
 
+	/** The mapping entry of a note whose last send was a REVIEW copy, if any. */
+	private annotationEntry(file: TFile): MappingEntry | undefined {
+		const docId = getFrontmatterValue(
+			this.app.metadataCache.getFileCache(file)?.frontmatter,
+			DOCID_FRONTMATTER_KEY,
+		);
+		if (typeof docId !== "string") return undefined;
+		const entry = this.settings.mappings[docId];
+		return entry === undefined || entry.format === "text" ? undefined : entry;
+	}
+
 	/**
-	 * Import annotations for every note we have sent (F10/F11). Runs on an
-	 * explicit command only — the vault is never written to behind your back.
+	 * Import annotations for every note we have sent (F10/F11), or — with
+	 * `only` (GP_E5_S14) — for exactly one note: the full run walks hundreds
+	 * of mappings, and checking a single freshly-reviewed note deserves the
+	 * same precision as sending one. Runs on an explicit command only — the
+	 * vault is never written to behind your back.
 	 */
-	async pullAnnotations(options: { force?: boolean } = {}): Promise<void> {
-		const mappings = Object.keys(this.settings.mappings).length;
+	async pullAnnotations(options: { force?: boolean; only?: TFile } = {}): Promise<void> {
+		let scope = this.settings.mappings;
+		if (options.only !== undefined) {
+			const entry = this.annotationEntry(options.only);
+			if (entry === undefined) {
+				notify(
+					this.writeModeEntry(options.only) !== undefined
+						? 'This note was sent as editable text — use "Get edited text back from reMarkable" instead.'
+						: "This note has not been sent to the reMarkable yet.",
+				);
+				return;
+			}
+			scope = { [entry.docId]: entry };
+		}
+		const mappings = Object.keys(scope).length;
 		if (mappings === 0) {
 			notify("Nothing to import yet — send a note to your reMarkable first.");
 			return;
@@ -867,7 +915,7 @@ export default class RoundTripPlugin extends Plugin {
 		try {
 			const api = await remarkable(this.settings.deviceToken, this.rmapiOptions());
 			const { results, table } = await pullAnnotations(
-				this.settings.mappings,
+				scope,
 				{
 					force: options.force,
 					log: (line) => log.push(line),
@@ -906,7 +954,8 @@ export default class RoundTripPlugin extends Plugin {
 				},
 				(done, total) => updateProgress(notice, `Checking ${done}/${total} for annotations…`),
 			);
-			this.settings.mappings = table;
+			// A scoped run returns only its slice; merging keeps the rest.
+			this.settings.mappings = { ...this.settings.mappings, ...table };
 			await this.saveSettings();
 
 			const report = `${renderImportReport({

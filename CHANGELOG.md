@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.39.1] - 2026-08-20
+
+### Fixed
+
+- **Paper Pro ink now lands exactly where you drew it.** The Paper Pro
+  writes pen strokes on its own, larger coordinate grid (1620×2160); the
+  import assumed the reMarkable 1/2 grid (1404×1872) for every device, so
+  each mark was read about 15% down-and-left of where the pen actually
+  was — an error that grew toward the bottom of the page. Ticks drawn dead
+  on a checkbox were attributed to the row below or dismissed as margin
+  scribbles, and remarks were quoted against neighbouring lines. The grid
+  is now chosen per document from the page size it was typeset at, so
+  reMarkable 1, 2, Paper Pure and Paper Pro all convert on their own grid.
+  Documents already on the device benefit immediately — no re-send needed.
+
+## [0.39.0] - 2026-08-20
+
+### Added
+
+- **Import annotations for just one note.** Right-click a note that has a
+  review copy on the device → *Import annotations from reMarkable*, or run
+  the new command for the current note. Checking a single freshly-reviewed
+  note now takes seconds instead of walking every document you ever sent.
+  Same behaviour as the full run — unchanged documents are skipped and the
+  report says what happened.
+
+
 ## [0.38.5] - 2026-08-19
 
 ### Fixed

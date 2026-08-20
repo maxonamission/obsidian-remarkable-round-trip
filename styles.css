@@ -1,0 +1,2 @@
+/* reMarkable Round-Trip ships no styling of its own; this file exists so
+   plugin-update checkers that expect a styles.css stay quiet. */

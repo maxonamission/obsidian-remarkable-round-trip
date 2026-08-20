@@ -126,7 +126,9 @@ plugin replaces your own text:
 ## Getting your thinking back
 
 Run **Import annotations from reMarkable**. The plugin finds the documents you
-have touched since last time and writes what it read into your vault.
+have touched since last time and writes what it read into your vault. Just
+reviewed one note? Right-click it → *Import annotations from reMarkable* (or
+use the current-note command) to check only that one.
 
 What you get is an **annotated copy of your note**: your own text, unchanged,
 with the marks worked in where you drew them. Bold, italics, headings, links

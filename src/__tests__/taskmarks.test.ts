@@ -6,6 +6,9 @@ import { projectOntoSource } from "../incoming/sourceprojection";
 import {
 	PAGE_HEIGHT as DEVICE_HEIGHT,
 	PAGE_WIDTH as DEVICE_WIDTH,
+	PAPER_PRO_GRID,
+	RM2_GRID,
+	deviceGridFor,
 } from "../incoming/strokerender";
 import { Stroke } from "../incoming/rmlines";
 import type { ImportedMark } from "../incoming/pull";
@@ -407,5 +410,142 @@ describe("task states in the annotated copy (GP_E5_S12)", () => {
 			{ kind: "checkbox", words: idsOf("gewone bullet zonder taak") },
 		]);
 		expect(result?.markdown).toBe(SOURCE.trimEnd());
+	});
+});
+
+describe("ticks on a Paper Pro page (GP_E5_S12, devicecheck 2026-08-20)", () => {
+	// The field log that cracked it: every tick sat exactly on its box on the
+	// tablet, yet imported 15% down-and-left of it — the Paper Pro writes ink
+	// on a 1620×2160 grid, not the 1404×1872 the conversion assumed. The error
+	// grows with the distance from the page's top-left, so a tick low on the
+	// page drifted whole rows while one at the top merely scraped past.
+	const PRO_SOURCE = [
+		"Agendapunten tot nu toe:",
+		"",
+		"- [ ] test met vinkje",
+		"- [ ] tweede agendapunt",
+		"- [ ] derde agendapunt",
+		"",
+		...Array.from(
+			{ length: 12 },
+			(_, i) => `Tussenliggende alinea nummer ${i + 1} die de pagina vult.`,
+		),
+		"",
+		"- [ ] onderaan eerste",
+		"- [ ] onderaan tweede",
+		"- [ ] onderaan derde",
+	].join("\n");
+
+	let proLayout: PdfLayout;
+
+	beforeAll(async () => {
+		const rendered = await renderPdf(
+			parseBlocks(PRO_SOURCE),
+			{ title: "PB", docId: "d" },
+			// Paper Pro page in PDF points (1620×2160 px @ 229 dpi).
+			{ pageWidth: 509, pageHeight: 679 },
+		);
+		proLayout = rendered.layout;
+	});
+
+	const proLineFor = (phrase: string) => {
+		const line = proLayout.lines.find((candidate) => candidate.text.includes(phrase));
+		if (line === undefined) throw new Error(`phrase not laid out: ${phrase}`);
+		return line;
+	};
+
+	/** PDF points → the Paper Pro's own ink grid. */
+	const toProDevice = (x: number, y: number) => ({
+		x: (x * PAPER_PRO_GRID.width) / proLayout.pageWidth - PAPER_PRO_GRID.width / 2,
+		y: ((proLayout.pageHeight - y) * PAPER_PRO_GRID.height) / proLayout.pageHeight,
+	});
+
+	const proStroke = (points: { x: number; y: number }[]): Stroke => ({
+		tool: 2,
+		color: 0,
+		thicknessScale: 1,
+		points: points.map((point) => ({
+			...toProDevice(point.x, point.y),
+			width: 8,
+			pressure: 100,
+		})),
+	});
+
+	/** The natural tick from the 2026-08-19 devicecheck, on a Paper Pro box. */
+	const proTickIn = (phrase: string): Stroke => {
+		const line = proLineFor(phrase);
+		const box = line.checkbox;
+		if (box === undefined) throw new Error(`no checkbox on: ${phrase}`);
+		const step = line.size * 1.5;
+		const vertex = { x: box.x + box.size * 0.5, y: box.y + box.size * 0.2 };
+		return proStroke([
+			{ x: vertex.x - box.size * 0.8, y: vertex.y + box.size },
+			vertex,
+			{ x: vertex.x + step * 2.0, y: vertex.y + step * 2.6 },
+		]);
+	};
+
+	it("resolves the ink grid from the page size the PDF was typeset at", () => {
+		expect(deviceGridFor(proLayout)).toBe(PAPER_PRO_GRID);
+		expect(deviceGridFor(layout)).toBe(RM2_GRID);
+		expect(deviceGridFor(null)).toBe(RM2_GRID);
+	});
+
+	it("reads a tick near the top of the page on the right task", () => {
+		const marks = readMarks([proTickIn("test met vinkje")], 1, proLayout);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox");
+		expect(marks[0].quote).toContain("test met vinkje");
+	});
+
+	it("reads a tick low on the page on ITS OWN row, not rows below", () => {
+		// This is where the wrong grid hurt most: at two thirds down the page
+		// the accumulated offset exceeded two line steps, so the tick was
+		// attributed to a lower task or fell off the boxes entirely.
+		const line = proLineFor("onderaan tweede");
+		expect(toProDevice(0, line.y).y).toBeGreaterThan(PAPER_PRO_GRID.height / 2);
+		const marks = readMarks([proTickIn("onderaan tweede")], 1, proLayout);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox");
+		expect(marks[0].quote).toContain("onderaan tweede");
+	});
+
+	it("reads all three ticks of a stacked group on their own rows", () => {
+		// The PB field note: three stacked tasks, three ticks, and the import
+		// marked a different set done than the pen did.
+		const phrases = ["onderaan eerste", "onderaan tweede", "onderaan derde"];
+		const marks = readMarks(
+			phrases.map((phrase) => proTickIn(phrase)),
+			1,
+			proLayout,
+		);
+		expect(marks).toHaveLength(3);
+		for (const phrase of phrases) {
+			expect(
+				marks.some(
+					(mark) => mark.kind === "checkbox" && mark.quote?.includes(phrase),
+				),
+			).toBe(true);
+		}
+	});
+
+	it("quotes handwriting beside a paragraph against that paragraph", () => {
+		// The same grid feeds every anchor, so remarks moved with the ticks —
+		// the earlier "three rows too low" placement was this bug too.
+		const line = proLineFor("alinea nummer 8");
+		const marginX = proLayout.pageWidth - 30;
+		const marks = readMarks(
+			[
+				proStroke([
+					{ x: marginX, y: line.y - line.size * 0.2 },
+					{ x: marginX + 8, y: line.y + line.size * 0.6 },
+					{ x: marginX + 16, y: line.y - line.size * 0.1 },
+				]),
+			],
+			1,
+			proLayout,
+		);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].quote).toContain("alinea nummer 8");
 	});
 });

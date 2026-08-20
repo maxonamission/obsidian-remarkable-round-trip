@@ -10,7 +10,7 @@
 
 import { PdfLayout } from "../convert/pdf";
 import { MappingEntry, MappingTable } from "../id/mapping";
-import { PAGE_HEIGHT as DEVICE_HEIGHT, PAGE_WIDTH as DEVICE_WIDTH } from "./strokerender";
+import { deviceGridFor } from "./strokerender";
 import type { AnnotationOutcome } from "./annotationnote";
 import { Highlight, isHighlightFile, parseHighlightPage } from "./highlights";
 import { MarkKind, readMarks } from "./marks";
@@ -447,10 +447,11 @@ async function readStrokePages(
 			// points beside them — ink and box lines side by side make any
 			// systematic offset directly measurable from one field log).
 			if (marks.length > 0 && layout !== null && page !== undefined) {
+				const grid = deviceGridFor(layout);
 				const toDeviceX = (v: number) =>
-					(v / layout.pageWidth) * DEVICE_WIDTH - DEVICE_WIDTH / 2;
+					(v / layout.pageWidth) * grid.width - grid.width / 2;
 				const toDeviceY = (v: number) =>
-					((layout.pageHeight - v) / layout.pageHeight) * DEVICE_HEIGHT;
+					((layout.pageHeight - v) / layout.pageHeight) * grid.height;
 				for (const line of layout.lines) {
 					const box = line.checkbox;
 					if (line.page !== page || box === undefined) continue;
