@@ -10,6 +10,7 @@
 
 import { PdfLayout } from "../convert/pdf";
 import { MappingEntry, MappingTable } from "../id/mapping";
+import { PAGE_HEIGHT as DEVICE_HEIGHT, PAGE_WIDTH as DEVICE_WIDTH } from "./strokerender";
 import type { AnnotationOutcome } from "./annotationnote";
 import { Highlight, isHighlightFile, parseHighlightPage } from "./highlights";
 import { MarkKind, readMarks } from "./marks";
@@ -440,6 +441,26 @@ async function readStrokePages(
 			// measured instead of guessed at (GP_E3_S15). Device units in,
 			// distance from the top of the page out — the two numbers that say
 			// whether the origin or the scale is wrong.
+			//
+			// The page's task boxes ride along in the same device units
+			// (devicecheck 2026-08-19: ticks drawn ON the boxes read as 20+
+			// points beside them — ink and box lines side by side make any
+			// systematic offset directly measurable from one field log).
+			if (marks.length > 0 && layout !== null && page !== undefined) {
+				const toDeviceX = (v: number) =>
+					(v / layout.pageWidth) * DEVICE_WIDTH - DEVICE_WIDTH / 2;
+				const toDeviceY = (v: number) =>
+					((layout.pageHeight - v) / layout.pageHeight) * DEVICE_HEIGHT;
+				for (const line of layout.lines) {
+					const box = line.checkbox;
+					if (line.page !== page || box === undefined) continue;
+					deps.log?.(
+						`    task box x ${toDeviceX(box.x).toFixed(0)}–${toDeviceX(box.x + box.size).toFixed(0)}, ` +
+							`y ${toDeviceY(box.y + box.size).toFixed(0)}–${toDeviceY(box.y).toFixed(0)} ` +
+							`“${line.text.slice(0, 40)}”`,
+					);
+				}
+			}
 			for (const mark of marks) {
 				const band =
 					layout === null

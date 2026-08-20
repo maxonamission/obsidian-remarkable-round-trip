@@ -224,6 +224,66 @@ describe("reading pen ticks (GP_E5_S12)", () => {
 		expect(marks[0].strokes).toHaveLength(2);
 	});
 
+	it("reads a compact tick in the margin LEFT of the box (field log 2026-08-19)", () => {
+		// The week-01 field log: real ticks sat 10 to 40 points left of the
+		// drawn box — in the page margin next to the item, where nothing else
+		// lives. One scraped into the old window, its twins missed by points.
+		const box = lineFor("Warming-up vijf minuten").checkbox!;
+		const vertexX = box.x - 28;
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x: vertexX - 3, y: box.y + box.size },
+					{ x: vertexX, y: box.y + 1 },
+					{ x: vertexX + 6, y: box.y + 14 },
+				]),
+			],
+			1,
+			layout,
+		);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox");
+		expect(marks[0].quote).toContain("Warming-up vijf minuten");
+	});
+
+	it("reads a one-line vertical dash in the margin at a task row as a tick", () => {
+		// This exact stroke was classified as a margin quote in the field log
+		// while its near-identical neighbour became a checkbox — the split
+		// ran straight through the writer's habit.
+		const box = lineFor("Melk kopen").checkbox!;
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x: box.x - 18, y: box.y - 2 },
+					{ x: box.x - 17, y: box.y + 11 },
+				]),
+			],
+			1,
+			layout,
+		);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox");
+		expect(marks[0].quote).toContain("Melk kopen");
+	});
+
+	it("keeps a tall margin bar spanning several task rows a margin quote", () => {
+		const first = lineFor("Warming-up vijf minuten");
+		const box = first.checkbox!;
+		const step = first.size * 1.5;
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x: box.x - 20, y: first.y - step * 2.2 },
+					{ x: box.x - 19, y: first.y + step * 0.6 },
+				]),
+			],
+			1,
+			layout,
+		);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("margin");
+	});
+
 	it("keeps a strike dipping lowest at the task's first word a strike", () => {
 		// A strike-through's leftmost point sits close to the box; anchoring
 		// on the lowest point must not turn a left-dipping strike into a tick.

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.38.5] - 2026-08-19
+
+### Fixed
+
+- **Ticks in the margin next to a task now count.** The drawn checkbox is
+  barely three millimetres, and in practice people tick in the margin just
+  left of it — the import's own field log showed real ticks 10 to 40
+  points left of the box, one recognized and its near-identical neighbour
+  read as a margin quote. The recognition window now reaches left into the
+  page margin for compact gestures (nothing else lives there on a task
+  line); taller margin bars spanning several lines keep their quote
+  meaning.
+
+
 ## [0.38.4] - 2026-08-19
 
 ### Fixed

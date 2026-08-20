@@ -396,6 +396,14 @@ function classify(
  * The rim is generous — the drawn box is barely three millimetres on the
  * device and people tick well outside its lines — and stacked subtasks sit
  * closer together than two rims, so among matching boxes the nearest wins.
+ *
+ * The window also reaches LEFT into the page margin (devicecheck
+ * 2026-08-19, week-01 field log): people tick in the margin next to the
+ * item, not inside the 3mm box — the log showed real ticks 10 to 40 points
+ * left of it, one scraping in and its twin missing by a single point. Left
+ * of a task's box is empty margin, so a compact gesture there can only
+ * mean this box. Only compact ink though: a bar of two line-steps or more
+ * keeps its margin-quote meaning.
  */
 function checkboxUnder(rows: Row[], ink: Bounds, low: { x: number; y: number }): Row | null {
 	const height = ink.maxY - ink.minY;
@@ -409,8 +417,15 @@ function checkboxUnder(rows: Row[], ink: Bounds, low: { x: number; y: number }):
 			const anchor = height >= box.size * 0.8 ? low : centre;
 			const boxCentreX = box.x + box.size / 2;
 			const boxCentreY = box.y + box.size / 2;
-			if (Math.abs(anchor.x - boxCentreX) > box.size / 2 + rim) continue;
 			if (Math.abs(anchor.y - boxCentreY) > box.size / 2 + rim) continue;
+			const halfWindow = box.size / 2 + rim;
+			const inCore = Math.abs(anchor.x - boxCentreX) <= halfWindow;
+			const inMargin =
+				!inCore &&
+				anchor.x < boxCentreX &&
+				anchor.x >= boxCentreX - halfWindow - box.size * 5 &&
+				height <= box.size * 4;
+			if (!inCore && !inMargin) continue;
 			const distance = Math.hypot(anchor.x - boxCentreX, anchor.y - boxCentreY);
 			if (best === null || distance < best.distance) best = { row, distance };
 		}
