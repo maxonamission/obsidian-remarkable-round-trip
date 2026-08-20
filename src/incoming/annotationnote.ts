@@ -176,6 +176,8 @@ function renderMark(mark: ImportedMark, styles: MarkStyles): string[] {
 			// second, live task line that task-query tooling would index — so
 			// it reports the tick as plain prose.
 			return [`Ticked on the reMarkable: “${mark.target ?? mark.quote ?? "task"}”`];
+		case "checkbox-cancel":
+			return [`Struck off on the reMarkable: “${mark.target ?? mark.quote ?? "task"}”`];
 		default:
 			if (mark.addedPage !== undefined) {
 				return [`**Page added on the reMarkable** (page ${mark.addedPage})`, ...image];

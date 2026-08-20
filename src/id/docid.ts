@@ -9,6 +9,9 @@
 /** Frontmatter key that carries the stable document ID. */
 export const DOCID_FRONTMATTER_KEY = "remarkable-id";
 
+/** Frontmatter key linking a source note to its companion note (GP_E5_S15). */
+export const ANNOTATIONS_FRONTMATTER_KEY = "annotations";
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isValidDocId(value: unknown): value is string {

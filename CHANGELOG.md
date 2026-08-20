@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.40.0] - 2026-08-20
+
+### Added
+
+- **A stripe through a checkbox now cancels the task.** A drawn checkbox
+  understands two gestures: a tick, cross or scribble marks the task done
+  (`- [x]`), and a flat horizontal stripe straight through the box now
+  cancels it (`- [-]`) — the same result as striking through the task's
+  text, one small gesture instead of a long one. The two are easy for the
+  reader to tell apart on the page, and easy for the import too: a stripe
+  is a fraction of the box's height, every done-gesture reaches well up
+  the box.
+- **Optional link from your note to its annotations.** A new setting
+  (*Link the source note to its annotations*, off by default) keeps an
+  `annotations` property in the source note pointing at its companion
+  note after each import — the two are one click apart, in both
+  directions, since the companion note always links back.
+
 ## [0.39.1] - 2026-08-20
 
 ### Fixed

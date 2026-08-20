@@ -22,8 +22,11 @@ import { deviceGridFor } from "./strokerender";
  * Owner decision 2026-07-26: only four freehand shapes are read. Anything
  * else — an arrow, a scribble, a written word — is a remark at that spot;
  * guessing at more kinds produced more wrong answers than useful ones.
- * GP_E5_S12 adds "checkbox", which is not a shape judgement at all: any ink
- * anchored on a box the plugin drew itself counts, whatever it looks like.
+ * GP_E5_S12 adds "checkbox", which is barely a shape judgement: any ink
+ * anchored on a box the plugin drew itself counts. The one distinction that
+ * ink DOES carry (devicecheck 2026-08-20): a flat stripe straight through
+ * the box says "cancelled", everything else — tick, cross, scribble — says
+ * "done". That is "checkbox-cancel".
  */
 export type MarkKind =
 	| "strikethrough"
@@ -31,7 +34,8 @@ export type MarkKind =
 	| "circle"
 	| "margin"
 	| "note"
-	| "checkbox";
+	| "checkbox"
+	| "checkbox-cancel";
 
 export interface Mark {
 	kind: MarkKind;
@@ -289,17 +293,24 @@ function classify(
 	const oversized = Math.hypot(width, height) >= step * 5;
 	const ticked = flatAndWide || oversized ? null : checkboxUnder(rows, pdf, candidate.low);
 	if (ticked !== null) {
+		// A flat stripe straight through the box cancels the task instead of
+		// completing it (devicecheck 2026-08-20, PB field PDF): the owner's
+		// stripes were a tenth of the box tall and nearly its width, while
+		// every done-gesture — tick, cross, scribble — reached at least two
+		// thirds up the box. A dot stays "done": too short to be a stripe.
+		const stripe =
+			height <= ticked.box.size * 0.35 && width >= ticked.box.size * 0.5;
 		return {
 			mark: {
 				...base,
-				kind: "checkbox",
-				target: ticked.text,
-				words: ticked.lines.flatMap((line) => line.words).map((word) => word.id),
-				quote: ticked.text,
+				kind: stripe ? "checkbox-cancel" : "checkbox",
+				target: ticked.row.text,
+				words: ticked.row.lines.flatMap((line) => line.words).map((word) => word.id),
+				quote: ticked.row.text,
 			},
 			// The row rides along so joinFlatMarks can fold a cross (two
 			// strokes) or a re-traced tick into ONE mark per box.
-			row: ticked,
+			row: ticked.row,
 		};
 	}
 
@@ -406,10 +417,14 @@ function classify(
  * mean this box. Only compact ink though: a bar of two line-steps or more
  * keeps its margin-quote meaning.
  */
-function checkboxUnder(rows: Row[], ink: Bounds, low: { x: number; y: number }): Row | null {
+function checkboxUnder(
+	rows: Row[],
+	ink: Bounds,
+	low: { x: number; y: number },
+): { row: Row; box: { size: number } } | null {
 	const height = ink.maxY - ink.minY;
 	const centre = { x: (ink.minX + ink.maxX) / 2, y: (ink.minY + ink.maxY) / 2 };
-	let best: { row: Row; distance: number } | null = null;
+	let best: { row: Row; box: { size: number }; distance: number } | null = null;
 	for (const row of rows) {
 		for (const line of row.lines) {
 			const box = line.checkbox;
@@ -428,10 +443,10 @@ function checkboxUnder(rows: Row[], ink: Bounds, low: { x: number; y: number }):
 				height <= box.size * 4;
 			if (!inCore && !inMargin) continue;
 			const distance = Math.hypot(anchor.x - boxCentreX, anchor.y - boxCentreY);
-			if (best === null || distance < best.distance) best = { row, distance };
+			if (best === null || distance < best.distance) best = { row, box, distance };
 		}
 	}
-	return best === null ? null : best.row;
+	return best === null ? null : { row: best.row, box: best.box };
 }
 
 /**
@@ -453,9 +468,12 @@ function joinFlatMarks(classified: Classified[]): Mark[] {
 
 	// One box, one tick (GP_E5_S12): a cross is two strokes and a tick often
 	// gets a second pass — every stroke in the same row's box is one gesture.
+	// When strokes on one box disagree, cancel wins, the same rule the
+	// projection applies when one line carries both states.
+	const BOX = new Set<MarkKind>(["checkbox", "checkbox-cancel"]);
 	const ticksByRow = new Map<Row, Mark>();
 	for (const entry of classified) {
-		if (entry.mark.kind === "checkbox" && entry.row !== undefined) {
+		if (BOX.has(entry.mark.kind) && entry.row !== undefined) {
 			const existing = ticksByRow.get(entry.row);
 			if (existing === undefined) {
 				ticksByRow.set(entry.row, entry.mark);
@@ -464,6 +482,7 @@ function joinFlatMarks(classified: Classified[]): Mark[] {
 				existing.strokes.push(...entry.mark.strokes);
 				existing.bounds = merge(existing.bounds, entry.mark.bounds);
 				existing.orderY = Math.max(existing.orderY, entry.mark.orderY);
+				if (entry.mark.kind === "checkbox-cancel") existing.kind = "checkbox-cancel";
 			}
 			continue;
 		}

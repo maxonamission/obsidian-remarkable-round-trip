@@ -38,6 +38,12 @@ export interface RoundTripSettings {
 	annotationTarget: "companion" | "source";
 	/** Vault folder for companion notes; empty = vault root. */
 	annotationFolder: string;
+	/**
+	 * Keep a link to the companion note in the source note's properties
+	 * (GP_E5_S15). Off by default: it writes frontmatter into a note the
+	 * user wrote, which is opt-in territory.
+	 */
+	linkSourceToAnnotations: boolean;
 	/** Import handwritten annotations as PNG images (F12). */
 	importHandwriting: boolean;
 	/** Vault folder for the rendered handwriting images. */
@@ -75,6 +81,7 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	watchFolderPath: "reMarkable-out",
 	annotationTarget: "companion",
 	annotationFolder: "reMarkable-in",
+	linkSourceToAnnotations: false,
 	importHandwriting: true,
 	markStyles: { ...DEFAULT_MARK_STYLES },
 	handwritingFolder: "reMarkable-in/handwriting",

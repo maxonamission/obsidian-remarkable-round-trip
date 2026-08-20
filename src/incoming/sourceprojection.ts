@@ -277,9 +277,9 @@ export function projectOntoSource(input: ProjectionInput): ProjectionResult | nu
 		const covered = (mark.words ?? []).map((id) => ranges.get(id)).filter(isRange);
 		if (covered.length === 0) continue;
 		const line = lineOf(Math.min(...covered.map((range) => range.start)));
-		if (mark.kind === "checkbox") {
+		if (mark.kind === "checkbox" || mark.kind === "checkbox-cancel") {
 			if (TASK_LINE_RE.test(sourceLines[line])) {
-				done.add(line);
+				(mark.kind === "checkbox" ? done : cancelled).add(line);
 				placed++;
 			}
 			continue;

@@ -324,6 +324,50 @@ describe("reading pen ticks (GP_E5_S12)", () => {
 		expect(marks.every((mark) => mark.kind !== "checkbox")).toBe(true);
 	});
 
+	it("reads a flat stripe through a box as task CANCELLED (devicecheck 2026-08-20)", () => {
+		// The PB field PDF: the owner's cancel gesture is a level stripe
+		// straight through the box — a tenth of the box tall, nearly its
+		// width. Before this, any ink on a box meant done.
+		const box = lineFor("Band row twee keer vijftien").checkbox!;
+		const marks = readMarks(
+			[
+				strokeThrough([
+					{ x: box.x - 0.5, y: box.y + box.size * 0.45 },
+					{ x: box.x + box.size + 1, y: box.y + box.size * 0.5 },
+				]),
+			],
+			1,
+			layout,
+		);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox-cancel");
+		expect(marks[0].quote).toContain("Band row twee keer vijftien");
+	});
+
+	it("joins a retraced stripe into ONE cancelled mark", () => {
+		const box = lineFor("Melk kopen").checkbox!;
+		const pass = (wobble: number) =>
+			strokeThrough([
+				{ x: box.x - 0.5, y: box.y + box.size * 0.45 + wobble },
+				{ x: box.x + box.size + 1, y: box.y + box.size * 0.5 + wobble },
+			]);
+		const marks = readMarks([pass(0), pass(0.8)], 1, layout);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox-cancel");
+		expect(marks[0].strokes).toHaveLength(2);
+	});
+
+	it("lets cancel win when one box carries a tick AND a stripe", () => {
+		const box = lineFor("Melk kopen").checkbox!;
+		const stripe = strokeThrough([
+			{ x: box.x - 0.5, y: box.y + box.size * 0.45 },
+			{ x: box.x + box.size + 1, y: box.y + box.size * 0.5 },
+		]);
+		const marks = readMarks([tickIn("Melk kopen"), stripe], 1, layout);
+		expect(marks).toHaveLength(1);
+		expect(marks[0].kind).toBe("checkbox-cancel");
+	});
+
 	it("keeps small ink away from any box a plain note", () => {
 		const line = lineFor("Afvinken na de training");
 		const word = line.words[1];
@@ -410,6 +454,15 @@ describe("task states in the annotated copy (GP_E5_S12)", () => {
 			{ kind: "checkbox", words: idsOf("gewone bullet zonder taak") },
 		]);
 		expect(result?.markdown).toBe(SOURCE.trimEnd());
+	});
+
+	it("rewrites a stripe-cancelled task to [-]", () => {
+		const result = project([
+			{ kind: "checkbox-cancel", words: idsOf("Melk kopen") },
+			{ kind: "checkbox", words: idsOf("Warming-up vijf minuten") },
+		]);
+		expect(result?.markdown).toContain("- [-] Melk kopen");
+		expect(result?.markdown).toContain("- [x] Warming-up vijf minuten");
 	});
 });
 
@@ -527,6 +580,53 @@ describe("ticks on a Paper Pro page (GP_E5_S12, devicecheck 2026-08-20)", () => 
 				),
 			).toBe(true);
 		}
+	});
+
+	it("reads the six PB gestures as done/cancelled/done — twice (field PDF 2026-08-20)", () => {
+		// The exact scenario from the owner's PB_met_checkboxes PDF: per
+		// group a tick, a flat stripe, and a cross/scribble — meaning
+		// [x], [-], [x]. All six landed as [x] before the stripe rule.
+		const stripeOn = (phrase: string): Stroke => {
+			const box = proLineFor(phrase).checkbox!;
+			return proStroke([
+				{ x: box.x - 0.5, y: box.y + box.size * 0.45 },
+				{ x: box.x + box.size + 1, y: box.y + box.size * 0.5 },
+			]);
+		};
+		const crossOn = (phrase: string): Stroke[] => {
+			const box = proLineFor(phrase).checkbox!;
+			return [
+				proStroke([
+					{ x: box.x, y: box.y + box.size },
+					{ x: box.x + box.size, y: box.y - 1 },
+				]),
+				proStroke([
+					{ x: box.x, y: box.y - 1 },
+					{ x: box.x + box.size, y: box.y + box.size },
+				]),
+			];
+		};
+		const marks = readMarks(
+			[
+				proTickIn("test met vinkje"),
+				stripeOn("tweede agendapunt"),
+				...crossOn("derde agendapunt"),
+				stripeOn("onderaan eerste"),
+				proTickIn("onderaan tweede"),
+				...crossOn("onderaan derde"),
+			],
+			1,
+			proLayout,
+		);
+		expect(marks).toHaveLength(6);
+		const kindFor = (phrase: string) =>
+			marks.find((mark) => mark.quote?.includes(phrase))?.kind;
+		expect(kindFor("test met vinkje")).toBe("checkbox");
+		expect(kindFor("tweede agendapunt")).toBe("checkbox-cancel");
+		expect(kindFor("derde agendapunt")).toBe("checkbox");
+		expect(kindFor("onderaan eerste")).toBe("checkbox-cancel");
+		expect(kindFor("onderaan tweede")).toBe("checkbox");
+		expect(kindFor("onderaan derde")).toBe("checkbox");
 	});
 
 	it("quotes handwriting beside a paragraph against that paragraph", () => {

@@ -29,7 +29,7 @@ import { installFetchShim, ShimTransport } from "./transport/fetchshim";
 import { MirrorTransport, toTransportError } from "./transport/mirror";
 import { describeDiagnosis, diagnoseCloud } from "./transport/diagnose";
 import { EmbedContent } from "./preprocess/preprocess";
-import { DOCID_FRONTMATTER_KEY } from "./id/docid";
+import { ANNOTATIONS_FRONTMATTER_KEY, DOCID_FRONTMATTER_KEY } from "./id/docid";
 import { NoteInput, SendFormat, sendBatch, SendResult } from "./sync/send";
 import {
 	DocumentFile,
@@ -1193,6 +1193,7 @@ export default class RoundTripPlugin extends Plugin {
 		if (existing) {
 			const current = await this.app.vault.read(existing);
 			await this.app.vault.modify(existing, upsertAnnotationBlock(current, rendered.text));
+			await this.linkSourceToAnnotations(currentPath, targetPath);
 			return rendered.outcome;
 		}
 		// A companion note may need its folder created first.
@@ -1201,7 +1202,24 @@ export default class RoundTripPlugin extends Plugin {
 			await this.app.vault.createFolder(folder);
 		}
 		await this.app.vault.create(targetPath, `${rendered.text}\n`);
+		await this.linkSourceToAnnotations(currentPath, targetPath);
 		return rendered.outcome;
+	}
+
+	/**
+	 * Keep an `annotations` property in the source note pointing at its
+	 * companion note (GP_E5_S15, opt-in). The reverse link needs no work:
+	 * the companion's header always reads "Annotations from [[source]]".
+	 */
+	private async linkSourceToAnnotations(sourcePath: string, targetPath: string): Promise<void> {
+		if (!this.settings.linkSourceToAnnotations) return;
+		if (this.settings.annotationTarget !== "companion" || targetPath === sourcePath) return;
+		const source = this.app.vault.getFileByPath(sourcePath);
+		if (!source) return;
+		const link = `[[${targetPath.replace(/\.md$/i, "")}]]`;
+		await this.app.fileManager.processFrontMatter(source, (fm) => {
+			(fm as Record<string, unknown>)[ANNOTATIONS_FRONTMATTER_KEY] = link;
+		});
 	}
 }
 

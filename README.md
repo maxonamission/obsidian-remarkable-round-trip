@@ -140,6 +140,11 @@ stays untouched; a setting puts it inside the source note instead. Either way
 the plugin only ever replaces its own marked block, so anything you write
 around it survives a re-import.
 
+The companion note always links back to the note it annotates. Want the
+other direction too? Turn on *Link the source note to its annotations* and
+each import keeps an `annotations` property in your note pointing at the
+companion — the two are one click apart, both ways.
+
 ### Which marks are understood
 
 The plugin typeset the page itself, so it knows where every word sits and
@@ -154,6 +159,7 @@ it points at — read locally, from stroke geometry alone.
 | A **vertical bar in the margin** | Margin bar | The lines it ran alongside, as a `>` quote |
 | The **text highlighter** | Highlight | `<mark>` in the colour you used |
 | A **tick or cross in a drawn checkbox** | Task done | `- [x]` on that task line |
+| A **flat stripe through a drawn checkbox** | Task cancelled | `- [-]` on that task line |
 | A **strike through a whole task line** | Task cancelled | `- [-]` on that task line |
 | Anything else — handwriting, arrows, scribbles | Remark | A cropped image in a callout, under the line it was written against |
 | **A page you added** on the tablet to write on | Added page | The whole page as an image, placed after the text it follows |

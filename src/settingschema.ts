@@ -292,6 +292,17 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 				visibleWhen: { key: "annotationTarget", equals: "companion" },
 			},
 			{
+				key: "linkSourceToAnnotations",
+				name: "Link the source note to its annotations",
+				desc:
+					"After an import, the source note gets an “annotations” property " +
+					"linking to its companion note, so the two are one click apart. " +
+					"The companion note always links back to the source. This is the " +
+					"only thing the plugin ever writes into your note besides its id.",
+				control: { type: "toggle" },
+				visibleWhen: { key: "annotationTarget", equals: "companion" },
+			},
+			{
 				key: "importHandwriting",
 				name: "Import handwriting as images",
 				desc:

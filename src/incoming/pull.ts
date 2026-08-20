@@ -360,6 +360,7 @@ const TEXT_ONLY_KINDS = new Set<MarkKind>([
 	// itself would be noise — and without this entry the whole feature
 	// vanished when handwriting import was off (reviewvondst).
 	"checkbox",
+	"checkbox-cancel",
 ]);
 
 /**
