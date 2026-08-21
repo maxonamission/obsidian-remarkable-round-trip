@@ -135,6 +135,20 @@ export default class RoundTripPlugin extends Plugin {
 			},
 		});
 
+		// The per-note force twin (GP_E5_S16): look again at ONE document,
+		// ignoring the imported-hash — the full re-import walks the whole
+		// account for what is usually a single freshly-reviewed note.
+		this.addCommand({
+			id: "import-annotations-current-note-force",
+			name: "Re-import annotations from reMarkable (current note)",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || this.annotationEntry(file) === undefined) return false;
+				if (!checking) void this.pullAnnotations({ only: file, force: true });
+				return true;
+			},
+		});
+
 		this.addCommand({
 			id: "send-current-note",
 			name: "Send current note to reMarkable",
@@ -223,13 +237,22 @@ export default class RoundTripPlugin extends Plugin {
 							.onClick(() => void this.importEditedTextFor(file)),
 					);
 					// Annotations of exactly this note (GP_E5_S14) — only shown
-					// once the note has a review copy on the device.
-					if (this.annotationEntry(file) !== undefined) menu.addItem((item) =>
-						item
-							.setTitle("Import annotations from reMarkable")
-							.setIcon("import")
-							.onClick(() => void this.pullAnnotations({ only: file })),
-					);
+					// once the note has a review copy on the device. The
+					// re-import twin (GP_E5_S16) ignores the imported-hash.
+					if (this.annotationEntry(file) !== undefined) {
+						menu.addItem((item) =>
+							item
+								.setTitle("Import annotations from reMarkable")
+								.setIcon("import")
+								.onClick(() => void this.pullAnnotations({ only: file })),
+						);
+						menu.addItem((item) =>
+							item
+								.setTitle("Re-import annotations from reMarkable")
+								.setIcon("rotate-ccw")
+								.onClick(() => void this.pullAnnotations({ only: file, force: true })),
+						);
+					}
 				}
 				if (file instanceof TFolder) {
 					menu.addItem((item) =>
@@ -955,7 +978,14 @@ export default class RoundTripPlugin extends Plugin {
 				(done, total) => updateProgress(notice, `Checking ${done}/${total} for annotations…`),
 			);
 			// A scoped run returns only its slice; merging keeps the rest.
-			this.settings.mappings = { ...this.settings.mappings, ...table };
+			// Entries the run dropped — documents gone from the account
+			// (GP_E5_S17) — must not be resurrected by the merge, so what was
+			// in scope but absent from the result is deleted explicitly.
+			const merged = { ...this.settings.mappings, ...table };
+			for (const docId of Object.keys(scope)) {
+				if (!(docId in table)) delete merged[docId];
+			}
+			this.settings.mappings = merged;
 			await this.saveSettings();
 
 			const report = `${renderImportReport({
@@ -1236,8 +1266,11 @@ function reportPullResults(results: PullResult[]): void {
 		notify(`${failures.length} document(s) could not be imported.\n${detail}`, 10000);
 		return;
 	}
+	const removed = results.filter((r) => r.ok && r.removed === true).length;
+	const cleanup =
+		removed > 0 ? ` ${removed} stale document(s) removed from the import administration.` : "";
 	if (imported.length === 0) {
-		notify("No new annotations — everything is already up to date.");
+		notify(`No new annotations — everything is already up to date.${cleanup}`);
 		return;
 	}
 	// A note edited after it was sent still yields annotations, but unplaced
@@ -1249,7 +1282,7 @@ function reportPullResults(results: PullResult[]): void {
 				"placed in the text. Send them again."
 			: "";
 	notify(
-		`Imported ${total} highlight(s) from ${imported.length} document(s).${conflict}`,
+		`Imported ${total} highlight(s) from ${imported.length} document(s).${cleanup}${conflict}`,
 		changed > 0 ? 10000 : undefined,
 	);
 }

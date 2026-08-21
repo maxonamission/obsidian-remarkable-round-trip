@@ -38,7 +38,9 @@ export function renderImportReport(input: ImportReportInput): string {
 		if (result.skipped) {
 			lines.push(
 				result.skipReason === "not-on-device"
-					? `– ${result.notePath}: no longer on the reMarkable account`
+					? result.removed === true
+						? `– ${result.notePath}: no longer on the reMarkable account — removed from the import administration`
+						: `– ${result.notePath}: no longer on the reMarkable account`
 					: result.skipReason === "write-mode"
 						? `– ${result.notePath}: sent as editable text — the annotation import does not apply`
 						: `– ${result.notePath}: unchanged since the last import`,
@@ -71,6 +73,18 @@ export function renderImportReport(input: ImportReportInput): string {
 		lines.push(`    ${describeWrite(scan)}`);
 		const state = describeSource(scan.sourceState);
 		if (state !== "") lines.push(`    ${state}`);
+	}
+
+	// The administration cleans itself (GP_E5_S17); one summary line says
+	// so, because 300 silently shrinking mappings would look like data loss.
+	const removed = input.results.filter((result) => result.ok && result.removed === true).length;
+	if (removed > 0) {
+		lines.push(
+			"",
+			`${removed} mapping(s) pointed at documents that no longer exist on the account ` +
+				"and were removed from the import administration. The notes keep their id — " +
+				"re-sending one re-links it.",
+		);
 	}
 
 	lines.push("", diagnose(input));

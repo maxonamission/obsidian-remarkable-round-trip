@@ -128,7 +128,13 @@ plugin replaces your own text:
 Run **Import annotations from reMarkable**. The plugin finds the documents you
 have touched since last time and writes what it read into your vault. Just
 reviewed one note? Right-click it → *Import annotations from reMarkable* (or
-use the current-note command) to check only that one.
+use the current-note command) to check only that one. *Re-import annotations
+from reMarkable* reads that one document again even when nothing changed on
+the device — handy after changing a mark-style setting.
+
+Deleted a document on the reMarkable? The next import notices, stops
+checking it, and says so in the report. The note in your vault is untouched
+and keeps its id — send it again and it is re-linked seamlessly.
 
 What you get is an **annotated copy of your note**: your own text, unchanged,
 with the marks worked in where you drew them. Bold, italics, headings, links

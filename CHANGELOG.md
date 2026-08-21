@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.41.0] - 2026-08-21
+
+### Added
+
+- **Re-import a single note.** Right-click a note → *Re-import annotations
+  from reMarkable* (or run the current-note re-import command) to read one
+  document again even when nothing changed on the device — after changing
+  a mark-style setting, for instance — without walking the whole account.
+
+### Changed
+
+- **The import administration now cleans itself.** A document you deleted
+  on the reMarkable used to stay in the plugin's import list forever, and
+  every run kept checking it. The next import now notices it is gone and
+  drops it from the administration, and the report says how many were
+  cleaned up. Your note is untouched and keeps its id — sending it again
+  re-links it seamlessly. As a safeguard, nothing is pruned when the
+  account listing comes back empty (a fresh pairing or an endpoint switch
+  looks like that, and that is not three hundred deletions).
+
 ## [0.40.0] - 2026-08-20
 
 ### Added

@@ -158,6 +158,11 @@ export interface PullSuccess {
 	skipped?: boolean;
 	/** Why it was skipped, for the diagnostic report. */
 	skipReason?: "unchanged" | "not-on-device" | "write-mode";
+	/**
+	 * The mapping was dropped because the document no longer exists on the
+	 * account (GP_E5_S17). The note keeps its id; re-sending re-links it.
+	 */
+	removed?: boolean;
 	scan?: DocumentScan;
 }
 
@@ -586,7 +591,35 @@ export async function pullAnnotations(
 		let result: PullResult;
 		try {
 			deps.log?.(`${entry.notePath} → device ${entry.deviceDocId}`);
-			if (entry.format === "text") {
+			if (hash === undefined) {
+				// The document is gone from the account (deleted on the
+				// device, trash emptied): drop the mapping so the run stops
+				// walking it forever (GP_E5_S17) — the note keeps its id in
+				// its frontmatter, so re-sending re-links it seamlessly. One
+				// guard: an EMPTY account listing is far more likely a fresh
+				// pairing or an endpoint switch than 300 real deletions, so
+				// then nothing is pruned.
+				const prune = hashes.size > 0;
+				if (prune) {
+					updated = Object.fromEntries(
+						Object.entries(updated).filter(([docId]) => docId !== entry.docId),
+					);
+				}
+				deps.log?.(
+					prune
+						? "  not on the account — mapping removed"
+						: "  not on the account — kept (account listing is empty; not pruning)",
+				);
+				result = {
+					ok: true,
+					docId: entry.docId,
+					notePath: entry.notePath,
+					highlightCount: 0,
+					skipped: true,
+					skipReason: "not-on-device",
+					removed: prune ? true : undefined,
+				};
+			} else if (entry.format === "text") {
 				// A write-mode notebook (GP_E7_S2) carries typed text, not
 				// annotations on a review copy; its import is the write-mode
 				// route (GP_E7_S3), and reading it as ink would find nothing.
@@ -598,18 +631,6 @@ export async function pullAnnotations(
 					highlightCount: 0,
 					skipped: true,
 					skipReason: "write-mode",
-				};
-			} else if (hash === undefined) {
-				// The document is gone from the device (deleted or moved out of
-				// reach): not an error, just nothing to import.
-				deps.log?.("  not on the account — skipped");
-				result = {
-					ok: true,
-					docId: entry.docId,
-					notePath: entry.notePath,
-					highlightCount: 0,
-					skipped: true,
-					skipReason: "not-on-device",
 				};
 			} else if (!deps.force && entry.importedHash === hash) {
 				deps.log?.(`  unchanged since last import (${hash.slice(0, 8)}…) — skipped`);

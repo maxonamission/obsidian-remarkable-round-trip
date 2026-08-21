@@ -291,12 +291,87 @@ describe("pullAnnotations", () => {
 		expect(written).toHaveLength(1);
 	});
 
-	it("treats a document that is gone from the device as nothing to do", async () => {
+	it("keeps every mapping when the account listing is empty — pairing switch, not 300 deletions", async () => {
 		const { deps, written } = makeDeps({
 			listDocumentHashes: () => Promise.resolve(new Map()),
 		});
-		const { results } = await pullAnnotations(TABLE, deps);
-		expect(results[0]).toMatchObject({ ok: true, skipped: true });
+		const { results, table } = await pullAnnotations(TABLE, deps);
+		expect(results[0]).toMatchObject({ ok: true, skipped: true, skipReason: "not-on-device" });
+		expect(results[0].ok && results[0].removed).toBeUndefined();
+		expect(table["doc-a"]).toBeDefined();
+		expect(written).toHaveLength(0);
+	});
+
+	it("removes the mapping of a document gone from the account (GP_E5_S17)", async () => {
+		const table: MappingTable = {
+			...TABLE,
+			"doc-b": {
+				...TABLE["doc-a"],
+				docId: "doc-b",
+				deviceDocId: "device-b",
+				notePath: "b.md",
+			},
+		};
+		const { deps } = makeDeps({
+			// device-a is gone; device-b still lives, so the listing is real.
+			listDocumentHashes: () => Promise.resolve(new Map([["device-b", "hash-2"]])),
+			listDocumentFiles: () =>
+				Promise.resolve([{ id: "device-b.highlights/p1.json", hash: "h" }]),
+		});
+		const { results, table: updated } = await pullAnnotations(table, deps);
+		expect(results[0]).toMatchObject({
+			ok: true,
+			skipped: true,
+			skipReason: "not-on-device",
+			removed: true,
+		});
+		expect(updated["doc-a"]).toBeUndefined();
+		expect(updated["doc-b"]).toBeDefined();
+	});
+
+	it("also removes a gone write-mode document's mapping", async () => {
+		const table: MappingTable = {
+			"doc-t": {
+				...TABLE["doc-a"],
+				docId: "doc-t",
+				deviceDocId: "device-t",
+				notePath: "t.md",
+				format: "text",
+			},
+			"doc-b": {
+				...TABLE["doc-a"],
+				docId: "doc-b",
+				deviceDocId: "device-b",
+				notePath: "b.md",
+			},
+		};
+		const { deps } = makeDeps({
+			listDocumentHashes: () => Promise.resolve(new Map([["device-b", "hash-2"]])),
+			listDocumentFiles: () =>
+				Promise.resolve([{ id: "device-b.highlights/p1.json", hash: "h" }]),
+		});
+		const { results, table: updated } = await pullAnnotations(table, deps);
+		expect(results[0]).toMatchObject({ skipReason: "not-on-device", removed: true });
+		expect(updated["doc-t"]).toBeUndefined();
+		expect(updated["doc-b"]).toBeDefined();
+	});
+
+	it("keeps a write-mode document that still lives on the account out of the ink import", async () => {
+		const table: MappingTable = {
+			"doc-t": {
+				...TABLE["doc-a"],
+				docId: "doc-t",
+				deviceDocId: "device-t",
+				notePath: "t.md",
+				format: "text",
+			},
+		};
+		const { deps, written } = makeDeps({
+			listDocumentHashes: () => Promise.resolve(new Map([["device-t", "hash-t"]])),
+		});
+		const { results, table: updated } = await pullAnnotations(table, deps);
+		expect(results[0]).toMatchObject({ skipped: true, skipReason: "write-mode" });
+		expect(updated["doc-t"]).toBeDefined();
 		expect(written).toHaveLength(0);
 	});
 

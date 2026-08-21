@@ -374,6 +374,33 @@ describe("renderImportReport", () => {
 		expect(renderImportReport({ ...base, results })).toContain("no longer on the reMarkable");
 	});
 
+	it("says when stale mappings were removed from the administration (GP_E5_S17)", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 0,
+				skipped: true,
+				skipReason: "not-on-device",
+				removed: true,
+			},
+			{
+				ok: true,
+				docId: "b",
+				notePath: "Andere.md",
+				highlightCount: 0,
+				skipped: true,
+				skipReason: "not-on-device",
+				removed: true,
+			},
+		];
+		const report = renderImportReport({ ...base, results });
+		expect(report).toContain("removed from the import administration");
+		expect(report).toContain("2 mapping(s) pointed at documents that no longer exist");
+		expect(report).toContain("re-sending one re-links it");
+	});
+
 	it("names the cause when every document failed", () => {
 		const auth: PullResult[] = [{ ok: false, docId: "a", notePath: "Nota.md", error: "401" }];
 		expect(renderImportReport({ ...base, results: auth })).toContain("Pair again");
