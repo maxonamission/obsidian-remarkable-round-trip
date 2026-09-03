@@ -88,6 +88,12 @@ What happens to your note on the way:
   choose. Re-sending replaces the previous copy; the old one goes to the
   device trash. Folder creation always finishes before file upload; if it
   fails, the affected batch is left unsent rather than placed in the root.
+- **Strict mirror** (the default) restores tracked notes that were moved or
+  deleted on the device and moves untracked documents inside the configured
+  device base folder to trash. Content outside that folder is untouched.
+  **Push mirror** respects remote moves and deletions until the local note's
+  content or vault path changes. Both modes remember the local fingerprint and
+  path, observed device path, and last sync time.
 - Each note gets a stable `remarkable-id` in its frontmatter. That id — not the
   file path — is how a document finds its note again, so you can move and
   rename freely.

@@ -8,12 +8,19 @@
 export interface WatchQueueOptions {
 	/** Vault folder to watch, without trailing slash (e.g. "reMarkable-out"). */
 	folder: string;
+	/** Previously synced notes remain tracked even outside the watch folder. */
+	isTracked?: (path: string) => boolean;
 	/** Quiet period after the last change before a file is sent. */
 	debounceMs: number;
 	setTimer: (fn: () => void, ms: number) => number;
 	clearTimer: (id: number) => void;
 	/** Called once with the deduplicated batch when the quiet window closes. */
-	onReady: (paths: string[]) => void;
+	onReady: (batch: WatchBatch) => void;
+}
+
+export interface WatchBatch {
+	changed: string[];
+	removed: string[];
 }
 
 /** True when the path lives inside the watched folder (any depth). */
@@ -24,38 +31,96 @@ export function isInWatchFolder(path: string, folder: string): boolean {
 }
 
 export class WatchQueue {
-	private readonly pending = new Set<string>();
+	private readonly changed = new Set<string>();
+	private readonly removed = new Set<string>();
 	private timer: number | null = null;
 
 	constructor(private readonly opts: WatchQueueOptions) {}
 
 	/** Report a create/modify event; only markdown files in the folder count. */
 	noteChanged(path: string): void {
+		this.notesChanged([path]);
+	}
+
+	notesChanged(paths: string[]): void {
+		let added = false;
+		for (const path of paths) {
+			if (!path.endsWith(".md")) continue;
+			if (!this.isWatched(path)) continue;
+			this.removed.delete(path);
+			this.changed.add(path);
+			added = true;
+		}
+		if (added) this.restartTimer();
+	}
+
+	private addChanged(path: string): void {
 		if (!path.endsWith(".md")) return;
-		if (!isInWatchFolder(path, this.opts.folder)) return;
-		this.pending.add(path);
+		this.removed.delete(path);
+		this.changed.add(path);
+	}
+
+	noteRenamed(oldPath: string, newPath: string): void {
+		const oldTracked = this.opts.isTracked?.(oldPath) === true;
+		const oldWatched = oldPath.endsWith(".md") && this.isWatched(oldPath);
+		const newWatched = newPath.endsWith(".md") && this.isWatched(newPath);
+		this.changed.delete(oldPath);
+		this.removed.delete(oldPath);
+		if (
+			(oldTracked && !newPath.endsWith(".md")) ||
+			(oldWatched && !newWatched && !oldTracked)
+		) {
+			this.removed.add(oldPath);
+		}
+		if (newWatched || (oldTracked && newPath.endsWith(".md"))) {
+			this.addChanged(newPath);
+		}
+		if (oldWatched || newWatched) this.restartTimer();
+	}
+
+	/** A local deletion is part of the mirrored change set. */
+	noteRemoved(path: string): void {
+		if (!path.endsWith(".md")) return;
+		if (!this.isWatched(path)) return;
+		this.changed.delete(path);
+		this.removed.add(path);
+		this.restartTimer();
+	}
+
+	notesRemoved(paths: string[]): void {
+		let added = false;
+		for (const path of paths) {
+			if (!path.endsWith(".md")) continue;
+			this.changed.delete(path);
+			this.removed.add(path);
+			added = true;
+		}
+		if (added) this.restartTimer();
+	}
+
+	private isWatched(path: string): boolean {
+		return (
+			isInWatchFolder(path, this.opts.folder) ||
+			this.opts.isTracked?.(path) === true
+		);
+	}
+
+	private restartTimer(): void {
 		if (this.timer !== null) this.opts.clearTimer(this.timer);
 		this.timer = this.opts.setTimer(() => {
 			this.timer = null;
-			const paths = [...this.pending];
-			this.pending.clear();
-			this.opts.onReady(paths);
+			const batch = { changed: [...this.changed], removed: [...this.removed] };
+			this.changed.clear();
+			this.removed.clear();
+			this.opts.onReady(batch);
 		}, this.opts.debounceMs);
-	}
-
-	/** A rename/delete out of the folder cancels the pending send. */
-	noteRemoved(path: string): void {
-		this.pending.delete(path);
-		if (this.pending.size === 0 && this.timer !== null) {
-			this.opts.clearTimer(this.timer);
-			this.timer = null;
-		}
 	}
 
 	/** Cancel everything (plugin unload or settings change). */
 	dispose(): void {
 		if (this.timer !== null) this.opts.clearTimer(this.timer);
 		this.timer = null;
-		this.pending.clear();
+		this.changed.clear();
+		this.removed.clear();
 	}
 }

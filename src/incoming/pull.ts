@@ -159,6 +159,8 @@ export interface PullDeps {
 	yieldToPush?: () => Promise<void>;
 	/** False when a yielded push replaced this mapping before it was read. */
 	isCurrent?: (entry: MappingEntry) => boolean;
+	/** Keep missing documents tracked so mirror reconciliation can apply its mode. */
+	preserveMissingMappings?: boolean;
 }
 
 export interface PullSuccess {
@@ -205,7 +207,14 @@ export function mergePullMappings(
 		if (result === undefined) {
 			delete merged[docId];
 		} else {
-			merged[docId] = { ...latest, importedHash: result.importedHash };
+			const next = { ...latest, importedHash: result.importedHash };
+			if (result.remotePath !== original.remotePath) {
+				next.remotePath = result.remotePath;
+			}
+			if (result.lastSyncedAt !== original.lastSyncedAt) {
+				next.lastSyncedAt = result.lastSyncedAt;
+			}
+			merged[docId] = next;
 		}
 	}
 	return merged;
@@ -669,23 +678,30 @@ export async function pullAnnotations(
 					skipReason: "superseded",
 				};
 			} else if (hash === undefined) {
-				// The document is gone from the account (deleted on the
-				// device, trash emptied): drop the mapping so the run stops
-				// walking it forever (GP_E5_S17) — the note keeps its id in
-				// its frontmatter, so re-sending re-links it seamlessly. One
-				// guard: an EMPTY account listing is far more likely a fresh
-				// pairing or an endpoint switch than 300 real deletions, so
-				// then nothing is pruned.
-				const prune = hashes.size > 0;
+				// The document is gone from the account (deleted on the device,
+				// trash emptied). Folder mirroring keeps the mapping so its mode
+				// can restore or accept that deletion; flat uploads retain the
+				// older cleanup behavior. An empty listing is never pruned because
+				// it is more likely a pairing or endpoint switch.
+				const prune = hashes.size > 0 && !deps.preserveMissingMappings;
 				if (prune) {
 					updated = Object.fromEntries(
 						Object.entries(updated).filter(([docId]) => docId !== entry.docId),
 					);
+				} else if (deps.preserveMissingMappings) {
+					updated = {
+						...updated,
+						[entry.docId]: {
+							...entry,
+							remotePath: null,
+							lastSyncedAt: new Date().toISOString(),
+						},
+					};
 				}
 				deps.log?.(
 					prune
 						? "  not on the account — mapping removed"
-						: "  not on the account — kept (account listing is empty; not pruning)",
+						: "  not on the account — mapping kept for mirror reconciliation",
 				);
 				result = {
 					ok: true,

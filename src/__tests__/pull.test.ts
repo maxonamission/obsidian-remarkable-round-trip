@@ -403,6 +403,35 @@ describe("pullAnnotations", () => {
 		expect(updated["doc-b"]).toBeDefined();
 	});
 
+	it("keeps a missing document tracked when mirror reconciliation owns deletion policy", async () => {
+		const table: MappingTable = {
+			...TABLE,
+			"doc-b": {
+				...TABLE["doc-a"],
+				docId: "doc-b",
+				deviceDocId: "device-b",
+				notePath: "b.md",
+			},
+		};
+		const { deps } = makeDeps({
+			preserveMissingMappings: true,
+			listDocumentHashes: () =>
+				Promise.resolve(new Map([["device-b", "hash-2"]])),
+			listDocumentFiles: () =>
+				Promise.resolve([{ id: "device-b.highlights/p1.json", hash: "h" }]),
+		});
+		const { results, table: updated } = await pullAnnotations(table, deps);
+
+		expect(results[0]).toMatchObject({
+			ok: true,
+			skipped: true,
+			skipReason: "not-on-device",
+		});
+		expect(results[0].ok && results[0].removed).toBeUndefined();
+		expect(updated["doc-a"]).toMatchObject({ remotePath: null });
+		expect(updated["doc-a"].lastSyncedAt).toBeTruthy();
+	});
+
 	it("also removes a gone write-mode document's mapping", async () => {
 		const table: MappingTable = {
 			"doc-t": {
@@ -563,6 +592,25 @@ describe("mergePullMappings", () => {
 		expect(mergePullMappings(current, TABLE, pulled)["doc-a"]).toMatchObject({
 			notePath: "moved/Nota.md",
 			importedHash: "device-hash",
+		});
+	});
+
+	it("merges a confirmed missing remote location without replacing local state", () => {
+		const current: MappingTable = {
+			"doc-a": { ...TABLE["doc-a"], notePath: "moved/Nota.md" },
+		};
+		const pulled: MappingTable = {
+			"doc-a": {
+				...TABLE["doc-a"],
+				remotePath: null,
+				lastSyncedAt: "2026-09-03T12:00:00Z",
+			},
+		};
+
+		expect(mergePullMappings(current, TABLE, pulled)["doc-a"]).toMatchObject({
+			notePath: "moved/Nota.md",
+			remotePath: null,
+			lastSyncedAt: "2026-09-03T12:00:00Z",
 		});
 	});
 });

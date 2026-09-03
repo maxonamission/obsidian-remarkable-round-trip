@@ -61,11 +61,40 @@ describe("isTransientTransportError", () => {
 	});
 
 	it("does not treat application errors as transient", () => {
-		expect(isTransientTransportError(new Error("Pairing code was rejected"))).toBe(false);
+		expect(
+			isTransientTransportError(new Error("Pairing code was rejected")),
+		).toBe(false);
 	});
 });
 
 describe("installFetchShim retries", () => {
+	it("shares a cooldown and retries HTTP 429 responses", async () => {
+		let calls = 0;
+		const waits: number[] = [];
+		const transport: ShimTransport = () => {
+			calls++;
+			return Promise.resolve(
+				calls === 1
+					? { ...okResponse(), status: 429 }
+					: okResponse("after-cooldown"),
+			);
+		};
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			rateLimitBackoffMs: () => 5_000,
+			sleep: (ms) => {
+				waits.push(ms);
+				return Promise.resolve();
+			},
+		});
+		restore = handle.restore;
+
+		const response = await fetch(`${HOSTS[0]}/sync/v4/root`);
+		expect(await response.text()).toBe("after-cooldown");
+		expect(calls).toBe(2);
+		expect(waits).toEqual([5_000]);
+	});
+
 	it("retries a transient failure and succeeds", async () => {
 		let calls = 0;
 		const transport: ShimTransport = () => {
@@ -91,10 +120,15 @@ describe("installFetchShim retries", () => {
 			calls++;
 			return Promise.reject(new Error("unexpected end of stream"));
 		};
-		const handle = installFetchShim(HOSTS, transport, { ...NO_WAIT, attempts: 2 });
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			attempts: 2,
+		});
 		restore = handle.restore;
 
-		await expect(fetch(`${HOSTS[0]}/sync/v4/root`)).rejects.toThrow(/unexpected end of stream/);
+		await expect(fetch(`${HOSTS[0]}/sync/v4/root`)).rejects.toThrow(
+			/unexpected end of stream/,
+		);
 		expect(calls).toBe(2);
 	});
 
@@ -125,13 +159,19 @@ describe("installFetchShim retries", () => {
 		restore = handle.restore;
 
 		expect(globalThis.fetch).not.toBe(original);
-		await globalThis.fetch("https://example.invalid/nothing").catch(() => undefined); // network is unavailable in tests; only routing matters
+		await globalThis
+			.fetch("https://example.invalid/nothing")
+			.catch(() => undefined); // network is unavailable in tests; only routing matters
 		expect(shimCalls).toBe(0);
 	});
 
 	it("restores the original fetch", () => {
 		const original = globalThis.fetch;
-		const handle = installFetchShim(HOSTS, () => Promise.resolve(okResponse()), NO_WAIT);
+		const handle = installFetchShim(
+			HOSTS,
+			() => Promise.resolve(okResponse()),
+			NO_WAIT,
+		);
 		handle.restore();
 		expect(globalThis.fetch).toBe(original);
 	});
@@ -152,11 +192,16 @@ describe("installFetchShim concurrency gate (GP_E5_S9)", () => {
 				});
 			});
 		};
-		const handle = installFetchShim(HOSTS, transport, { ...NO_WAIT, maxConcurrent: 3 });
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			maxConcurrent: 3,
+		});
 		restore = handle.restore;
 
 		// The flood rmapi-js produces: far more requests than the cap, at once.
-		const calls = Array.from({ length: 10 }, (_, i) => fetch(`${HOSTS[0]}/entry/${i}`));
+		const calls = Array.from({ length: 10 }, (_, i) =>
+			fetch(`${HOSTS[0]}/entry/${i}`),
+		);
 		// Drain: finish whatever is admitted until every request went through.
 		let finished = 0;
 		while (finished < 10) {
@@ -169,7 +214,9 @@ describe("installFetchShim concurrency gate (GP_E5_S9)", () => {
 			}
 		}
 		const responses = await Promise.all(calls);
-		expect(responses.map((r) => r.status)).toEqual(Array.from({ length: 10 }, () => 200));
+		expect(responses.map((r) => r.status)).toEqual(
+			Array.from({ length: 10 }, () => 200),
+		);
 		expect(maxSeen).toBe(3);
 	});
 
@@ -186,7 +233,10 @@ describe("installFetchShim concurrency gate (GP_E5_S9)", () => {
 			}
 			return Promise.resolve(okResponse());
 		};
-		const handle = installFetchShim(HOSTS, transport, { ...NO_WAIT, maxConcurrent: 1 });
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			maxConcurrent: 1,
+		});
 		restore = handle.restore;
 
 		const first = fetch(`${HOSTS[0]}/first`);
@@ -203,10 +253,16 @@ describe("installFetchShim concurrency gate (GP_E5_S9)", () => {
 			calls++;
 			return Promise.resolve(okResponse());
 		};
-		const handle = installFetchShim(HOSTS, transport, { ...NO_WAIT, maxConcurrent: 0 });
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			maxConcurrent: 0,
+		});
 		restore = handle.restore;
 
-		const responses = await Promise.all([fetch(`${HOSTS[0]}/a`), fetch(`${HOSTS[0]}/b`)]);
+		const responses = await Promise.all([
+			fetch(`${HOSTS[0]}/a`),
+			fetch(`${HOSTS[0]}/b`),
+		]);
 		expect(responses.map((r) => r.status)).toEqual([200, 200]);
 		expect(calls).toBe(2);
 	});
@@ -220,7 +276,10 @@ describe("installFetchShim concurrency gate (GP_E5_S9)", () => {
 				finishFirst = () => resolve(okResponse());
 			});
 		};
-		const handle = installFetchShim(HOSTS, transport, { ...NO_WAIT, maxConcurrent: 1 });
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			maxConcurrent: 1,
+		});
 
 		const first = fetch(`${HOSTS[0]}/holds-the-slot`);
 		const queued = fetch(`${HOSTS[0]}/never-admitted`);

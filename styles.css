@@ -1,2 +1,46 @@
 /* reMarkable Round-Trip ships no styling of its own; this file exists so
    plugin-update checkers that expect a styles.css stay quiet. */
+.remarkable-round-trip-status {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-2);
+}
+
+.remarkable-round-trip-status-icon {
+	display: inline-flex;
+	--icon-size: var(--font-ui-small);
+	animation: remarkable-round-trip-spin 1.5s linear infinite;
+}
+
+.remarkable-round-trip-status-progress {
+	display: inline-flex;
+}
+
+.remarkable-round-trip-status-progress .setting-progress-bar {
+	width: 60px;
+	margin: 0;
+}
+
+.remarkable-round-trip-status-text {
+	max-width: 220px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+@keyframes remarkable-round-trip-spin {
+	from {
+		transform: rotate(0deg);
+	}
+
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.remarkable-round-trip-status-icon {
+		animation: none;
+	}
+}
+

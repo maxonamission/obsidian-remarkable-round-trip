@@ -30,8 +30,11 @@ describe("mapping", () => {
 				contentHash: contentHash("inhoud"),
 			},
 		);
-		expect(lookupByDeviceDocId(table, "device-1")?.notePath).toBe("map/nota.md");
+		expect(lookupByDeviceDocId(table, "device-1")?.notePath).toBe(
+			"map/nota.md",
+		);
 		expect(table["a"].uploadedAt).toBeTruthy();
+		expect(table["a"].lastSyncedAt).toBe(table["a"].uploadedAt);
 	});
 
 	it("hashes content stably and detects changes", () => {

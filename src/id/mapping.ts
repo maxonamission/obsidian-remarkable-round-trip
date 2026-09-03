@@ -7,14 +7,20 @@
 export interface MappingEntry {
 	/** Stable document ID from the note's frontmatter. */
 	docId: string;
-	/** Vault path of the source note at upload time (informational only). */
+	/** Vault-relative source path at the last successful reconciliation. */
 	notePath: string;
 	/** Document UUID assigned by the reMarkable cloud on upload. */
 	deviceDocId: string;
+	/** Last observed full device path; null means the remote document is absent. */
+	remotePath?: string | null;
+	/** ISO timestamp of the last successful local/remote reconciliation. */
+	lastSyncedAt?: string;
 	/** ISO timestamp of the last upload. */
 	uploadedAt: string;
 	/** Simple content hash of the uploaded (preprocessed) markdown. */
 	contentHash: string;
+	/** Hash of the source file itself; unaffected by rendering/settings changes. */
+	localHash?: string;
 	/**
 	 * What was delivered (GP_E7_S2): "pdf"/"epub" review copies, or "text" —
 	 * a write-mode notebook whose import is the write-mode route, not the
@@ -78,17 +84,22 @@ export function recordUpload(
 	table: MappingTable,
 	entry: Omit<MappingEntry, "uploadedAt"> & { uploadedAt?: string },
 ): MappingTable {
+	const uploadedAt = entry.uploadedAt ?? new Date().toISOString();
 	return {
 		...table,
 		[entry.docId]: {
 			...entry,
 			importedHash: undefined,
-			uploadedAt: entry.uploadedAt ?? new Date().toISOString(),
+			uploadedAt,
+			lastSyncedAt: entry.lastSyncedAt ?? uploadedAt,
 		},
 	};
 }
 
-export function lookupByDocId(table: MappingTable, docId: string): MappingEntry | undefined {
+export function lookupByDocId(
+	table: MappingTable,
+	docId: string,
+): MappingEntry | undefined {
 	return table[docId];
 }
 
