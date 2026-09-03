@@ -53,6 +53,11 @@ The **tablet ribbon icon** opens sync status and the annotation import actions.
 work, pending watch-folder changes, tracked-note coverage, and the last upload.
 Long operations show progress in the desktop status bar; mobile uses notices.
 
+With folder mirroring enabled, sync status also shows the mirror mode, pending
+removals, observed remote copies, and the last reconciliation. **Run full sync**
+is available from the ribbon and command palette: it reconciles watch-folder
+and tracked notes (including local removals), then imports annotations.
+
 - **Command palette**: *Send current note to reMarkable*.
 - **Right-click a note or folder**: *Send to reMarkable* — a folder sends
   everything inside it, with progress and per-file errors, and keeps its own

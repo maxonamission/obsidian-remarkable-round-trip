@@ -138,6 +138,7 @@ export default class RoundTripPlugin extends Plugin {
 		fromHex: true,
 		fromBase64: true,
 	};
+	private fullSyncPromise: Promise<void> | null = null;
 
 	async onload(): Promise<void> {
 		const loadedAfterLayout = this.app.workspace.layoutReady;
@@ -213,6 +214,12 @@ export default class RoundTripPlugin extends Plugin {
 					.setIcon("activity")
 					.onClick(() => this.openSyncStatus()),
 			);
+			menu.addItem((item) =>
+				item
+					.setTitle("Run full sync")
+					.setIcon("refresh-cw")
+					.onClick(() => void this.runFullSync()),
+			);
 			menu.addSeparator();
 			menu.addItem((item) =>
 				item
@@ -228,10 +235,17 @@ export default class RoundTripPlugin extends Plugin {
 			);
 			menu.showAtMouseEvent(event);
 		});
+
 		this.addCommand({
 			id: "show-sync-status",
 			name: "Show sync status",
 			callback: () => this.openSyncStatus(),
+		});
+
+		this.addCommand({
+			id: "run-full-sync",
+			name: "Run full sync",
+			callback: () => void this.runFullSync(),
 		});
 
 		this.addCommand({
@@ -480,11 +494,14 @@ export default class RoundTripPlugin extends Plugin {
 			}
 		}
 		new SyncStatusModal(this.app, {
-			mode: this.settings.mirrorFolders ? "On" : "Off (flat uploads)",
-			watchFolder:
-				this.settings.watchFolderEnabled && this.settings.watchFolderPath !== ""
-					? this.settings.watchFolderPath
-					: "Disabled",
+			mode: this.settings.mirrorFolders
+				? this.settings.mirrorMode === "strict"
+					? "Strict mirror"
+					: "Push mirror"
+				: "Off (flat uploads)",
+			watchFolder: this.settings.watchFolderEnabled
+				? this.settings.watchFolderPath || "Vault root"
+				: "Disabled",
 			summary: buildSyncStatusSummary({
 				mappings: this.settings.mappings,
 				localPaths,
@@ -498,6 +515,45 @@ export default class RoundTripPlugin extends Plugin {
 		return (
 			this.progressStatus?.begin(message, count) ?? progressNotice(message)
 		);
+	}
+
+	private runFullSync(): Promise<void> {
+		if (this.fullSyncPromise !== null) return this.fullSyncPromise;
+		const run = async (): Promise<void> => {
+			if (!this.metadataReady) {
+				notify(
+					"The metadata cache is still loading. Try the full sync again shortly.",
+				);
+				return;
+			}
+			const files = new Map<string, TFile>();
+			const removedPaths: string[] = [];
+			if (
+				this.settings.watchFolderEnabled &&
+				this.settings.watchFolderPath !== ""
+			) {
+				const folder = this.app.vault.getFolderByPath(
+					this.settings.watchFolderPath,
+				);
+				if (folder) {
+					for (const file of collectMarkdownFiles(folder))
+						files.set(file.path, file);
+				}
+			}
+			for (const entry of Object.values(this.settings.mappings)) {
+				const file = this.findTrackedFile(entry);
+				if (file) files.set(file.path, file);
+				else removedPaths.push(entry.notePath);
+			}
+			await this.sendFiles([...files.values()], { auto: true, removedPaths });
+			await this.pullAnnotations();
+			notify("Full reMarkable sync complete.");
+		};
+		const tracked = run().finally(() => {
+			if (this.fullSyncPromise === tracked) this.fullSyncPromise = null;
+		});
+		this.fullSyncPromise = tracked;
+		return tracked;
 	}
 
 	async loadSettings(): Promise<void> {

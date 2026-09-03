@@ -9,14 +9,18 @@ describe("buildSyncStatusSummary", () => {
 					docId: "a",
 					notePath: "watch/a.md",
 					deviceDocId: "remote-a",
+					remotePath: "Obsidian/a",
 					uploadedAt: "2026-09-01T10:00:00Z",
+					lastSyncedAt: "2026-09-02T10:00:00Z",
 					contentHash: "a",
 				},
 				b: {
 					docId: "b",
 					notePath: "missing.md",
 					deviceDocId: "remote-b",
+					remotePath: null,
 					uploadedAt: "2026-09-03T10:00:00Z",
+					lastSyncedAt: "2026-09-03T10:00:00Z",
 					contentHash: "b",
 				},
 			},
@@ -28,6 +32,7 @@ describe("buildSyncStatusSummary", () => {
 				queuedPushes: 2,
 				queuedPulls: 3,
 				pendingChanges: 4,
+				pendingRemovals: 1,
 			},
 		});
 
@@ -35,12 +40,16 @@ describe("buildSyncStatusSummary", () => {
 			queue: "Uploading",
 			queuedWork: 6,
 			pendingChanges: 4,
+			pendingRemovals: 1,
 			trackedNotes: 2,
 			localTrackedNotes: 1,
 			missingLocalNotes: 1,
 			watchNotes: 2,
 			untrackedWatchNotes: 1,
 			lastUploadedAt: "2026-09-03T10:00:00Z",
+			knownRemoteCopies: 1,
+			missingRemoteCopies: 1,
+			lastSyncedAt: "2026-09-03T10:00:00Z",
 		});
 	});
 });

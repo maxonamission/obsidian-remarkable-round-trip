@@ -21,7 +21,8 @@ export class SyncStatusModal extends Modal {
 		this.row("Queue", summary.queue);
 		this.row("Queued work", String(summary.queuedWork));
 		this.row("Pending local changes", String(summary.pendingChanges));
-		this.row("Folder mirroring", this.view.mode);
+		this.row("Pending local removals", String(summary.pendingRemovals));
+		this.row("Mirror mode", this.view.mode);
 		this.row("Watch folder", this.view.watchFolder);
 		this.row("Notes in watch folder", String(summary.watchNotes));
 		this.row("Watch notes not yet synced", String(summary.untrackedWatchNotes));
@@ -39,6 +40,17 @@ export class SyncStatusModal extends Modal {
 			summary.lastUploadedAt === null
 				? "Never"
 				: new Date(summary.lastUploadedAt).toLocaleString(),
+		);
+		this.row("Known remote copies", String(summary.knownRemoteCopies));
+		this.row(
+			"Known missing remote copies",
+			String(summary.missingRemoteCopies),
+		);
+		this.row(
+			"Last reconciliation",
+			summary.lastSyncedAt === null
+				? "Never"
+				: new Date(summary.lastSyncedAt).toLocaleString(),
 		);
 	}
 

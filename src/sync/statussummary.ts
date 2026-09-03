@@ -3,18 +3,23 @@ import type { SyncQueueStatus } from "./queues";
 
 export interface LiveSyncStatus extends SyncQueueStatus {
 	pendingChanges: number;
+	pendingRemovals: number;
 }
 
 export interface SyncStatusSummary {
 	queue: string;
 	queuedWork: number;
 	pendingChanges: number;
+	pendingRemovals: number;
 	trackedNotes: number;
 	localTrackedNotes: number;
 	missingLocalNotes: number;
 	watchNotes: number;
 	untrackedWatchNotes: number;
 	lastUploadedAt: string | null;
+	knownRemoteCopies: number;
+	missingRemoteCopies: number;
+	lastSyncedAt: string | null;
 }
 
 export function buildSyncStatusSummary(input: {
@@ -28,8 +33,13 @@ export function buildSyncStatusSummary(input: {
 	const localTrackedNotes = entries.filter((entry) =>
 		input.localPaths.has(entry.notePath),
 	).length;
-	const syncTimes = entries.map((entry) => entry.uploadedAt).sort();
-	const lastUploadedAt = syncTimes[syncTimes.length - 1] ?? null;
+	const uploadTimes = entries.map((entry) => entry.uploadedAt).sort();
+	const lastUploadedAt = uploadTimes[uploadTimes.length - 1] ?? null;
+	const syncTimes = entries
+		.map((entry) => entry.lastSyncedAt)
+		.filter((value): value is string => value !== undefined)
+		.sort();
+	const lastSyncedAt = syncTimes[syncTimes.length - 1] ?? null;
 	const queue =
 		input.live.active === "folder"
 			? "Preparing device folders"
@@ -42,7 +52,7 @@ export function buildSyncStatusSummary(input: {
 								input.live.queuedPulls >
 							0
 						? "Queued"
-						: input.live.pendingChanges > 0
+						: input.live.pendingChanges + input.live.pendingRemovals > 0
 							? "Waiting for debounce"
 							: "Idle";
 
@@ -53,6 +63,7 @@ export function buildSyncStatusSummary(input: {
 			input.live.queuedPushes +
 			input.live.queuedPulls,
 		pendingChanges: input.live.pendingChanges,
+		pendingRemovals: input.live.pendingRemovals,
 		trackedNotes: entries.length,
 		localTrackedNotes,
 		missingLocalNotes: entries.length - localTrackedNotes,
@@ -61,5 +72,11 @@ export function buildSyncStatusSummary(input: {
 			(path) => !mappedPaths.has(path),
 		).length,
 		lastUploadedAt,
+		knownRemoteCopies: entries.filter(
+			(entry) => typeof entry.remotePath === "string",
+		).length,
+		missingRemoteCopies: entries.filter((entry) => entry.remotePath === null)
+			.length,
+		lastSyncedAt,
 	};
 }
