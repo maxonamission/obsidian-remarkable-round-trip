@@ -98,6 +98,13 @@ export class WatchQueue {
 		if (added) this.restartTimer();
 	}
 
+	status(): { pendingChanges: number; pendingRemovals: number } {
+		return {
+			pendingChanges: this.changed.size,
+			pendingRemovals: this.removed.size,
+		};
+	}
+
 	private isWatched(path: string): boolean {
 		return (
 			isInWatchFolder(path, this.opts.folder) ||

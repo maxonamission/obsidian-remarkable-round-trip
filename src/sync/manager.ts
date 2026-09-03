@@ -1,4 +1,5 @@
 import { PullQueue, PushQueue, PushWork, SyncQueueCoordinator } from "./queues";
+import type { SyncQueueStatus } from "./queues";
 import { WatchBatch, WatchQueue, WatchQueueOptions } from "./watcher";
 import type { MirrorMode } from "../settingsmodel";
 import type { MappingEntry, MappingTable } from "../id/mapping";
@@ -113,6 +114,19 @@ export class SyncManager {
 
 	noteRemoved(path: string): void {
 		this.watcher?.noteRemoved(path);
+	}
+
+	status(): SyncQueueStatus & {
+		pendingChanges: number;
+		pendingRemovals: number;
+	} {
+		return {
+			...this.coordinator.status(),
+			...(this.watcher?.status() ?? {
+				pendingChanges: 0,
+				pendingRemovals: 0,
+			}),
+		};
 	}
 
 	enqueuePush(work: PushWork): Promise<void> {
