@@ -10,6 +10,7 @@ import {
 	PullDeps,
 	StrokeRenderRequest,
 	collectHighlights,
+	mergePullMappings,
 	pullAnnotations,
 } from "../incoming/pull";
 
@@ -23,7 +24,8 @@ const TABLE: MappingTable = {
 	},
 };
 
-const page = (text: string) => JSON.stringify({ highlights: [[{ text, color: 3 }]] });
+const page = (text: string) =>
+	JSON.stringify({ highlights: [[{ text, color: 3 }]] });
 
 /** A `.rm` v6 page holding one glyph block — a text highlight (GP_E3_S11). */
 function glyphPage(text: string, color: number): Uint8Array {
@@ -58,7 +60,8 @@ function makeDeps(overrides: Partial<PullDeps> = {}) {
 		{ id: "device-a/p1.rm", hash: "h-rm" },
 	];
 	const deps: PullDeps = {
-		listDocumentHashes: () => Promise.resolve(new Map([["device-a", "hash-1"]])),
+		listDocumentHashes: () =>
+			Promise.resolve(new Map([["device-a", "hash-1"]])),
 		listDocumentFiles: () => Promise.resolve(files),
 		readFile: (file) =>
 			Promise.resolve(
@@ -80,8 +83,15 @@ function makeDeps(overrides: Partial<PullDeps> = {}) {
 describe("collectHighlights", () => {
 	it("reads only highlight files and orders them by page", async () => {
 		const { deps } = makeDeps();
-		const { highlights, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
-		expect(highlights.map((h) => h.text)).toEqual(["van pagina 1", "van pagina 2"]);
+		const { highlights, scan } = await collectHighlights(
+			TABLE["doc-a"],
+			"hash-1",
+			deps,
+		);
+		expect(highlights.map((h) => h.text)).toEqual([
+			"van pagina 1",
+			"van pagina 2",
+		]);
 		expect(highlights.map((h) => h.page)).toEqual([1, 2]);
 		expect(scan).toMatchObject({
 			totalFiles: 4,
@@ -92,9 +102,14 @@ describe("collectHighlights", () => {
 
 	it("returns nothing when the document has no highlight files", async () => {
 		const { deps } = makeDeps({
-			listDocumentFiles: () => Promise.resolve([{ id: "device-a.content", hash: "h" }]),
+			listDocumentFiles: () =>
+				Promise.resolve([{ id: "device-a.content", hash: "h" }]),
 		});
-		const { highlights, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		const { highlights, scan } = await collectHighlights(
+			TABLE["doc-a"],
+			"hash-1",
+			deps,
+		);
 		expect(highlights).toEqual([]);
 		expect(scan).toMatchObject({
 			highlightFiles: 0,
@@ -110,7 +125,11 @@ describe("collectHighlights", () => {
 					? Promise.reject(new Error("stuk"))
 					: Promise.resolve(page("van pagina 2")),
 		});
-		const { highlights, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		const { highlights, scan } = await collectHighlights(
+			TABLE["doc-a"],
+			"hash-1",
+			deps,
+		);
 		expect(highlights.map((h) => h.text)).toEqual(["van pagina 2"]);
 		expect(scan.unreadableFiles).toBe(1);
 	});
@@ -119,7 +138,11 @@ describe("collectHighlights", () => {
 		const { deps } = makeDeps({
 			readFile: () => Promise.resolve(page("zonder volgorde")),
 		});
-		const { highlights } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		const { highlights } = await collectHighlights(
+			TABLE["doc-a"],
+			"hash-1",
+			deps,
+		);
 		expect(highlights).toHaveLength(2);
 		expect(highlights.every((h) => h.page === undefined)).toBe(true);
 	});
@@ -127,7 +150,9 @@ describe("collectHighlights", () => {
 
 describe("pen mark import", () => {
 	const realPage = new Uint8Array(
-		readFileSync(fileURLToPath(new URL("./fixtures/lines-v2.rm", import.meta.url))),
+		readFileSync(
+			fileURLToPath(new URL("./fixtures/lines-v2.rm", import.meta.url)),
+		),
 	);
 	// The fixture's ink covers device y 86–171, which is PDF y 542–569; a line
 	// at 550 sits right under it.
@@ -189,17 +214,29 @@ describe("pen mark import", () => {
 
 	it("quotes the text a note sits against when the layout is available", async () => {
 		const { deps } = markDeps({ loadLayout: () => Promise.resolve(layout) });
-		const { marks, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
-		expect(marks.some((mark) => mark.quote?.includes("De zin waar de inkt"))).toBe(true);
+		const { marks, scan } = await collectHighlights(
+			TABLE["doc-a"],
+			"hash-1",
+			deps,
+		);
+		expect(
+			marks.some((mark) => mark.quote?.includes("De zin waar de inkt")),
+		).toBe(true);
 		expect(scan.anchoredRemarks).toBeGreaterThan(0);
 		expect(scan.anchorSkipped).toBeUndefined();
 	});
 
 	it("still returns the ink when the layout cannot be reproduced", async () => {
 		const { deps } = markDeps({ loadLayout: () => Promise.resolve(null) });
-		const { marks, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		const { marks, scan } = await collectHighlights(
+			TABLE["doc-a"],
+			"hash-1",
+			deps,
+		);
 		expect(marks.length).toBeGreaterThan(0);
-		expect(marks.every((mark) => mark.kind === "note" && mark.path !== undefined)).toBe(true);
+		expect(
+			marks.every((mark) => mark.kind === "note" && mark.path !== undefined),
+		).toBe(true);
 		expect(marks.every((mark) => mark.quote === undefined)).toBe(true);
 		expect(scan.anchorSkipped).toBe("no-layout");
 	});
@@ -215,7 +252,11 @@ describe("pen mark import", () => {
 
 	it("renders no images when handwriting import is switched off", async () => {
 		const { deps } = makeDeps({ readBytes: () => Promise.resolve(realPage) });
-		const { marks, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		const { marks, scan } = await collectHighlights(
+			TABLE["doc-a"],
+			"hash-1",
+			deps,
+		);
 		expect(marks.every((mark) => mark.path === undefined)).toBe(true);
 		expect(scan.renderedPages).toBe(0);
 	});
@@ -233,7 +274,11 @@ describe("pen mark import", () => {
 			readFile: () => Promise.resolve(CONTENT),
 			readBytes: () => Promise.resolve(withGlyph),
 		});
-		const { highlights, scan } = await collectHighlights(TABLE["doc-a"], "hash-1", deps);
+		const { highlights, scan } = await collectHighlights(
+			TABLE["doc-a"],
+			"hash-1",
+			deps,
+		);
 
 		expect(highlights).toEqual([
 			{ text: "Maar is er altijd zekerheid uit data?", color: 2, page: 1 },
@@ -253,6 +298,30 @@ describe("pullAnnotations", () => {
 		expect(results[0]).toMatchObject({ ok: true, highlightCount: 2 });
 		expect(written[0].notePath).toBe("map/Nota.md");
 		expect(table["doc-a"].importedHash).toBe("hash-1");
+	});
+
+	it("offers the coordinator a safe yield before each document", async () => {
+		let yields = 0;
+		const { deps } = makeDeps({
+			yieldToPush: async () => {
+				yields++;
+			},
+		});
+
+		await pullAnnotations(TABLE, deps);
+		expect(yields).toBe(1);
+	});
+
+	it("skips a mapping superseded by a push while the pull yielded", async () => {
+		const { deps, written } = makeDeps({ isCurrent: () => false });
+		const { results } = await pullAnnotations(TABLE, deps);
+
+		expect(results[0]).toMatchObject({
+			ok: true,
+			skipped: true,
+			skipReason: "superseded",
+		});
+		expect(written).toHaveLength(0);
 	});
 
 	it("skips a write-mode document: typed text is not annotation ink (GP_E7_S2)", async () => {
@@ -296,7 +365,11 @@ describe("pullAnnotations", () => {
 			listDocumentHashes: () => Promise.resolve(new Map()),
 		});
 		const { results, table } = await pullAnnotations(TABLE, deps);
-		expect(results[0]).toMatchObject({ ok: true, skipped: true, skipReason: "not-on-device" });
+		expect(results[0]).toMatchObject({
+			ok: true,
+			skipped: true,
+			skipReason: "not-on-device",
+		});
 		expect(results[0].ok && results[0].removed).toBeUndefined();
 		expect(table["doc-a"]).toBeDefined();
 		expect(written).toHaveLength(0);
@@ -314,7 +387,8 @@ describe("pullAnnotations", () => {
 		};
 		const { deps } = makeDeps({
 			// device-a is gone; device-b still lives, so the listing is real.
-			listDocumentHashes: () => Promise.resolve(new Map([["device-b", "hash-2"]])),
+			listDocumentHashes: () =>
+				Promise.resolve(new Map([["device-b", "hash-2"]])),
 			listDocumentFiles: () =>
 				Promise.resolve([{ id: "device-b.highlights/p1.json", hash: "h" }]),
 		});
@@ -346,12 +420,16 @@ describe("pullAnnotations", () => {
 			},
 		};
 		const { deps } = makeDeps({
-			listDocumentHashes: () => Promise.resolve(new Map([["device-b", "hash-2"]])),
+			listDocumentHashes: () =>
+				Promise.resolve(new Map([["device-b", "hash-2"]])),
 			listDocumentFiles: () =>
 				Promise.resolve([{ id: "device-b.highlights/p1.json", hash: "h" }]),
 		});
 		const { results, table: updated } = await pullAnnotations(table, deps);
-		expect(results[0]).toMatchObject({ skipReason: "not-on-device", removed: true });
+		expect(results[0]).toMatchObject({
+			skipReason: "not-on-device",
+			removed: true,
+		});
 		expect(updated["doc-t"]).toBeUndefined();
 		expect(updated["doc-b"]).toBeDefined();
 	});
@@ -367,10 +445,14 @@ describe("pullAnnotations", () => {
 			},
 		};
 		const { deps, written } = makeDeps({
-			listDocumentHashes: () => Promise.resolve(new Map([["device-t", "hash-t"]])),
+			listDocumentHashes: () =>
+				Promise.resolve(new Map([["device-t", "hash-t"]])),
 		});
 		const { results, table: updated } = await pullAnnotations(table, deps);
-		expect(results[0]).toMatchObject({ skipped: true, skipReason: "write-mode" });
+		expect(results[0]).toMatchObject({
+			skipped: true,
+			skipReason: "write-mode",
+		});
 		expect(updated["doc-t"]).toBeDefined();
 		expect(written).toHaveLength(0);
 	});
@@ -405,9 +487,14 @@ describe("pullAnnotations", () => {
 	});
 
 	it("records how the source note relates to what was sent (F14)", async () => {
-		const { deps } = makeDeps({ checkSource: () => Promise.resolve("changed" as const) });
+		const { deps } = makeDeps({
+			checkSource: () => Promise.resolve("changed" as const),
+		});
 		const { results } = await pullAnnotations(TABLE, deps);
-		expect(results[0]).toMatchObject({ ok: true, scan: { sourceState: "changed" } });
+		expect(results[0]).toMatchObject({
+			ok: true,
+			scan: { sourceState: "changed" },
+		});
 	});
 
 	it("still imports when the source check itself fails — it is a diagnosis, not a gate", async () => {
@@ -446,5 +533,36 @@ describe("pullAnnotations", () => {
 		const { results, table } = await pullAnnotations(TABLE, deps);
 		expect(results[0]).toMatchObject({ ok: false, error: "geen verbinding" });
 		expect(table).toEqual(TABLE);
+	});
+});
+
+describe("mergePullMappings", () => {
+	it("does not overwrite a mapping replaced by a yielded push", () => {
+		const current: MappingTable = {
+			"doc-a": {
+				...TABLE["doc-a"],
+				deviceDocId: "device-new",
+				contentHash: "new",
+			},
+		};
+		const pulled: MappingTable = {
+			"doc-a": { ...TABLE["doc-a"], importedHash: "old-device-hash" },
+		};
+
+		expect(mergePullMappings(current, TABLE, pulled)).toEqual(current);
+	});
+
+	it("merges only pull state when the device mapping is still current", () => {
+		const current: MappingTable = {
+			"doc-a": { ...TABLE["doc-a"], notePath: "moved/Nota.md" },
+		};
+		const pulled: MappingTable = {
+			"doc-a": { ...TABLE["doc-a"], importedHash: "device-hash" },
+		};
+
+		expect(mergePullMappings(current, TABLE, pulled)["doc-a"]).toMatchObject({
+			notePath: "moved/Nota.md",
+			importedHash: "device-hash",
+		});
 	});
 });

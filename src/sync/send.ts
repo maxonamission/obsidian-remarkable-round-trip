@@ -4,10 +4,18 @@
  * the whole flow is unit-testable without Obsidian or a device.
  */
 
-import { preprocess, parseFrontmatter, EmbedResolver } from "../preprocess/preprocess";
+import {
+	preprocess,
+	parseFrontmatter,
+	EmbedResolver,
+} from "../preprocess/preprocess";
 import { canonicalText } from "../convert/textdoc";
 import { parseBlocks } from "../convert/mdblocks";
-import { renderPdf, resolveLayoutOptions, PdfLayoutOptions } from "../convert/pdf";
+import {
+	renderPdf,
+	resolveLayoutOptions,
+	PdfLayoutOptions,
+} from "../convert/pdf";
 import { renderEpub } from "../convert/epub";
 import { ensureDocId } from "../id/docid";
 import { MappingTable, contentHash, recordUpload } from "../id/mapping";
@@ -53,7 +61,10 @@ export interface SendDeps {
 	/** Delivered format; PDF is the default because it anchors annotations. */
 	format?: SendFormat;
 	/** Resolve an embed for a given note (notePath disambiguates targets). */
-	resolveEmbed: (linkpath: string, notePath: string) => ReturnType<EmbedResolver>;
+	resolveEmbed: (
+		linkpath: string,
+		notePath: string,
+	) => ReturnType<EmbedResolver>;
 	/** Persist a newly generated docId into the note's frontmatter. */
 	persistDocId: (note: NoteInput, docId: string) => Promise<void>;
 	/**
@@ -94,6 +105,49 @@ export interface SendFailure {
 
 export type SendResult = SendSuccess | SendFailure;
 
+export function prepareNoteContent(
+	note: NoteInput,
+	format: SendFormat,
+	resolveEmbed: (
+		linkpath: string,
+		notePath: string,
+	) => ReturnType<EmbedResolver>,
+	frontmatterAsTitleBlock = false,
+): { markdown: string; missingEmbeds: string[] } {
+	if (format === "text") {
+		return { markdown: parseFrontmatter(note.content).body, missingEmbeds: [] };
+	}
+	const processed = preprocess(note.content, {
+		resolveEmbed: (linkpath) => resolveEmbed(linkpath, note.path),
+		frontmatterAsTitleBlock,
+	});
+	return processed;
+}
+
+export function notesNeedingUpload(
+	notes: NoteInput[],
+	table: MappingTable,
+	format: SendFormat,
+	resolveEmbed: (
+		linkpath: string,
+		notePath: string,
+	) => ReturnType<EmbedResolver>,
+	frontmatterAsTitleBlock = false,
+): NoteInput[] {
+	return notes.filter((note) => {
+		if (typeof note.existingDocId !== "string") return true;
+		const previous = table[note.existingDocId];
+		if (previous === undefined) return true;
+		const { markdown } = prepareNoteContent(
+			note,
+			format,
+			resolveEmbed,
+			frontmatterAsTitleBlock,
+		);
+		return previous.contentHash !== contentHash(markdown);
+	});
+}
+
 /** Send one note; never throws — failures come back as a result (F8). */
 export async function sendNote(
 	note: NoteInput,
@@ -111,15 +165,12 @@ export async function sendNote(
 		// metadata is not text to edit; the note keeps its own frontmatter and
 		// the import, GP_E7_S3, leaves it standing). Review formats keep their
 		// full preprocessing below.
-		const body =
-			format === "text"
-				? parseFrontmatter(note.content).body
-				: preprocess(note.content, {
-						resolveEmbed: (linkpath) => deps.resolveEmbed(linkpath, note.path),
-						frontmatterAsTitleBlock: deps.frontmatterAsTitleBlock,
-					});
-		const markdown = typeof body === "string" ? body : body.markdown;
-		const missingEmbeds = typeof body === "string" ? [] : body.missingEmbeds;
+		const { markdown, missingEmbeds } = prepareNoteContent(
+			note,
+			format,
+			deps.resolveEmbed,
+			deps.frontmatterAsTitleBlock,
+		);
 		const hash = contentHash(markdown);
 		if (deps.skipUnchanged && table[docId]?.contentHash === hash) {
 			return {
@@ -144,13 +195,21 @@ export async function sendNote(
 					"Editable-text sends need the reMarkable sync API, which is not available right now.",
 				);
 			}
-			upload = await deps.client.uploadText(note.basename, markdown, { parentId });
+			upload = await deps.client.uploadText(note.basename, markdown, {
+				parentId,
+			});
 		} else {
 			const blocks = parseBlocks(markdown);
 			const bytes =
 				format === "epub"
 					? await renderEpub(blocks, { title: note.basename, docId })
-					: (await renderPdf(blocks, { title: note.basename, docId }, deps.layout)).bytes;
+					: (
+							await renderPdf(
+								blocks,
+								{ title: note.basename, docId },
+								deps.layout,
+							)
+						).bytes;
 			upload = await deps.client.upload(`${note.basename}.${format}`, bytes, {
 				parentId,
 				format,
@@ -180,10 +239,12 @@ export async function sendNote(
 			format,
 			// What an unedited device copy reads back as (GP_E7_S3) — the
 			// import's "was the device actually edited?" reference.
-			textHash: format === "text" ? contentHash(canonicalText(markdown)) : undefined,
+			textHash:
+				format === "text" ? contentHash(canonicalText(markdown)) : undefined,
 			// EPUB reflows and a text notebook has no fixed page geometry, so
 			// only PDF records layout to anchor imported ink against (GP_E3_S8).
-			pdfLayout: format === "pdf" ? resolveLayoutOptions(deps.layout) : undefined,
+			pdfLayout:
+				format === "pdf" ? resolveLayoutOptions(deps.layout) : undefined,
 		});
 		return {
 			result: {

@@ -8,7 +8,9 @@ const base = {
 	pluginVersion: "0.6.0",
 };
 
-const scan = (over: Partial<NonNullable<Extract<PullResult, { ok: true }>["scan"]>> = {}) => ({
+const scan = (
+	over: Partial<NonNullable<Extract<PullResult, { ok: true }>["scan"]>> = {},
+) => ({
 	totalFiles: 5,
 	highlightFiles: 0,
 	strokeFiles: 0,
@@ -25,7 +27,9 @@ const scan = (over: Partial<NonNullable<Extract<PullResult, { ok: true }>["scan"
 
 describe("renderImportReport", () => {
 	it("says plainly when nothing has been sent yet", () => {
-		expect(renderImportReport({ ...base, results: [] })).toContain("nothing to import");
+		expect(renderImportReport({ ...base, results: [] })).toContain(
+			"nothing to import",
+		);
 	});
 
 	it("points at the setting when strokes were found but handwriting import is off", () => {
@@ -87,7 +91,9 @@ describe("renderImportReport", () => {
 			handwritingEnabled: true,
 			results,
 		});
-		expect(report).toContain("1 pen mark(s) on 1 page(s), 1 tied to the source");
+		expect(report).toContain(
+			"1 pen mark(s) on 1 page(s), 1 tied to the source",
+		);
 		expect(report).toContain("1 page(s) with pen marks came back");
 		expect(report).not.toContain("not built yet");
 	});
@@ -203,7 +209,9 @@ describe("renderImportReport", () => {
 				scan: scan({ sourceState: "match" }),
 			},
 		];
-		expect(renderImportReport({ ...base, results: same })).not.toContain("source note:");
+		expect(renderImportReport({ ...base, results: same })).not.toContain(
+			"source note:",
+		);
 	});
 
 	it("blames the edit, not EPUB, when the source check knows the note changed", () => {
@@ -222,7 +230,11 @@ describe("renderImportReport", () => {
 				}),
 			},
 		];
-		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		const report = renderImportReport({
+			...base,
+			handwritingEnabled: true,
+			results,
+		});
 		expect(report).toContain("has been edited since it was sent");
 		expect(report).not.toContain("or it went over as EPUB");
 	});
@@ -246,9 +258,15 @@ describe("renderImportReport", () => {
 				}),
 			},
 		];
-		const report = renderImportReport({ ...base, handwritingEnabled: true, results });
+		const report = renderImportReport({
+			...base,
+			handwritingEnabled: true,
+			results,
+		});
 		expect(report).toContain("1 page(s) you added on the device");
-		expect(report).toContain("came back whole, placed after the text they follow");
+		expect(report).toContain(
+			"came back whole, placed after the text they follow",
+		);
 	});
 
 	it("says when the highlights came from the pen layer", () => {
@@ -258,7 +276,11 @@ describe("renderImportReport", () => {
 				docId: "a",
 				notePath: "Nota.md",
 				highlightCount: 3,
-				scan: scan({ strokeFiles: 2, parsedHighlights: 3, highlightsInStrokes: 3 }),
+				scan: scan({
+					strokeFiles: 2,
+					parsedHighlights: 3,
+					highlightsInStrokes: 3,
+				}),
 			},
 		];
 		expect(renderImportReport({ ...base, results })).toContain(
@@ -325,7 +347,9 @@ describe("renderImportReport", () => {
 				scan: scan({ highlightFiles: 2 }),
 			},
 		];
-		expect(renderImportReport({ ...base, results })).toContain("firmware format");
+		expect(renderImportReport({ ...base, results })).toContain(
+			"firmware format",
+		);
 	});
 
 	it("suggests a forced re-import when everything was skipped", () => {
@@ -342,6 +366,22 @@ describe("renderImportReport", () => {
 		const report = renderImportReport({ ...base, results });
 		expect(report).toContain("unchanged since the last import");
 		expect(report).toContain("Re-import all annotations");
+	});
+
+	it("reports a stale pull entry superseded by a newer push", () => {
+		const results: PullResult[] = [
+			{
+				ok: true,
+				docId: "a",
+				notePath: "Nota.md",
+				highlightCount: 0,
+				skipped: true,
+				skipReason: "superseded",
+			},
+		];
+		expect(renderImportReport({ ...base, results })).toContain(
+			"replaced by a newer push",
+		);
 	});
 
 	it("names a write-mode document as out of scope for the annotation import", () => {
@@ -371,7 +411,9 @@ describe("renderImportReport", () => {
 				skipReason: "not-on-device",
 			},
 		];
-		expect(renderImportReport({ ...base, results })).toContain("no longer on the reMarkable");
+		expect(renderImportReport({ ...base, results })).toContain(
+			"no longer on the reMarkable",
+		);
 	});
 
 	it("says when stale mappings were removed from the administration (GP_E5_S17)", () => {
@@ -397,16 +439,27 @@ describe("renderImportReport", () => {
 		];
 		const report = renderImportReport({ ...base, results });
 		expect(report).toContain("removed from the import administration");
-		expect(report).toContain("2 mapping(s) pointed at documents that no longer exist");
+		expect(report).toContain(
+			"2 mapping(s) pointed at documents that no longer exist",
+		);
 		expect(report).toContain("re-sending one re-links it");
 	});
 
 	it("names the cause when every document failed", () => {
-		const auth: PullResult[] = [{ ok: false, docId: "a", notePath: "Nota.md", error: "401" }];
-		expect(renderImportReport({ ...base, results: auth })).toContain("Pair again");
+		const auth: PullResult[] = [
+			{ ok: false, docId: "a", notePath: "Nota.md", error: "401" },
+		];
+		expect(renderImportReport({ ...base, results: auth })).toContain(
+			"Pair again",
+		);
 
 		const offline: PullResult[] = [
-			{ ok: false, docId: "a", notePath: "Nota.md", error: "Unable to resolve host" },
+			{
+				ok: false,
+				docId: "a",
+				notePath: "Nota.md",
+				error: "Unable to resolve host",
+			},
 		];
 		expect(renderImportReport({ ...base, results: offline })).toContain(
 			"network problem, not your pairing",
