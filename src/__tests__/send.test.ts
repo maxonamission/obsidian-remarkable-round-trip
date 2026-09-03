@@ -100,6 +100,35 @@ describe("sendNote", () => {
 		expect(persisted).toHaveLength(0);
 	});
 
+	it("records the local path, remote path, fingerprint, and sync time", async () => {
+		const { deps } = makeDeps({
+			remotePath: (_notePath, visibleName) =>
+				`Obsidian/Projects/${visibleName}`,
+		});
+		const { result, table } = await sendNote(NOTE, {}, deps);
+		if (!result.ok) throw new Error("unexpected failure");
+
+		expect(table[result.docId]).toMatchObject({
+			notePath: NOTE.path,
+			remotePath: "Obsidian/Projects/Nota",
+			localHash: contentHash(NOTE.content),
+		});
+		expect(typeof table[result.docId].contentHash).toBe("string");
+		expect(typeof table[result.docId].lastSyncedAt).toBe("string");
+	});
+
+	it("fingerprints the persisted source after adding a new document ID", async () => {
+		const persistedContent =
+			"---\ntitle: X\nremarkable-id: generated\n---\nInhoud van de notitie.";
+		const { deps } = makeDeps({
+			persistDocId: () => Promise.resolve(persistedContent),
+		});
+		const { result, table } = await sendNote(NOTE, {}, deps);
+		if (!result.ok) throw new Error("unexpected failure");
+
+		expect(table[result.docId].localHash).toBe(contentHash(persistedContent));
+	});
+
 	it("returns a failure result instead of throwing", async () => {
 		const { deps } = makeDeps({
 			client: { upload: () => Promise.reject(new Error("cloud down")) },
@@ -357,5 +386,28 @@ describe("sendBatch", () => {
 		expect(results.map((r) => r.ok)).toEqual([false, true]);
 		expect(Object.keys(table)).toHaveLength(1);
 		expect(progress).toEqual([1, 2]);
+	});
+
+	it("checkpoints a large batch after every 20 successful uploads", async () => {
+		const { deps } = makeDeps();
+		const checkpoints: number[] = [];
+		const notes = Array.from({ length: 45 }, (_, index) => ({
+			...NOTE,
+			path: `batch/${index}.md`,
+			basename: String(index),
+		}));
+
+		const { table } = await sendBatch(
+			notes,
+			{},
+			deps,
+			undefined,
+			async (checkpoint) => {
+				checkpoints.push(Object.keys(checkpoint).length);
+			},
+		);
+
+		expect(checkpoints).toEqual([20, 40]);
+		expect(Object.keys(table)).toHaveLength(45);
 	});
 });

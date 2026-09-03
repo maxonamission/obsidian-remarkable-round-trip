@@ -58,7 +58,10 @@ export type TextImportOutcome =
 const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/;
 
 /** Split a note into its frontmatter block (verbatim) and the body. */
-export function splitFrontmatter(content: string): { head: string; body: string } {
+export function splitFrontmatter(content: string): {
+	head: string;
+	body: string;
+} {
 	const match = content.match(FRONTMATTER_RE);
 	if (!match) return { head: "", body: content };
 	return { head: match[0], body: content.slice(match[0].length) };
@@ -94,7 +97,8 @@ export async function importEditedText(
 	entry: MappingEntry,
 	deps: TextImportDeps,
 ): Promise<{ outcome: TextImportOutcome; entry: MappingEntry }> {
-	if (entry.format !== "text") return { outcome: { kind: "not-write-mode" }, entry };
+	if (entry.format !== "text")
+		return { outcome: { kind: "not-write-mode" }, entry };
 
 	const device = await deps.readDeviceText(entry);
 	if (device === null) return { outcome: { kind: "not-on-device" }, entry };
@@ -107,7 +111,8 @@ export async function importEditedText(
 	// A note without frontmatter of its own would start with the device
 	// text at byte 0 — disarm any identity it carries (see above). The
 	// stored hashes and all comparisons follow what would land on disk.
-	const incoming = head === "" ? disarmNoteIdentity(device.markdown) : device.markdown;
+	const incoming =
+		head === "" ? disarmNoteIdentity(device.markdown) : device.markdown;
 
 	// Comparing against the CANONICAL body (one trip through the style
 	// subset — `# ` normalises to `## `) is what makes "no difference"
@@ -122,10 +127,15 @@ export async function importEditedText(
 	// (a conflict, and the user chooses).
 	const vaultChanged = contentHash(body) !== entry.contentHash;
 	const deviceEdited =
-		entry.textHash === undefined || contentHash(device.markdown) !== entry.textHash;
+		entry.textHash === undefined ||
+		contentHash(device.markdown) !== entry.textHash;
+	// `head + incoming` is exactly what writeNote puts on disk, so its hash is
+	// the note's new source fingerprint — otherwise the next reconciliation
+	// would read the import as a local edit and send it back to the device.
 	const imported: MappingEntry = {
 		...entry,
 		contentHash: contentHash(incoming),
+		localHash: contentHash(head + incoming),
 		textHash: contentHash(device.markdown),
 	};
 
@@ -146,10 +156,16 @@ export async function importEditedText(
 		case "replace": {
 			const backupPath = await deps.writeBackup(entry, current);
 			await deps.writeNote(entry, head + incoming);
-			return { outcome: { kind: "conflict-replaced", backupPath }, entry: imported };
+			return {
+				outcome: { kind: "conflict-replaced", backupPath },
+				entry: imported,
+			};
 		}
 		case "keep": {
-			const asidePath = await deps.writeAside(entry, disarmNoteIdentity(device.markdown));
+			const asidePath = await deps.writeAside(
+				entry,
+				disarmNoteIdentity(device.markdown),
+			);
 			// The entry does not advance: the note and the device still
 			// disagree, and the next import should say so again.
 			return { outcome: { kind: "conflict-kept", asidePath }, entry };

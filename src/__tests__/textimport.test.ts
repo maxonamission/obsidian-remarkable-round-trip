@@ -11,7 +11,8 @@ import {
 
 const SENT_BODY = "## Doel\nAlles rustig opbouwen.\n- [ ] eerste sessie";
 const NOTE = `---\nremarkable-id: 0f8fad5b-d9cb-469f-a165-70867728950e\ntitle: Weeklog\n---\n${SENT_BODY}`;
-const EDITED = "## Doel\nAlles rustig opbouwen.\n- [x] eerste sessie\nNieuwe gedachte van het device.";
+const EDITED =
+	"## Doel\nAlles rustig opbouwen.\n- [x] eerste sessie\nNieuwe gedachte van het device.";
 
 const ENTRY: MappingEntry = {
 	docId: "0f8fad5b-d9cb-469f-a165-70867728950e",
@@ -58,7 +59,10 @@ describe("splitFrontmatter", () => {
 	});
 
 	it("treats a note without frontmatter as all body", () => {
-		expect(splitFrontmatter("gewoon tekst")).toEqual({ head: "", body: "gewoon tekst" });
+		expect(splitFrontmatter("gewoon tekst")).toEqual({
+			head: "",
+			body: "gewoon tekst",
+		});
 	});
 });
 
@@ -79,6 +83,9 @@ describe("importEditedText (GP_E7_S3)", () => {
 		// The hashes advance: note and device now agree.
 		expect(entry.contentHash).toBe(contentHash(EDITED));
 		expect(entry.textHash).toBe(contentHash(EDITED));
+		// The source fingerprint follows what landed on disk, so the next
+		// reconciliation does not send the import straight back to the device.
+		expect(entry.localHash).toBe(contentHash(written[0]));
 	});
 
 	it("does nothing when the device text matches the note (canonically)", async () => {
@@ -101,7 +108,8 @@ describe("importEditedText (GP_E7_S3)", () => {
 		const note = `---\na: b\n---\n${body}`;
 		const { deps, written } = makeDeps({
 			readNote: () => Promise.resolve(note),
-			readDeviceText: () => Promise.resolve({ markdown: canonicalText(body), missing: false }),
+			readDeviceText: () =>
+				Promise.resolve({ markdown: canonicalText(body), missing: false }),
 		});
 		const entry = {
 			...ENTRY,
@@ -122,7 +130,8 @@ describe("importEditedText (GP_E7_S3)", () => {
 		const oldCanonical = "## Kop\ninhoud";
 		const { deps, written } = makeDeps({
 			readNote: () => Promise.resolve(`---\na: b\n---\n${body}`),
-			readDeviceText: () => Promise.resolve({ markdown: oldCanonical, missing: false }),
+			readDeviceText: () =>
+				Promise.resolve({ markdown: oldCanonical, missing: false }),
 		});
 		const entry = {
 			...ENTRY,
@@ -208,7 +217,8 @@ describe("importEditedText (GP_E7_S3)", () => {
 		// remarkable-id would be a LIVE identity in the vault, hijackable by
 		// the docId lookup once the real note moves. The key is renamed, the
 		// text otherwise untouched.
-		const armed = "---\nremarkable-id: 11111111-2222-3333-4444-555555555555\n---\ntekst";
+		const armed =
+			"---\nremarkable-id: 11111111-2222-3333-4444-555555555555\n---\ntekst";
 		expect(disarmNoteIdentity(armed)).toBe(
 			"---\nremarkable-id-imported: 11111111-2222-3333-4444-555555555555\n---\ntekst",
 		);
@@ -219,10 +229,12 @@ describe("importEditedText (GP_E7_S3)", () => {
 	});
 
 	it("writes the conflict aside with any smuggled identity disarmed", async () => {
-		const armed = "---\nremarkable-id: 11111111-2222-3333-4444-555555555555\n---\nboze tekst";
+		const armed =
+			"---\nremarkable-id: 11111111-2222-3333-4444-555555555555\n---\nboze tekst";
 		const { deps, asides } = makeDeps({
 			readNote: () => Promise.resolve(`---\na: b\n---\nvault ging verder`),
-			readDeviceText: () => Promise.resolve({ markdown: armed, missing: false }),
+			readDeviceText: () =>
+				Promise.resolve({ markdown: armed, missing: false }),
 			chooseOnConflict: () => Promise.resolve("keep" as ConflictChoice),
 		});
 		await importEditedText(ENTRY, deps);
@@ -232,11 +244,13 @@ describe("importEditedText (GP_E7_S3)", () => {
 	});
 
 	it("disarms device text replacing a note that has no frontmatter of its own", async () => {
-		const armed = "---\nremarkable-id: 11111111-2222-3333-4444-555555555555\n---\nnieuw";
+		const armed =
+			"---\nremarkable-id: 11111111-2222-3333-4444-555555555555\n---\nnieuw";
 		const body = "oude tekst zonder frontmatter";
 		const { deps, written } = makeDeps({
 			readNote: () => Promise.resolve(body),
-			readDeviceText: () => Promise.resolve({ markdown: armed, missing: false }),
+			readDeviceText: () =>
+				Promise.resolve({ markdown: armed, missing: false }),
 		});
 		const entry = {
 			...ENTRY,
@@ -268,13 +282,17 @@ describe("importEditedText (GP_E7_S3)", () => {
 			(
 				await importEditedText(ENTRY, {
 					...deps,
-					readDeviceText: () => Promise.resolve({ markdown: "", missing: true }),
+					readDeviceText: () =>
+						Promise.resolve({ markdown: "", missing: true }),
 				})
 			).outcome,
 		).toEqual({ kind: "no-text" });
 		expect(
 			(
-				await importEditedText(ENTRY, { ...deps, readNote: () => Promise.resolve(null) })
+				await importEditedText(ENTRY, {
+					...deps,
+					readNote: () => Promise.resolve(null),
+				})
 			).outcome,
 		).toEqual({ kind: "note-missing" });
 	});

@@ -7,14 +7,20 @@
 export interface MappingEntry {
 	/** Stable document ID from the note's frontmatter. */
 	docId: string;
-	/** Vault path of the source note at upload time (informational only). */
+	/** Vault-relative source path at the last successful reconciliation. */
 	notePath: string;
 	/** Document UUID assigned by the reMarkable cloud on upload. */
 	deviceDocId: string;
+	/** Last observed full device path; null means the remote document is absent. */
+	remotePath?: string | null;
+	/** ISO timestamp of the last successful local/remote reconciliation. */
+	lastSyncedAt?: string;
 	/** ISO timestamp of the last upload. */
 	uploadedAt: string;
 	/** Simple content hash of the uploaded (preprocessed) markdown. */
 	contentHash: string;
+	/** Hash of the source file itself; unaffected by rendering/settings changes. */
+	localHash?: string;
 	/**
 	 * What was delivered (GP_E7_S2): "pdf"/"epub" review copies, or "text" —
 	 * a write-mode notebook whose import is the write-mode route, not the
@@ -78,17 +84,43 @@ export function recordUpload(
 	table: MappingTable,
 	entry: Omit<MappingEntry, "uploadedAt"> & { uploadedAt?: string },
 ): MappingTable {
+	const uploadedAt = entry.uploadedAt ?? new Date().toISOString();
 	return {
 		...table,
 		[entry.docId]: {
 			...entry,
 			importedHash: undefined,
-			uploadedAt: entry.uploadedAt ?? new Date().toISOString(),
+			uploadedAt,
+			lastSyncedAt: entry.lastSyncedAt ?? uploadedAt,
 		},
 	};
 }
 
-export function lookupByDocId(table: MappingTable, docId: string): MappingEntry | undefined {
+/**
+ * Fingerprint to store after the PLUGIN wrote into a tracked note (annotation
+ * block, companion link, imported device text). Without this the next
+ * reconciliation reads the plugin's own write as a user change and sends the
+ * note straight back to the device (sync-back amplification).
+ *
+ * Refreshes only when the note was in sync before the write: a user edit made
+ * since the last send keeps the stale fingerprint, so it is still pushed.
+ * Legacy entries without `localHash` return undefined — inventing a
+ * fingerprint there could hide a real edit; the first upload sets it.
+ */
+export function absorbPluginWrite(
+	entry: Pick<MappingEntry, "localHash">,
+	beforeContent: string,
+	afterContent: string,
+): string | undefined {
+	if (entry.localHash === undefined) return undefined;
+	if (entry.localHash !== contentHash(beforeContent)) return undefined;
+	return contentHash(afterContent);
+}
+
+export function lookupByDocId(
+	table: MappingTable,
+	docId: string,
+): MappingEntry | undefined {
 	return table[docId];
 }
 

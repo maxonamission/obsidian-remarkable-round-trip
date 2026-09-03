@@ -300,6 +300,38 @@ describe("pullAnnotations", () => {
 		expect(table["doc-a"].importedHash).toBe("hash-1");
 	});
 
+	it("stores the writer's refreshed source fingerprint so the plugin's own write is not sent back", async () => {
+		const { deps } = makeDeps({
+			writeAnnotations: () =>
+				Promise.resolve({
+					outcome: { form: "copy" },
+					localHash: "after-write",
+				}),
+		});
+		const table: MappingTable = {
+			"doc-a": { ...TABLE["doc-a"], localHash: "before-write" },
+		};
+		const { results, table: after } = await pullAnnotations(table, deps);
+
+		expect(results[0]).toMatchObject({
+			ok: true,
+			scan: { written: { form: "copy" } },
+		});
+		expect(after["doc-a"].localHash).toBe("after-write");
+		expect(after["doc-a"].importedHash).toBe("hash-1");
+	});
+
+	it("keeps the old fingerprint when the writer reports none (user edit pending)", async () => {
+		const { deps } = makeDeps({
+			writeAnnotations: () => Promise.resolve({ localHash: undefined }),
+		});
+		const table: MappingTable = {
+			"doc-a": { ...TABLE["doc-a"], localHash: "user-edited" },
+		};
+		const { table: after } = await pullAnnotations(table, deps);
+		expect(after["doc-a"].localHash).toBe("user-edited");
+	});
+
 	it("offers the coordinator a safe yield before each document", async () => {
 		let yields = 0;
 		const { deps } = makeDeps({
@@ -401,6 +433,35 @@ describe("pullAnnotations", () => {
 		});
 		expect(updated["doc-a"]).toBeUndefined();
 		expect(updated["doc-b"]).toBeDefined();
+	});
+
+	it("keeps a missing document tracked when mirror reconciliation owns deletion policy", async () => {
+		const table: MappingTable = {
+			...TABLE,
+			"doc-b": {
+				...TABLE["doc-a"],
+				docId: "doc-b",
+				deviceDocId: "device-b",
+				notePath: "b.md",
+			},
+		};
+		const { deps } = makeDeps({
+			preserveMissingMappings: true,
+			listDocumentHashes: () =>
+				Promise.resolve(new Map([["device-b", "hash-2"]])),
+			listDocumentFiles: () =>
+				Promise.resolve([{ id: "device-b.highlights/p1.json", hash: "h" }]),
+		});
+		const { results, table: updated } = await pullAnnotations(table, deps);
+
+		expect(results[0]).toMatchObject({
+			ok: true,
+			skipped: true,
+			skipReason: "not-on-device",
+		});
+		expect(results[0].ok && results[0].removed).toBeUndefined();
+		expect(updated["doc-a"]).toMatchObject({ remotePath: null });
+		expect(updated["doc-a"].lastSyncedAt).toBeTruthy();
 	});
 
 	it("also removes a gone write-mode document's mapping", async () => {
@@ -537,6 +598,47 @@ describe("pullAnnotations", () => {
 });
 
 describe("mergePullMappings", () => {
+	it("retains the fingerprint refreshed by an annotation write", () => {
+		const scope: MappingTable = {
+			"doc-a": { ...TABLE["doc-a"], localHash: "before-write" },
+		};
+		const current: MappingTable = {
+			"doc-a": { ...scope["doc-a"], notePath: "moved/Nota.md" },
+		};
+		const pulled: MappingTable = {
+			"doc-a": {
+				...scope["doc-a"],
+				importedHash: "device-hash",
+				localHash: "after-write",
+			},
+		};
+		expect(mergePullMappings(current, scope, pulled)["doc-a"]).toMatchObject({
+			notePath: "moved/Nota.md",
+			importedHash: "device-hash",
+			localHash: "after-write",
+		});
+	});
+
+	it("does not overwrite a newer source fingerprint while merging pull state", () => {
+		const scope: MappingTable = {
+			"doc-a": { ...TABLE["doc-a"], localHash: "before-write" },
+		};
+		const current: MappingTable = {
+			"doc-a": { ...scope["doc-a"], localHash: "newer-write" },
+		};
+		const pulled: MappingTable = {
+			"doc-a": {
+				...scope["doc-a"],
+				importedHash: "device-hash",
+				localHash: "after-write",
+			},
+		};
+		expect(mergePullMappings(current, scope, pulled)["doc-a"]).toMatchObject({
+			importedHash: "device-hash",
+			localHash: "newer-write",
+		});
+	});
+
 	it("does not overwrite a mapping replaced by a yielded push", () => {
 		const current: MappingTable = {
 			"doc-a": {
@@ -563,6 +665,25 @@ describe("mergePullMappings", () => {
 		expect(mergePullMappings(current, TABLE, pulled)["doc-a"]).toMatchObject({
 			notePath: "moved/Nota.md",
 			importedHash: "device-hash",
+		});
+	});
+
+	it("merges a confirmed missing remote location without replacing local state", () => {
+		const current: MappingTable = {
+			"doc-a": { ...TABLE["doc-a"], notePath: "moved/Nota.md" },
+		};
+		const pulled: MappingTable = {
+			"doc-a": {
+				...TABLE["doc-a"],
+				remotePath: null,
+				lastSyncedAt: "2026-09-03T12:00:00Z",
+			},
+		};
+
+		expect(mergePullMappings(current, TABLE, pulled)["doc-a"]).toMatchObject({
+			notePath: "moved/Nota.md",
+			remotePath: null,
+			lastSyncedAt: "2026-09-03T12:00:00Z",
 		});
 	});
 });

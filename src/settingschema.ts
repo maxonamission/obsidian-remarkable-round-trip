@@ -86,14 +86,20 @@ export function writeSetting<T>(settings: T, key: string, value: unknown): T {
 	const nested = (settings as Record<string, unknown>)[head];
 	return {
 		...settings,
-		[head]: writeSetting(nested as Record<string, unknown>, rest.join("."), value),
+		[head]: writeSetting(
+			nested as Record<string, unknown>,
+			rest.join("."),
+			value,
+		),
 	};
 }
 
 /** The visibility conditions of a setting, normalised to a list. */
 export function conditionsOf(spec: SettingSpec): VisibleWhen[] {
 	if (spec.visibleWhen === undefined) return [];
-	return Array.isArray(spec.visibleWhen) ? spec.visibleWhen : [spec.visibleWhen];
+	return Array.isArray(spec.visibleWhen)
+		? spec.visibleWhen
+		: [spec.visibleWhen];
 }
 
 /**
@@ -101,10 +107,15 @@ export function conditionsOf(spec: SettingSpec): VisibleWhen[] {
  * them so bounds are never redeclared. Throws on a non-slider key — covered
  * by a test so a schema rename cannot silently strand the modal.
  */
-export function sliderSpec(key: string): { min: number; max: number; step: number } {
+export function sliderSpec(key: string): {
+	min: number;
+	max: number;
+	step: number;
+} {
 	for (const section of SETTING_SECTIONS) {
 		for (const item of section.items) {
-			if (item.key === key && item.control.type === "slider") return item.control;
+			if (item.key === key && item.control.type === "slider")
+				return item.control;
 		}
 	}
 	throw new Error(`No slider spec for "${key}" in the settings schema.`);
@@ -112,7 +123,9 @@ export function sliderSpec(key: string): { min: number; max: number; step: numbe
 
 /** Is this setting shown, given the current values? */
 export function isVisible(spec: SettingSpec, settings: unknown): boolean {
-	return conditionsOf(spec).every((c) => readSetting(settings, c.key) === c.equals);
+	return conditionsOf(spec).every(
+		(c) => readSetting(settings, c.key) === c.equals,
+	);
 }
 
 /** Trim a vault or device folder path to the form the plugin stores. */
@@ -149,7 +162,11 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 				key: "customEndpointUrl",
 				name: "rmfakecloud URL",
 				desc: "Base URL of the self-hosted server, e.g. https://rm.example.org",
-				control: { type: "text", placeholder: "https://rm.example.org", sanitise: "url" },
+				control: {
+					type: "text",
+					placeholder: "https://rm.example.org",
+					sanitise: "url",
+				},
 				visibleWhen: { key: "useCustomEndpoint", equals: true },
 			},
 		],
@@ -245,6 +262,30 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 		],
 	},
 	{
+		heading: "Watch folder",
+		items: [
+			{
+				key: "watchFolderEnabled",
+				name: "Auto-send from a vault folder",
+				desc:
+					"Notes created or changed in the folder below are converted and " +
+					"uploaded automatically (after a short quiet period). Unchanged " +
+					"notes are skipped.",
+				control: { type: "toggle" },
+			},
+			{
+				key: "watchFolderPath",
+				name: "Folder to watch",
+				desc: "Vault path, e.g. reMarkable-out",
+				control: {
+					type: "text",
+					placeholder: "reMarkable-out",
+					sanitise: "path",
+				},
+			},
+		],
+	},
+	{
 		heading: "Device organization",
 		items: [
 			{
@@ -261,6 +302,22 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 				name: "Device base folder",
 				desc: "Folder on the reMarkable that holds the mirrored vault tree; empty for the root.",
 				control: { type: "text", placeholder: "Obsidian", sanitise: "path" },
+				visibleWhen: { key: "mirrorFolders", equals: true },
+			},
+			{
+				key: "mirrorMode",
+				name: "Mirror mode",
+				desc:
+					"Strict mirror makes the device base folder match the local synced tree, " +
+					"restoring missing notes and moving extra remote documents to trash. Push " +
+					"mirror accepts remote moves and deletions until the local note changes.",
+				control: {
+					type: "dropdown",
+					options: {
+						strict: "Strict mirror",
+						push: "Push mirror",
+					},
+				},
 				visibleWhen: { key: "mirrorFolders", equals: true },
 			},
 		],
@@ -288,7 +345,11 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 				key: "annotationFolder",
 				name: "Folder for companion notes",
 				desc: "Vault path, e.g. reMarkable-in; empty puts them in the vault root.",
-				control: { type: "text", placeholder: "reMarkable-in", sanitise: "path" },
+				control: {
+					type: "text",
+					placeholder: "reMarkable-in",
+					sanitise: "path",
+				},
 				visibleWhen: { key: "annotationTarget", equals: "companion" },
 			},
 			{
@@ -316,7 +377,11 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 				key: "handwritingFolder",
 				name: "Folder for handwriting images",
 				desc: "Vault path where the rendered pages are stored.",
-				control: { type: "text", placeholder: "reMarkable-in/handwriting", sanitise: "path" },
+				control: {
+					type: "text",
+					placeholder: "reMarkable-in/handwriting",
+					sanitise: "path",
+				},
 				visibleWhen: { key: "importHandwriting", equals: true },
 			},
 		],
@@ -345,26 +410,6 @@ export const SETTING_SECTIONS: SectionSpec[] = [
 				name: "Line under words",
 				desc: "A flat stroke below the letters, clear of the baseline.",
 				control: { type: "dropdown", options: MARK_STYLE_LABELS },
-			},
-		],
-	},
-	{
-		heading: "Watch folder",
-		items: [
-			{
-				key: "watchFolderEnabled",
-				name: "Auto-send from a vault folder",
-				desc:
-					"Notes created or changed in the folder below are converted and " +
-					"uploaded automatically (after a short quiet period). Unchanged " +
-					"notes are skipped.",
-				control: { type: "toggle" },
-			},
-			{
-				key: "watchFolderPath",
-				name: "Folder to watch",
-				desc: "Vault path, e.g. reMarkable-out",
-				control: { type: "text", placeholder: "reMarkable-out", sanitise: "path" },
 			},
 		],
 	},

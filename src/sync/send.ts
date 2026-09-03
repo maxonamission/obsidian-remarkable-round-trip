@@ -66,7 +66,9 @@ export interface SendDeps {
 		notePath: string,
 	) => ReturnType<EmbedResolver>;
 	/** Persist a newly generated docId into the note's frontmatter. */
-	persistDocId: (note: NoteInput, docId: string) => Promise<void>;
+	persistDocId: (note: NoteInput, docId: string) => Promise<string | void>;
+	/** Full device path recorded after a successful upload. */
+	remotePath?: (notePath: string, visibleName: string) => string;
 	/**
 	 * Device collection for this note (folder mirroring, GP_E2_S7); omit for
 	 * root uploads.
@@ -138,6 +140,9 @@ export function notesNeedingUpload(
 		if (typeof note.existingDocId !== "string") return true;
 		const previous = table[note.existingDocId];
 		if (previous === undefined) return true;
+		if (previous.localHash !== undefined) {
+			return previous.localHash !== contentHash(note.content);
+		}
 		const { markdown } = prepareNoteContent(
 			note,
 			format,
@@ -156,7 +161,11 @@ export async function sendNote(
 ): Promise<{ result: SendResult; table: MappingTable }> {
 	try {
 		const { docId, isNew } = ensureDocId(note.existingDocId);
-		if (isNew) await deps.persistDocId(note, docId);
+		let localContent = note.content;
+		if (isNew) {
+			const persisted = await deps.persistDocId(note, docId);
+			if (typeof persisted === "string") localContent = persisted;
+		}
 		const format: SendFormat = deps.format ?? "pdf";
 
 		// Write-mode (F16): the note BODY travels as editable text, exactly as
@@ -172,7 +181,13 @@ export async function sendNote(
 			deps.frontmatterAsTitleBlock,
 		);
 		const hash = contentHash(markdown);
-		if (deps.skipUnchanged && table[docId]?.contentHash === hash) {
+		const previousLocalHash = table[docId]?.localHash;
+		if (
+			deps.skipUnchanged &&
+			(previousLocalHash !== undefined
+				? previousLocalHash === contentHash(note.content)
+				: table[docId]?.contentHash === hash)
+		) {
 			return {
 				result: {
 					ok: true,
@@ -233,7 +248,9 @@ export async function sendNote(
 			docId,
 			notePath: note.path,
 			deviceDocId: upload.deviceDocId,
+			remotePath: deps.remotePath?.(note.path, note.basename) ?? note.basename,
 			contentHash: hash,
+			localHash: contentHash(localContent),
 			// The import routes branch on this: annotation pull skips "text"
 			// documents (their import is the write-mode route, GP_E7_S3).
 			format,
@@ -274,14 +291,23 @@ export async function sendBatch(
 	table: MappingTable,
 	deps: SendDeps,
 	onProgress?: (done: number, total: number, current: SendResult) => void,
+	onCheckpoint?: (table: MappingTable) => Promise<void>,
 ): Promise<{ results: SendResult[]; table: MappingTable }> {
 	const results: SendResult[] = [];
 	let current = table;
+	let successfulSinceCheckpoint = 0;
 	for (const note of notes) {
 		const { result, table: updated } = await sendNote(note, current, deps);
 		current = updated;
 		results.push(result);
 		onProgress?.(results.length, notes.length, result);
+		if (notes.length > 20 && result.ok) {
+			successfulSinceCheckpoint += 1;
+			if (successfulSinceCheckpoint === 20) {
+				await onCheckpoint?.(current);
+				successfulSinceCheckpoint = 0;
+			}
+		}
 	}
 	return { results, table: current };
 }

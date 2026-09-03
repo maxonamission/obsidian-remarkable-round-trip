@@ -44,7 +44,11 @@ import {
 	rmfakecloudEndpoints,
 } from "./transport/cloud";
 import { installFetchShim, ShimTransport } from "./transport/fetchshim";
-import { MirrorTransport, toTransportError } from "./transport/mirror";
+import {
+	MirrorTransport,
+	RemoteDocumentState,
+	toTransportError,
+} from "./transport/mirror";
 import {
 	describeByteCompat,
 	describeDiagnosis,
@@ -58,6 +62,7 @@ import {
 	SendFormat,
 	SendResult,
 	notesNeedingUpload,
+	prepareNoteContent,
 	sendBatch,
 } from "./sync/send";
 import {
@@ -73,7 +78,7 @@ import { renderImportReport } from "./incoming/report";
 import { paintPlan, planRender } from "./incoming/strokerender";
 import { parseBlocks } from "./convert/mdblocks";
 import { PdfLayout, renderPdf } from "./convert/pdf";
-import { MappingEntry, contentHash } from "./id/mapping";
+import { MappingEntry, absorbPluginWrite, contentHash } from "./id/mapping";
 import { preprocess } from "./preprocess/preprocess";
 import {
 	AnnotationOutcome,
@@ -81,8 +86,7 @@ import {
 	renderAnnotationBlock,
 	upsertAnnotationBlock,
 } from "./incoming/annotationnote";
-import { WatchQueue } from "./sync/watcher";
-import { PullQueue, PushQueue, SyncQueueCoordinator } from "./sync/queues";
+import { SyncManager } from "./sync/manager";
 import {
 	RawSyncApi,
 	readTextNotebook,
@@ -117,11 +121,11 @@ const RAW_HOST = "https://eu.tectonic.remarkable.com";
 
 export default class RoundTripPlugin extends Plugin {
 	settings: RoundTripSettings = { ...DEFAULT_SETTINGS };
-	private watchQueue: WatchQueue | null = null;
-	private readonly syncCoordinator = new SyncQueueCoordinator();
-	private readonly pushQueue = new PushQueue(this.syncCoordinator);
-	private readonly pullQueue = new PullQueue(this.syncCoordinator);
+	private readonly syncManager = new SyncManager();
+	private watchConfiguration = "";
+	private mirrorConfiguration = "";
 	private progressStatus: ProgressStatus | null = null;
+	private metadataReady = false;
 	private fetchShim: { restore: () => void } | null = null;
 	/** Unknown data.json keys, preserved across saves (see extrasFrom). */
 	private extraData: Record<string, unknown> = {};
@@ -136,6 +140,14 @@ export default class RoundTripPlugin extends Plugin {
 	};
 
 	async onload(): Promise<void> {
+		const loadedAfterLayout = this.app.workspace.layoutReady;
+		const metadataResolved = new Promise<void>((resolve) => {
+			const ref = this.app.metadataCache.on("resolved", () => {
+				this.app.metadataCache.offref(ref);
+				resolve();
+			});
+			this.registerEvent(ref);
+		});
 		await this.loadSettings();
 		// Before anything can call rmapi-js: it uses the ES2025 bytes methods
 		// directly, which an older Obsidian installer's Electron may lack
@@ -145,36 +157,52 @@ export default class RoundTripPlugin extends Plugin {
 		if (!Platform.isMobile) {
 			this.progressStatus = new ProgressStatus(this.addStatusBarItem());
 		}
+		this.mirrorConfiguration = this.currentMirrorConfiguration();
 		this.addSettingTab(new RoundTripSettingTab(this.app, this));
-		this.setupWatcher();
 		this.setupFetchShim();
 
 		// Subtle "what's changed" notice (GP_E5_S3) — deferred to layout-ready
 		// so it never adds to startup noise.
 		this.app.workspace.onLayoutReady(() => {
 			void this.checkForUpdateNotice();
+			void this.startInitialSync(loadedAfterLayout, metadataResolved);
 		});
 
 		this.registerEvent(
 			this.app.vault.on("modify", (file) =>
-				this.watchQueue?.noteChanged(file.path),
+				this.syncManager.noteChanged(file.path),
 			),
 		);
 		this.registerEvent(
 			this.app.vault.on("create", (file) =>
-				this.watchQueue?.noteChanged(file.path),
+				this.syncManager.noteChanged(file.path),
 			),
 		);
 		this.registerEvent(
 			this.app.vault.on("rename", (file, oldPath) => {
-				this.watchQueue?.noteRemoved(oldPath);
-				this.watchQueue?.noteChanged(file.path);
+				if (file instanceof TFile) {
+					this.syncManager.noteRenamed(oldPath, file.path);
+				} else if (file instanceof TFolder) {
+					for (const child of collectMarkdownFiles(file)) {
+						const oldChildPath = `${oldPath}${child.path.slice(file.path.length)}`;
+						this.syncManager.noteRenamed(oldChildPath, child.path);
+					}
+				}
 			}),
 		);
 		this.registerEvent(
-			this.app.vault.on("delete", (file) =>
-				this.watchQueue?.noteRemoved(file.path),
-			),
+			this.app.vault.on("delete", (file) => {
+				if (file instanceof TFile) {
+					this.syncManager.noteRemoved(file.path);
+				} else {
+					const prefix = file.path === "/" ? "" : `${file.path}/`;
+					this.syncManager.notesRemoved(
+						Object.values(this.settings.mappings)
+							.map((entry) => entry.notePath)
+							.filter((path) => path.startsWith(prefix)),
+					);
+				}
+			}),
 		);
 
 		this.addRibbonIcon("tablet", "reMarkable sync", (event) => {
@@ -461,10 +489,7 @@ export default class RoundTripPlugin extends Plugin {
 				mappings: this.settings.mappings,
 				localPaths,
 				watchPaths,
-				live: {
-					...this.syncCoordinator.status(),
-					pendingChanges: this.watchQueue?.status().pendingChanges ?? 0,
-				},
+				live: this.syncManager.status(),
 			}),
 		}).open();
 	}
@@ -493,15 +518,17 @@ export default class RoundTripPlugin extends Plugin {
 	 * edit (reviewvondst 0.35.1).
 	 */
 	async onExternalSettingsChange(): Promise<void> {
-		await this.syncCoordinator.enqueue("pull", async () => {
+		await this.syncManager.runExclusive(async () => {
 			await this.loadSettings();
+			if (this.invalidateMirrorCacheIfNeeded()) await this.persistSettings();
 			this.setupWatcher();
 			this.setupFetchShim();
 		});
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.syncCoordinator.enqueue("pull", async () => {
+		await this.syncManager.runExclusive(async () => {
+			this.invalidateMirrorCacheIfNeeded();
 			await this.persistSettings();
 			this.setupWatcher();
 			this.setupFetchShim();
@@ -513,10 +540,36 @@ export default class RoundTripPlugin extends Plugin {
 		await this.saveData(storedFrom(this.settings, this.extraData));
 	}
 
+	private async startInitialSync(
+		loadedAfterLayout: boolean,
+		metadataResolved: Promise<void>,
+	): Promise<void> {
+		if (!loadedAfterLayout) await metadataResolved;
+		this.metadataReady = true;
+		this.setupWatcher(true);
+	}
+
+	private currentMirrorConfiguration(): string {
+		return JSON.stringify({
+			mirrorFolders: this.settings.mirrorFolders,
+			mirrorMode: this.settings.mirrorMode,
+			deviceBaseFolder: this.settings.deviceBaseFolder,
+		});
+	}
+
+	private invalidateMirrorCacheIfNeeded(): boolean {
+		const configuration = this.currentMirrorConfiguration();
+		if (configuration === this.mirrorConfiguration) return false;
+		this.mirrorConfiguration = configuration;
+		this.settings.mappings = this.syncManager.invalidateMirrorCache(
+			this.settings.mappings,
+		);
+		this.settings.remoteRootHash = "";
+		return true;
+	}
+
 	onunload(): void {
-		this.watchQueue?.dispose();
-		this.watchQueue = null;
-		this.syncCoordinator.dispose();
+		this.syncManager.dispose();
 		this.fetchShim?.restore();
 		this.fetchShim = null;
 	}
@@ -582,27 +635,83 @@ export default class RoundTripPlugin extends Plugin {
 	}
 
 	/** (Re)build the watch queue from the current settings (F6). */
-	private setupWatcher(): void {
-		this.watchQueue?.dispose();
-		this.watchQueue = null;
-		if (
-			!this.settings.watchFolderEnabled ||
-			this.settings.watchFolderPath === ""
-		) {
+	private setupWatcher(syncAll = false): void {
+		if (!this.metadataReady) return;
+		const configuration = JSON.stringify({
+			enabled: this.settings.watchFolderEnabled,
+			folder: this.settings.watchFolderPath,
+			mirrorFolders: this.settings.mirrorFolders,
+			mirrorMode: this.settings.mirrorMode,
+			deviceBaseFolder: this.settings.deviceBaseFolder,
+			paired: this.settings.deviceToken !== "",
+		});
+		const configurationChanged = configuration !== this.watchConfiguration;
+		const shouldSyncAll = syncAll || configurationChanged;
+		if (!syncAll && !configurationChanged) return;
+		this.watchConfiguration = configuration;
+		const watchesFolder =
+			this.settings.watchFolderEnabled && this.settings.watchFolderPath !== "";
+		if (!watchesFolder && !this.settings.mirrorFolders) {
+			this.syncManager.configureWatcher(null);
 			return;
 		}
-		this.watchQueue = new WatchQueue({
-			folder: this.settings.watchFolderPath,
+		this.syncManager.configureWatcher({
+			folder: watchesFolder ? this.settings.watchFolderPath : "",
+			isTracked: (path) =>
+				this.settings.mirrorFolders &&
+				Object.values(this.settings.mappings).some(
+					(entry) => entry.notePath === path,
+				),
 			debounceMs: WATCH_DEBOUNCE_MS,
 			setTimer: (fn, ms) => window.setTimeout(fn, ms),
 			clearTimer: (id) => window.clearTimeout(id),
-			onReady: (paths) => {
-				const files = paths
+			onReady: ({ changed, removed }) => {
+				const files = changed
 					.map((path) => this.app.vault.getFileByPath(path))
 					.filter((file): file is TFile => file instanceof TFile);
-				if (files.length > 0) void this.sendFiles(files, { auto: true });
+				if (files.length > 0 || removed.length > 0) {
+					void this.sendFiles(files, { auto: true, removedPaths: removed });
+				}
 			},
 		});
+		if (shouldSyncAll && this.settings.deviceToken !== "") {
+			const changed = new Set<string>();
+			const removed: string[] = [];
+			if (watchesFolder) {
+				const folder = this.app.vault.getFolderByPath(
+					this.settings.watchFolderPath,
+				);
+				if (folder) {
+					for (const file of collectMarkdownFiles(folder))
+						changed.add(file.path);
+				}
+			}
+			if (this.settings.mirrorFolders) {
+				for (const entry of Object.values(this.settings.mappings)) {
+					const file = this.findTrackedFile(entry);
+					if (file) changed.add(file.path);
+					else removed.push(entry.notePath);
+				}
+			}
+			this.syncManager.notesChanged([...changed]);
+			this.syncManager.notesRemoved(removed);
+		}
+	}
+
+	private findTrackedFile(entry: MappingEntry): TFile | null {
+		const direct = this.app.vault.getFileByPath(entry.notePath);
+		if (direct) return direct;
+		return (
+			this.app.vault
+				.getMarkdownFiles()
+				.find(
+					(file) =>
+						getFrontmatterValue(
+							this.app.metadataCache.getFileCache(file)?.frontmatter,
+							DOCID_FRONTMATTER_KEY,
+						) === entry.docId,
+				) ?? null
+		);
 	}
 
 	createClient(): RemarkableCloudClient {
@@ -683,6 +792,7 @@ export default class RoundTripPlugin extends Plugin {
 		files: TFile[],
 		options: {
 			auto?: boolean;
+			removedPaths?: string[];
 			structureRoot?: string;
 			/** One-send override (GP_E6_S10); omitted = the stored settings. */
 			layout?: ReturnType<typeof sendLayout>;
@@ -694,7 +804,8 @@ export default class RoundTripPlugin extends Plugin {
 			format?: SendFormat;
 		} = {},
 	): Promise<void> {
-		if (files.length === 0) {
+		const removedPaths = options.removedPaths ?? [];
+		if (files.length === 0 && removedPaths.length === 0) {
 			notify("No markdown notes to send.");
 			return;
 		}
@@ -706,27 +817,40 @@ export default class RoundTripPlugin extends Plugin {
 			return;
 		}
 		const format: SendFormat = options.format ?? this.settings.outputFormat;
+		const structureOnly =
+			!this.settings.mirrorFolders && options.structureRoot !== undefined;
+		const mirrorFoldersActive = this.settings.mirrorFolders || structureOnly;
 		const notes: NoteInput[] = [];
 		const embedMaps = new Map<string, Map<string, EmbedContent>>();
+		const localModifiedAt = new Map<string, number>();
 		try {
 			for (const file of files) {
+				const frontmatterValue = getFrontmatterValue(
+					this.app.metadataCache.getFileCache(file)?.frontmatter,
+					DOCID_FRONTMATTER_KEY,
+				);
+				const frontmatterDocId =
+					typeof frontmatterValue === "string" ? frontmatterValue : undefined;
+				const tracked = this.syncManager.findTrackedMapping(
+					this.settings.mappings,
+					file.path,
+					frontmatterDocId,
+				);
 				notes.push({
 					path: file.path,
 					basename: file.basename,
 					content: await this.app.vault.cachedRead(file),
-					existingDocId: getFrontmatterValue(
-						this.app.metadataCache.getFileCache(file)?.frontmatter,
-						DOCID_FRONTMATTER_KEY,
-					),
+					existingDocId: tracked?.docId ?? frontmatterDocId,
 				});
 				embedMaps.set(file.path, await this.buildEmbedMap(file));
+				localModifiedAt.set(file.path, file.stat.mtime);
 			}
 		} catch (error) {
 			notify(error instanceof Error ? error.message : String(error), 10000);
 			return;
 		}
 		let queuedNotes = notes;
-		if (options.auto) {
+		if (options.auto && !mirrorFoldersActive) {
 			try {
 				queuedNotes = notesNeedingUpload(
 					notes,
@@ -741,14 +865,26 @@ export default class RoundTripPlugin extends Plugin {
 				return;
 			}
 		}
-		const queuedPaths = new Set(queuedNotes.map((note) => note.path));
-		const queuedFiles = files.filter((file) => queuedPaths.has(file.path));
-		const structureOnly =
-			!this.settings.mirrorFolders && options.structureRoot !== undefined;
-		const mirrorFoldersActive = this.settings.mirrorFolders || structureOnly;
 		let mirror: MirrorTransport | null = null;
 		let rawApi: RawSyncApi | null = null;
+		let uploadNotes = queuedNotes;
 		const parentIds = new Map<string, string>();
+		const trackingUpdates = new Map<string, MappingEntry>();
+		const removals: MappingEntry[] = [];
+		let strictExtras: RemoteDocumentState[] = [];
+		let progress: ProgressHandle | null = null;
+		let observedRootHash: string | null = null;
+		let remoteTreeUnchanged = false;
+		const relocations: {
+			docId: string;
+			note: NoteInput;
+			mapping: MappingEntry;
+			remote: RemoteDocumentState;
+			target: string;
+			expectedRemotePath: string;
+			localHash: string;
+			deliveredHash: string;
+		}[] = [];
 		const targetFolder = (notePath: string): string => {
 			const dir = notePath.split("/").slice(0, -1).join("/");
 			return structureOnly
@@ -756,17 +892,37 @@ export default class RoundTripPlugin extends Plugin {
 				: dir;
 		};
 
-		await this.pushQueue
-			.enqueue({
+		await this.syncManager
+			.enqueuePush({
 				ensureFolders: async () => {
-					if (queuedFiles.length === 0) return;
-					if (!mirrorFoldersActive && format !== "text") return;
+					if (options.auto && mirrorFoldersActive && queuedNotes.length > 0) {
+						progress = this.progress(
+							`Checking ${queuedNotes.length} notes for local or device changes…`,
+						);
+					}
+					for (const entry of Object.values(this.settings.mappings)) {
+						if (removedPaths.includes(entry.notePath)) removals.push(entry);
+					}
+					if (queuedNotes.length === 0 && removals.length === 0) {
+						return;
+					}
+					if (
+						!mirrorFoldersActive &&
+						format !== "text" &&
+						removals.length === 0
+					) {
+						return;
+					}
 					try {
 						const api = await remarkable(
 							this.settings.deviceToken,
 							this.rmapiOptions(),
 						);
 						rawApi = api.raw;
+						[observedRootHash] = await rawApi.getRootHash();
+						remoteTreeUnchanged =
+							this.settings.remoteRootHash !== "" &&
+							this.settings.remoteRootHash === observedRootHash;
 						mirror = new MirrorTransport(
 							api,
 							mirrorFoldersActive && !structureOnly
@@ -774,16 +930,127 @@ export default class RoundTripPlugin extends Plugin {
 								: "",
 						);
 						if (!mirrorFoldersActive) return;
+						const preparedMirror = mirror;
+						if (preparedMirror === null)
+							throw new Error("Mirror session was not prepared.");
+
+						if (options.auto) {
+							const plan = await this.syncManager.planMirrorBatch(
+								this.settings.mirrorMode,
+								queuedNotes.map((note) => {
+									const docId =
+										typeof note.existingDocId === "string"
+											? note.existingDocId
+											: undefined;
+									const { markdown } = prepareNoteContent(
+										note,
+										format,
+										(linkpath, notePath) =>
+											embedMaps.get(notePath)?.get(linkpath) ?? {
+												kind: "missing",
+											},
+										this.settings.frontmatterAsTitleBlock,
+									);
+									return {
+										value: note,
+										localPath: note.path,
+										localHash: contentHash(note.content),
+										legacyContentHash: contentHash(markdown),
+										localModifiedAt: localModifiedAt.get(note.path) ?? 0,
+										expectedRemotePath: preparedMirror.devicePath(
+											targetFolder(note.path),
+											note.basename,
+										),
+										tracked:
+											docId === undefined
+												? undefined
+												: this.settings.mappings[docId],
+									};
+								}),
+								async (tracked) => {
+									const remote = await preparedMirror.documentState(
+										tracked.deviceDocId,
+									);
+									return remote
+										? { ...remote, trashed: remote.parentId === "trash" }
+										: null;
+								},
+								{ remoteTreeUnchanged },
+							);
+							uploadNotes = plan.uploads;
+							for (const { candidate, error } of plan.held) {
+								console.warn(
+									`reMarkable Round-Trip: "${candidate.localPath}" left untouched this run — ${error instanceof Error ? error.message : String(error)}`,
+								);
+							}
+							for (const update of plan.trackingUpdates) {
+								trackingUpdates.set(update.docId, update);
+							}
+							for (const relocation of plan.relocations) {
+								const note = relocation.candidate.value;
+								relocations.push({
+									docId: relocation.tracked.docId,
+									note,
+									mapping: relocation.tracked,
+									remote: relocation.remote,
+									target: targetFolder(note.path),
+									expectedRemotePath: relocation.candidate.expectedRemotePath,
+									localHash: relocation.candidate.localHash,
+									deliveredHash: relocation.candidate.legacyContentHash,
+								});
+							}
+						}
+
+						if (
+							this.settings.mirrorFolders &&
+							this.settings.mirrorMode === "strict" &&
+							!structureOnly &&
+							!remoteTreeUnchanged
+						) {
+							const expectedDeviceIds = new Set<string>();
+							for (const entry of Object.values(this.settings.mappings)) {
+								if (this.findTrackedFile(entry)) {
+									expectedDeviceIds.add(entry.deviceDocId);
+								}
+							}
+							for (const relocation of relocations) {
+								expectedDeviceIds.add(relocation.mapping.deviceDocId);
+							}
+							strictExtras = this.syncManager.findExtraneousRemoteDocuments(
+								await preparedMirror.documentsInMirrorRoot(),
+								expectedDeviceIds,
+							);
+						}
+						if (options.auto) {
+							if (uploadNotes.length > 0) {
+								progress?.setMessage(
+									`Uploading changed or missing notes 0/${uploadNotes.length}…`,
+									{ done: 0, total: uploadNotes.length },
+								);
+							} else if (
+								relocations.length > 0 ||
+								removals.length > 0 ||
+								strictExtras.length > 0
+							) {
+								progress?.setMessage("Applying device mirror changes…");
+							}
+						}
 
 						const targets = [
-							...new Set(queuedFiles.map((file) => targetFolder(file.path))),
+							...new Set([
+								...uploadNotes.map((note) => targetFolder(note.path)),
+								...relocations.map((entry) => entry.target),
+							]),
 						].sort(
 							(a, b) =>
 								a.split("/").filter(Boolean).length -
 									b.split("/").filter(Boolean).length || a.localeCompare(b),
 						);
 						for (const target of targets) {
-							parentIds.set(target, await mirror.ensureFolderPath(target));
+							parentIds.set(
+								target,
+								await preparedMirror.ensureFolderPath(target),
+							);
 						}
 					} catch (error) {
 						console.error(
@@ -794,17 +1061,86 @@ export default class RoundTripPlugin extends Plugin {
 					}
 				},
 				uploadFiles: async () => {
-					if (queuedNotes.length === 0) return;
-					const notice = this.progress(
-						`Sending 0/${queuedNotes.length} to reMarkable…`,
-						{ done: 0, total: queuedNotes.length },
-					);
+					if (
+						uploadNotes.length === 0 &&
+						relocations.length === 0 &&
+						removals.length === 0 &&
+						strictExtras.length === 0 &&
+						trackingUpdates.size === 0
+					) {
+						return;
+					}
+					const notice =
+						progress ??
+						(uploadNotes.length > 0
+							? this.progress(
+									`Sending 0/${uploadNotes.length} to reMarkable…`,
+									{
+										done: 0,
+										total: uploadNotes.length,
+									},
+								)
+							: null);
 					try {
 						const activeMirror = mirror;
 						const activeRaw = rawApi;
-						const { results, table } = await sendBatch(
-							queuedNotes,
-							this.settings.mappings,
+						let table = { ...this.settings.mappings };
+						if (strictExtras.length > 0 && !activeMirror) {
+							throw new Error("Strict mirror cleanup was not prepared.");
+						}
+						const trashIds = new Set(
+							strictExtras.map((entry) => entry.deviceDocId),
+						);
+						for (const removal of removals) trashIds.add(removal.deviceDocId);
+						for (const deviceDocId of trashIds) {
+							await activeMirror?.trashPrevious(deviceDocId);
+						}
+						for (const [docId, update] of trackingUpdates) {
+							if (table[docId]?.deviceDocId === update.deviceDocId) {
+								table[docId] = update;
+							}
+						}
+						for (const relocation of relocations) {
+							const parentId = parentIds.get(relocation.target);
+							if (!activeMirror || parentId === undefined) {
+								throw new Error(
+									`Device folder was not prepared for "${relocation.note.path}".`,
+								);
+							}
+							await activeMirror.relocateDocument(
+								relocation.remote,
+								parentId,
+								relocation.note.basename,
+							);
+							const current = table[relocation.docId];
+							if (current?.deviceDocId === relocation.mapping.deviceDocId) {
+								table[relocation.docId] = {
+									...current,
+									notePath: relocation.note.path,
+									contentHash: relocation.deliveredHash,
+									localHash: relocation.localHash,
+									remotePath: relocation.expectedRemotePath,
+									lastSyncedAt: new Date().toISOString(),
+								};
+							}
+						}
+						for (const removal of removals) {
+							if (!activeMirror) {
+								throw new Error(
+									`Could not remove remote copy of "${removal.notePath}".`,
+								);
+							}
+							if (table[removal.docId]?.notePath === removal.notePath) {
+								delete table[removal.docId];
+							}
+						}
+						if (uploadNotes.length > 0 && trackingUpdates.size > 0) {
+							this.settings.mappings = table;
+							await this.persistSettings();
+						}
+						const sent = await sendBatch(
+							uploadNotes,
+							table,
 							{
 								client: {
 									upload: (fileName, bytes, uploadOptions) =>
@@ -825,6 +1161,13 @@ export default class RoundTripPlugin extends Plugin {
 										: undefined,
 								},
 								format,
+								remotePath: (notePath, visibleName) =>
+									activeMirror
+										? activeMirror.devicePath(
+												targetFolder(notePath),
+												visibleName,
+											)
+										: visibleName,
 								resolveParent:
 									activeMirror && mirrorFoldersActive
 										? (notePath) => {
@@ -851,32 +1194,59 @@ export default class RoundTripPlugin extends Plugin {
 										(fm as Record<string, unknown>)[DOCID_FRONTMATTER_KEY] =
 											docId;
 									});
+									return this.app.vault.cachedRead(file);
 								},
 								layout: options.layout ?? sendLayout(this.settings),
 								frontmatterAsTitleBlock: this.settings.frontmatterAsTitleBlock,
-								skipUnchanged: options.auto === true,
+								skipUnchanged: options.auto === true && !mirrorFoldersActive,
 							},
 							(done, total) =>
-								updateProgress(
-									notice,
-									`Sending ${done}/${total} to reMarkable…`,
+								notice?.setMessage(
+									options.auto
+										? `Uploading changed or missing notes ${done}/${total}…`
+										: `Sending ${done}/${total} to reMarkable…`,
 									{ done, total },
 								),
+							async (checkpoint) => {
+								this.settings.mappings = checkpoint;
+								await this.persistSettings();
+							},
 						);
 
+						table = sent.table;
 						this.settings.mappings = table;
+						if (this.settings.mirrorFolders) {
+							const failed = sent.results.some((result) => !result.ok);
+							const wroteRemote =
+								trashIds.size > 0 ||
+								relocations.length > 0 ||
+								uploadNotes.length > 0;
+							if (failed) {
+								this.settings.remoteRootHash = "";
+							} else if (!wroteRemote && observedRootHash !== null) {
+								this.settings.remoteRootHash = observedRootHash;
+							} else if (activeRaw) {
+								try {
+									[this.settings.remoteRootHash] =
+										await activeRaw.getRootHash();
+								} catch {
+									this.settings.remoteRootHash = "";
+								}
+							}
+						}
 						await this.persistSettings();
-						reportResults(results, {
+						reportResults(sent.results, {
 							quietWhenAllSkipped: options.auto === true,
 						});
 					} finally {
-						notice.hide();
+						notice?.hide();
 					}
 				},
 			})
 			.catch((error: unknown) => {
+				progress?.hide();
 				const message = error instanceof Error ? error.message : String(error);
-				notify(`${message} No notes were uploaded.`, 10000);
+				notify(`${message} Sync stopped.`, 10000);
 			});
 	}
 
@@ -899,7 +1269,7 @@ export default class RoundTripPlugin extends Plugin {
 	 * invoked this on IS the target, so a moved note needs no path chase.
 	 */
 	private importEditedTextFor(file: TFile): Promise<void> {
-		return this.pullQueue.enqueue(`text:${file.path}`, () =>
+		return this.syncManager.enqueuePull(`text:${file.path}`, () =>
 			this.runImportEditedTextFor(file),
 		);
 	}
@@ -1091,7 +1461,7 @@ export default class RoundTripPlugin extends Plugin {
 	 * lives in the cloud or on the tablet, without touching anything.
 	 */
 	checkCloudStatus(): Promise<void> {
-		return this.pullQueue.enqueue("cloud-status", () =>
+		return this.syncManager.enqueuePull("cloud-status", () =>
 			this.runCheckCloudStatus(),
 		);
 	}
@@ -1157,7 +1527,9 @@ export default class RoundTripPlugin extends Plugin {
 		options: { force?: boolean; only?: TFile } = {},
 	): Promise<void> {
 		const key = `annotations:${options.force === true ? "force" : "changed"}:${options.only?.path ?? "all"}`;
-		return this.pullQueue.enqueue(key, () => this.runPullAnnotations(options));
+		return this.syncManager.enqueuePull(key, () =>
+			this.runPullAnnotations(options),
+		);
 	}
 
 	private async runPullAnnotations(
@@ -1204,10 +1576,11 @@ export default class RoundTripPlugin extends Plugin {
 				scope,
 				{
 					force: options.force,
-					yieldToPush: () => this.syncCoordinator.yieldToPush(),
+					yieldToPush: () => this.syncManager.yieldToPush(),
 					isCurrent: (entry) =>
 						this.settings.mappings[entry.docId]?.deviceDocId ===
 						entry.deviceDocId,
+					preserveMissingMappings: this.settings.mirrorFolders,
 					log: (line) => log.push(line),
 					listDocumentHashes: async () => {
 						const items = await api.listIds(true);
@@ -1232,16 +1605,30 @@ export default class RoundTripPlugin extends Plugin {
 						: undefined,
 					loadLayout: (entry) => this.reproduceLayout(entry),
 					checkSource: (entry) => this.checkSource(entry),
-					writeAnnotations: async (entry, highlights, marks, sourceState) =>
-						this.writeAnnotations(
+					writeAnnotations: async (entry, highlights, marks, sourceState) => {
+						// The source note may receive the annotation block itself or a
+						// companion link in its frontmatter. Either is a plugin write,
+						// and its fingerprint must follow it (sync-back amplification).
+						const source = this.resolveNote(entry);
+						const before = source ? await this.app.vault.read(source) : null;
+						const outcome = await this.writeAnnotations(
 							entry.notePath,
 							highlights,
 							marks,
 							await this.reproduceLayout(entry).catch(() => null),
 							await this.readSourceBody(entry).catch(() => null),
-							this.resolveNote(entry)?.path ?? entry.notePath,
+							source?.path ?? entry.notePath,
 							sourceState,
-						),
+						);
+						const after = source ? await this.app.vault.read(source) : null;
+						return {
+							outcome,
+							localHash:
+								before !== null && after !== null
+									? absorbPluginWrite(entry, before, after)
+									: undefined,
+						};
+					},
 				},
 				(done, total) =>
 					updateProgress(notice, `Checking ${done}/${total} for annotations…`, {
