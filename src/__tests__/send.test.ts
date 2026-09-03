@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { NoteInput, SendDeps, sendBatch, sendNote } from "../sync/send";
+import {
+	NoteInput,
+	SendDeps,
+	notesNeedingUpload,
+	prepareNoteContent,
+	sendBatch,
+	sendNote,
+} from "../sync/send";
 import { DOCID_SUBJECT_PREFIX } from "../convert/pdf";
 import { isValidDocId } from "../id/docid";
+import { MappingTable, contentHash } from "../id/mapping";
 
 function makeDeps(overrides: Partial<SendDeps> = {}) {
 	const uploads: { fileName: string; bytes: Uint8Array }[] = [];
@@ -30,6 +38,37 @@ const NOTE: NoteInput = {
 	content: "---\ntitle: X\n---\nInhoud van de notitie.",
 };
 
+describe("notesNeedingUpload", () => {
+	it("filters unchanged automatic notes before cloud work is queued", () => {
+		const docId = "0f8fad5b-d9cb-469f-a165-70867728950e";
+		const note = { ...NOTE, existingDocId: docId };
+		const { markdown } = prepareNoteContent(note, "pdf", () => ({
+			kind: "missing",
+		}));
+		const table: MappingTable = {
+			[docId]: {
+				docId,
+				notePath: note.path,
+				deviceDocId: "device-a",
+				uploadedAt: "2026-09-03T00:00:00Z",
+				contentHash: contentHash(markdown),
+			},
+		};
+
+		expect(
+			notesNeedingUpload([note], table, "pdf", () => ({ kind: "missing" })),
+		).toEqual([]);
+		expect(
+			notesNeedingUpload(
+				[{ ...note, content: `${note.content}\nChanged.` }],
+				table,
+				"pdf",
+				() => ({ kind: "missing" }),
+			),
+		).toHaveLength(1);
+	});
+});
+
 describe("sendNote", () => {
 	it("generates and persists a docId, uploads, and records the mapping", async () => {
 		const { deps, uploads, persisted } = makeDeps();
@@ -51,7 +90,11 @@ describe("sendNote", () => {
 	it("reuses an existing docId without persisting again", async () => {
 		const { deps, persisted } = makeDeps();
 		const existing = "0f8fad5b-d9cb-469f-a165-70867728950e";
-		const { result } = await sendNote({ ...NOTE, existingDocId: existing }, {}, deps);
+		const { result } = await sendNote(
+			{ ...NOTE, existingDocId: existing },
+			{},
+			deps,
+		);
 		if (!result.ok) throw new Error("unexpected failure");
 		expect(result.docId).toBe(existing);
 		expect(persisted).toHaveLength(0);
@@ -119,7 +162,11 @@ describe("sendNote output format", () => {
 		// metadata (the note keeps its own on import) and an inlined embed
 		// could never route an edit back to the right file — so the body
 		// travels exactly as it is on disk.
-		const texts: { visibleName: string; markdown: string; parentId?: string }[] = [];
+		const texts: {
+			visibleName: string;
+			markdown: string;
+			parentId?: string;
+		}[] = [];
 		const { deps } = makeDeps({ format: "text" });
 		deps.client.uploadText = (visibleName, markdown, uploadOptions) => {
 			texts.push({ visibleName, markdown, parentId: uploadOptions.parentId });
@@ -168,7 +215,10 @@ describe("sendNote output format", () => {
 			texts.push(markdown);
 			return Promise.resolve({ deviceDocId: "device-text-1" });
 		};
-		const note = { ...NOTE, existingDocId: "0f8fad5b-d9cb-469f-a165-70867728950e" };
+		const note = {
+			...NOTE,
+			existingDocId: "0f8fad5b-d9cb-469f-a165-70867728950e",
+		};
 		const first = await sendNote(note, {}, deps);
 		if (!first.result.ok) throw new Error("unexpected failure");
 		const second = await sendNote(note, first.table, deps);
@@ -216,6 +266,19 @@ describe("sendNote skipUnchanged", () => {
 });
 
 describe("sendNote folder mirroring hooks", () => {
+	it("does not upload when the destination folder was not resolved", async () => {
+		const { deps, uploads } = makeDeps({
+			resolveParent: () => Promise.reject(new Error("folder creation failed")),
+		});
+		const { result } = await sendNote(NOTE, {}, deps);
+
+		expect(result).toMatchObject({
+			ok: false,
+			error: "folder creation failed",
+		});
+		expect(uploads).toHaveLength(0);
+	});
+
 	it("uploads into the resolved parent and retires the previous device copy", async () => {
 		const trashed: string[] = [];
 		const parents: string[] = [];

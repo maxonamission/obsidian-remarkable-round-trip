@@ -43,7 +43,9 @@ export function renderImportReport(input: ImportReportInput): string {
 						: `– ${result.notePath}: no longer on the reMarkable account`
 					: result.skipReason === "write-mode"
 						? `– ${result.notePath}: sent as editable text — the annotation import does not apply`
-						: `– ${result.notePath}: unchanged since the last import`,
+						: result.skipReason === "superseded"
+							? `– ${result.notePath}: replaced by a newer push while importing — stale device copy skipped`
+							: `– ${result.notePath}: unchanged since the last import`,
 			);
 			continue;
 		}
@@ -52,17 +54,26 @@ export function renderImportReport(input: ImportReportInput): string {
 			lines.push(`✓ ${result.notePath}: ${result.highlightCount} highlight(s)`);
 			continue;
 		}
-		const read = scan.interpretedMarks > 0 ? `, ${scan.interpretedMarks} read as text` : "";
+		const read =
+			scan.interpretedMarks > 0
+				? `, ${scan.interpretedMarks} read as text`
+				: "";
 		const anchored =
-			scan.renderedRemarks > 0 ? `, ${scan.anchoredRemarks} tied to the source` : "";
+			scan.renderedRemarks > 0
+				? `, ${scan.anchoredRemarks} tied to the source`
+				: "";
 		const rendered =
 			scan.renderedPages > 0
 				? `, ${scan.renderedRemarks} pen mark(s) on ${scan.renderedPages} page(s)${read}${anchored}`
 				: "";
 		const source =
-			scan.highlightsInStrokes > 0 && scan.highlightFiles === 0 ? " (from the pen layer)" : "";
+			scan.highlightsInStrokes > 0 && scan.highlightFiles === 0
+				? " (from the pen layer)"
+				: "";
 		const added =
-			scan.addedPages > 0 ? `, ${scan.addedPages} page(s) you added on the device` : "";
+			scan.addedPages > 0
+				? `, ${scan.addedPages} page(s) you added on the device`
+				: "";
 		lines.push(
 			`✓ ${result.notePath}: ${result.highlightCount} highlight(s)${source}${rendered}${added} ` +
 				`(${scan.totalFiles} files, ${scan.highlightFiles} highlight, ${scan.strokeFiles} stroke)`,
@@ -77,7 +88,9 @@ export function renderImportReport(input: ImportReportInput): string {
 
 	// The administration cleans itself (GP_E5_S17); one summary line says
 	// so, because 300 silently shrinking mappings would look like data loss.
-	const removed = input.results.filter((result) => result.ok && result.removed === true).length;
+	const removed = input.results.filter(
+		(result) => result.ok && result.removed === true,
+	).length;
 	if (removed > 0) {
 		lines.push(
 			"",
@@ -96,7 +109,9 @@ export function renderImportReport(input: ImportReportInput): string {
  * *reading* side, so a failed projection looked like a successful import that
  * did nothing (beta, 2026-07-27).
  */
-function describeWrite(scan: NonNullable<Extract<PullResult, { ok: true }>["scan"]>): string {
+function describeWrite(
+	scan: NonNullable<Extract<PullResult, { ok: true }>["scan"]>,
+): string {
 	const written = scan.written;
 	if (written === undefined) return "written as: (not recorded)";
 	if (written.form === "copy") {
@@ -150,12 +165,20 @@ function describeSource(state: SourceState | undefined): string {
 /** The most useful next sentence, given what the run found. */
 function diagnose(input: ImportReportInput): string {
 	const results = input.results;
-	const successes = results.filter((r): r is Extract<PullResult, { ok: true }> => r.ok);
+	const successes = results.filter(
+		(r): r is Extract<PullResult, { ok: true }> => r.ok,
+	);
 	const scanned = successes.filter((r) => r.scan !== undefined);
 	const imported = successes.filter((r) => r.highlightCount > 0);
 	const failures = results.filter((r) => !r.ok);
-	const renderedPages = successes.reduce((total, r) => total + (r.scan?.renderedPages ?? 0), 0);
-	const anchored = successes.reduce((total, r) => total + (r.scan?.anchoredRemarks ?? 0), 0);
+	const renderedPages = successes.reduce(
+		(total, r) => total + (r.scan?.renderedPages ?? 0),
+		0,
+	);
+	const anchored = successes.reduce(
+		(total, r) => total + (r.scan?.anchoredRemarks ?? 0),
+		0,
+	);
 	const unanchored = scanned.some((r) => r.scan?.anchorSkipped === "no-layout");
 	// With a source check available (F14) we know which of the two causes it
 	// was, instead of naming both and leaving the choice to the reader.
@@ -179,7 +202,10 @@ function diagnose(input: ImportReportInput): string {
 			? ` ${interpreted} of them were read as text — struck through, circled, underlined or ` +
 				"marked in the margin — and name the words they point at."
 			: "";
-	const addedPages = successes.reduce((total, r) => total + (r.scan?.addedPages ?? 0), 0);
+	const addedPages = successes.reduce(
+		(total, r) => total + (r.scan?.addedPages ?? 0),
+		0,
+	);
 	const added =
 		addedPages > 0
 			? ` ${addedPages} page(s) you added on the reMarkable came back whole, placed after ` +
@@ -219,7 +245,9 @@ function diagnose(input: ImportReportInput): string {
 		);
 	}
 	const withStrokes = scanned.filter((r) => (r.scan?.strokeFiles ?? 0) > 0);
-	const withHighlightFiles = scanned.filter((r) => (r.scan?.highlightFiles ?? 0) > 0);
+	const withHighlightFiles = scanned.filter(
+		(r) => (r.scan?.highlightFiles ?? 0) > 0,
+	);
 
 	if (withHighlightFiles.length === 0 && withStrokes.length > 0) {
 		const why =
