@@ -63,6 +63,12 @@ What happens to your note on the way:
 - Wikilinks become readable text, `![[embeds]]` are resolved inline, callouts
   become titled quotes, comments are dropped, and frontmatter is left out — or
   rendered as a small title block, if you prefer.
+- An embed pointing at part of a note — `![[Note#Section]]`, a nested
+  `#Heading#Subheading` path, or `![[Note#^block-id]]` — brings that part
+  only, as Obsidian shows it. Handy for reviewing one chapter of a long
+  note: put the single embed in a small note of its own and send that.
+  What comes back is a summary of your marks rather than an annotated copy,
+  because the note you sent holds the link, not the text.
 - Task checkboxes (`- [ ]`) become real drawn squares you can tick with the
   pen, and a table row that is empty — or holds only a label in its first
   column — becomes a fill-in row with room to write: a note with log tables

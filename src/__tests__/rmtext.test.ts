@@ -45,6 +45,22 @@ describe("v6 text page writer (GP_E7_S1)", () => {
 		expect(readTextPageRm(buildTextPageRm(unicode)).paragraphs).toEqual(unicode);
 	});
 
+	it("keeps styles on their own paragraph with an emoji ahead of them (GP_E7_S4)", () => {
+		// A surrogate pair counts as TWO units in the offsets the format uses
+		// (JS string length is UTF-16 too, so writer and reader agree by
+		// construction). This pins that agreement: an emoji before a heading
+		// must not slide the heading style onto the next paragraph. What it
+		// cannot prove is the device's own counting — that stays a
+		// devicecheck.
+		const withEmoji: TextParagraph[] = [
+			{ text: "🎯 doelen van vandaag", style: PARAGRAPH_STYLE.plain },
+			{ text: "Overleg", style: PARAGRAPH_STYLE.heading },
+			{ text: "👨‍👩‍👧 gezin — 𝕏 buiten de BMP", style: PARAGRAPH_STYLE.bullet },
+			{ text: "afronden", style: PARAGRAPH_STYLE.checkbox },
+		];
+		expect(readTextPageRm(buildTextPageRm(withEmoji)).paragraphs).toEqual(withEmoji);
+	});
+
 	it("parses blocks the stroke reader also accepts (shared envelope)", () => {
 		// The writer's block envelope must match what rmlines.ts walks:
 		// uint32 length, unknown, minVersion, currentVersion, blockType.

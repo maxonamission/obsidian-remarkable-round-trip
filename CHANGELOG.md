@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.42.0] - 2026-09-09
+
+### Fixed
+
+- **`![[Note#Section]]` now sends that section, not the whole note.** An
+  embed pointing at a heading, a nested `#Heading#Subheading` path or a
+  `^block-id` was resolved to the entire note — Obsidian shows just the
+  section, and so should the page you review. This also gives you a way to
+  zoom in on part of a long note without splitting it: a small note holding
+  one section embed travels to the reMarkable as its own document. A
+  subpath that names nothing in the note is reported as a missing section
+  instead of quietly sending everything.
+
 ## [0.41.0] - 2026-08-21
 
 ### Added
