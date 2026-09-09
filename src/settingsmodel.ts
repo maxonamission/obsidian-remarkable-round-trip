@@ -18,6 +18,8 @@ import {
 export type { MarkStyle, MarkStyles };
 export { DEFAULT_MARK_STYLES, MARK_STYLE_LABELS };
 
+export type MirrorMode = "strict" | "push";
+
 export interface RoundTripSettings {
 	/** Long-lived device token (empty = not paired). */
 	deviceToken: string;
@@ -50,6 +52,8 @@ export interface RoundTripSettings {
 	handwritingFolder: string;
 	/** Mirror vault folders on the device (GP_E2_S7); off = flat root uploads. */
 	mirrorFolders: boolean;
+	/** Strict restores remote moves/deletes; push accepts them until local change. */
+	mirrorMode: MirrorMode;
 	/** Device folder under which the vault tree is mirrored ("" = root). */
 	deviceBaseFolder: string;
 	/** How each recognised pen mark is written into the copy (GP_E3_S19). */
@@ -66,6 +70,8 @@ export interface RoundTripSettings {
 	lastSeenVersion: string;
 	/** docId ↔ device document mapping (round-trip foundation, F5). */
 	mappings: MappingTable;
+	/** Device root hash from the last complete mirror reconciliation. */
+	remoteRootHash: string;
 }
 
 export const DEFAULT_SETTINGS: RoundTripSettings = {
@@ -86,6 +92,7 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	markStyles: { ...DEFAULT_MARK_STYLES },
 	handwritingFolder: "reMarkable-in/handwriting",
 	mirrorFolders: true,
+	mirrorMode: "strict",
 	deviceBaseFolder: "Obsidian",
 	deviceModel: "rm2",
 	layoutPreset: "custom",
@@ -93,6 +100,7 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	showUpdateNotice: true,
 	lastSeenVersion: "",
 	mappings: {},
+	remoteRootHash: "",
 };
 
 /**
@@ -101,12 +109,16 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
  * (any keys, but not this one) keeps the old manual default, so an upgrade
  * never silently repaginates notes on re-send.
  */
-export function settingsFrom(stored: Partial<RoundTripSettings>): RoundTripSettings {
+export function settingsFrom(
+	stored: Partial<RoundTripSettings>,
+): RoundTripSettings {
 	const settings = { ...DEFAULT_SETTINGS, ...stored };
 	// Count KNOWN keys only: a data.json holding nothing but a hand-added
 	// extra (the spike flag) is still a fresh install, not an upgrade
 	// (reviewvondst 0.35.1).
-	const knownStored = Object.keys(stored).filter((key) => key in DEFAULT_SETTINGS);
+	const knownStored = Object.keys(stored).filter(
+		(key) => key in DEFAULT_SETTINGS,
+	);
 	if (knownStored.length > 0 && stored.pageBreakAtHeading === undefined) {
 		settings.pageBreakAtHeading = "off";
 	}
@@ -119,9 +131,13 @@ export function settingsFrom(stored: Partial<RoundTripSettings>): RoundTripSetti
  * spreads these back in FIRST, so saving settings never destroys them
  * (GP_E7_S1 bevinding: elke save wiste de handmatige spike-vlag).
  */
-export function extrasFrom(stored: Record<string, unknown>): Record<string, unknown> {
+export function extrasFrom(
+	stored: Record<string, unknown>,
+): Record<string, unknown> {
 	const known = new Set(Object.keys(DEFAULT_SETTINGS));
-	return Object.fromEntries(Object.entries(stored).filter(([key]) => !known.has(key)));
+	return Object.fromEntries(
+		Object.entries(stored).filter(([key]) => !known.has(key)),
+	);
 }
 
 /**
@@ -149,7 +165,10 @@ export type DeviceModel = "rm2" | "paperpro";
  * would make the device-to-page mapping anisotropic, and no Move is
  * available to validate against. Own story once one is.
  */
-export const DEVICE_PAGE_SIZES: Record<DeviceModel, { pageWidth: number; pageHeight: number }> = {
+export const DEVICE_PAGE_SIZES: Record<
+	DeviceModel,
+	{ pageWidth: number; pageHeight: number }
+> = {
 	rm2: { pageWidth: 447, pageHeight: 596 }, // 1404×1872 @ 226 dpi (rM1/rM2/Paper Pure)
 	paperpro: { pageWidth: 509, pageHeight: 679 }, // 1620×2160 @ 229 dpi
 };
@@ -172,7 +191,8 @@ export function layoutFor(settings: RoundTripSettings): {
 	lineHeight: number;
 	margin: number;
 } {
-	if (settings.layoutPreset !== "custom") return { ...LAYOUT_PRESETS[settings.layoutPreset] };
+	if (settings.layoutPreset !== "custom")
+		return { ...LAYOUT_PRESETS[settings.layoutPreset] };
 	return {
 		fontSize: settings.fontSize,
 		lineHeight: settings.lineHeight,

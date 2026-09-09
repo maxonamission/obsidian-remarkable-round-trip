@@ -18,6 +18,17 @@ import type { UploadResult } from "./cloud";
 /** The slice of rmapi-js' RemarkableApi that mirroring needs. */
 export interface MirrorApi {
 	listItems(refresh?: boolean): Promise<MirrorEntry[]>;
+	listIds?(refresh?: boolean): Promise<{ id: string; hash: string }[]>;
+	getMetadata?(
+		id: string,
+		hash: string,
+	): Promise<{
+		visibleName: string;
+		lastModified: string;
+		pinned: boolean;
+		parent: string;
+		type: "CollectionType" | "DocumentType" | "TemplateType";
+	}>;
 	putFolder(
 		visibleName: string,
 		opts?: { parent?: string },
@@ -33,7 +44,16 @@ export interface MirrorApi {
 		buffer: Uint8Array,
 		opts?: { parent?: string; refresh?: boolean },
 	): Promise<{ id: string; hash: string }>;
-	move(hash: string, parent: string, refresh?: boolean): Promise<unknown>;
+	move(
+		hash: string,
+		parent: string,
+		refresh?: boolean,
+	): Promise<{ hash?: string }>;
+	rename(
+		hash: string,
+		visibleName: string,
+		refresh?: boolean,
+	): Promise<{ hash?: string }>;
 }
 
 /**
@@ -51,7 +71,9 @@ export function isGenerationConflict(error: unknown): boolean {
 	// that set it deliberately).
 	if (error instanceof GenerationError) return true;
 	const name = error instanceof Error ? error.name : "";
-	const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+	const message = (
+		error instanceof Error ? error.message : String(error)
+	).toLowerCase();
 	return (
 		name === "GenerationError" ||
 		// The strings cover the same condition reaching us as a plain server
@@ -81,9 +103,11 @@ export async function withGenerationRetry<T>(
 	options: RetryOptions = {},
 ): Promise<T> {
 	const attempts = options.attempts ?? 4;
-	const backoffMs = options.backoffMs ?? ((attempt: number) => 300 * 2 ** (attempt - 1));
+	const backoffMs =
+		options.backoffMs ?? ((attempt: number) => 300 * 2 ** (attempt - 1));
 	const sleep =
-		options.sleep ?? ((ms: number) => new Promise<void>((r) => window.setTimeout(r, ms)));
+		options.sleep ??
+		((ms: number) => new Promise<void>((r) => window.setTimeout(r, ms)));
 
 	let lastError: unknown;
 	for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -113,6 +137,14 @@ export interface MirrorEntry {
 	parent?: string;
 }
 
+export interface RemoteDocumentState {
+	deviceDocId: string;
+	hash: string;
+	visibleName: string;
+	parentId: string;
+	remotePath: string;
+}
+
 export class MirrorTransport {
 	private items: MirrorEntry[] | null = null;
 	/** path → collection id, cached per instance (one send-run). */
@@ -127,7 +159,16 @@ export class MirrorTransport {
 
 	private async allItems(refresh = false): Promise<MirrorEntry[]> {
 		if (this.items === null || refresh) {
-			this.items = await this.api.listItems(refresh);
+			if (this.api.listIds && this.api.getMetadata) {
+				const items: MirrorEntry[] = [];
+				for (const { id, hash } of await this.api.listIds(refresh)) {
+					const metadata = await this.api.getMetadata(id, hash);
+					items.push({ id, hash, ...metadata });
+				}
+				this.items = items;
+			} else {
+				this.items = await this.api.listItems(refresh);
+			}
 		}
 		return this.items;
 	}
@@ -136,6 +177,94 @@ export class MirrorTransport {
 	private invalidate(): void {
 		this.items = null;
 		this.folderIds.clear();
+	}
+
+	devicePath(vaultFolderPath: string, visibleName: string): string {
+		return [
+			...this.baseFolder.split("/"),
+			...vaultFolderPath.split("/"),
+			visibleName,
+		]
+			.filter(Boolean)
+			.join("/");
+	}
+
+	async documentState(
+		deviceDocId: string,
+	): Promise<RemoteDocumentState | null> {
+		const items = await this.allItems();
+		const document = items.find(
+			(entry) => entry.type === "DocumentType" && entry.id === deviceDocId,
+		);
+		if (document === undefined) return null;
+		const parentId = document.parent ?? "";
+		return {
+			deviceDocId,
+			hash: document.hash,
+			visibleName: document.visibleName,
+			parentId,
+			remotePath: this.entryPath(document, items),
+		};
+	}
+
+	async documentsInMirrorRoot(): Promise<RemoteDocumentState[]> {
+		const items = await this.allItems();
+		const basePath = this.baseFolder.split("/").filter(Boolean).join("/");
+		return items
+			.filter(
+				(entry) =>
+					entry.type === "DocumentType" && !this.entryIsTrashed(entry, items),
+			)
+			.map((entry) => {
+				const remotePath = this.entryPath(entry, items);
+				return {
+					deviceDocId: entry.id,
+					hash: entry.hash,
+					visibleName: entry.visibleName,
+					parentId: entry.parent ?? "",
+					remotePath,
+				};
+			})
+			.filter(
+				(entry) =>
+					basePath === "" || entry.remotePath.startsWith(`${basePath}/`),
+			);
+	}
+
+	private entryIsTrashed(entry: MirrorEntry, items: MirrorEntry[]): boolean {
+		const byId = new Map(items.map((item) => [item.id, item]));
+		const seen = new Set<string>();
+		let parent = entry.parent ?? "";
+		while (parent !== "") {
+			if (parent === "trash") return true;
+			if (seen.has(parent)) return false;
+			seen.add(parent);
+			parent = byId.get(parent)?.parent ?? "";
+		}
+		return false;
+	}
+
+	private entryPath(entry: MirrorEntry, items: MirrorEntry[]): string {
+		const segments = [entry.visibleName];
+		const byId = new Map(items.map((item) => [item.id, item]));
+		const seen = new Set<string>();
+		let parent = entry.parent ?? "";
+		while (parent !== "") {
+			if (parent === "trash") {
+				segments.push("trash");
+				break;
+			}
+			if (seen.has(parent)) break;
+			seen.add(parent);
+			const folder = byId.get(parent);
+			if (folder === undefined) {
+				segments.push(parent);
+				break;
+			}
+			segments.push(folder.visibleName);
+			parent = folder.parent ?? "";
+		}
+		return segments.reverse().join("/");
 	}
 
 	private async findOrCreateFolder(
@@ -214,6 +343,34 @@ export class MirrorTransport {
 		return { deviceDocId: entry.id, hash: entry.hash };
 	}
 
+	async relocateDocument(
+		state: RemoteDocumentState,
+		parentId: string,
+		visibleName: string,
+	): Promise<void> {
+		let hash = state.hash;
+		if (state.parentId !== parentId) {
+			const moved = await withGenerationRetry(
+				(refresh) => this.api.move(hash, parentId, refresh),
+				this.retry,
+			);
+			hash = moved.hash ?? hash;
+		}
+		if (state.visibleName !== visibleName) {
+			const renamed = await withGenerationRetry(
+				(refresh) => this.api.rename(hash, visibleName, refresh),
+				this.retry,
+			);
+			hash = renamed.hash ?? hash;
+		}
+		const cached = this.items?.find((entry) => entry.id === state.deviceDocId);
+		if (cached !== undefined) {
+			cached.hash = hash;
+			cached.parent = parentId;
+			cached.visibleName = visibleName;
+		}
+	}
+
 	/**
 	 * Move a previously uploaded document to the trash (idempotent re-send,
 	 * N3): recoverable for the user, so safer than a hard delete. Missing
@@ -221,7 +378,9 @@ export class MirrorTransport {
 	 */
 	async trashPrevious(deviceDocId: string): Promise<void> {
 		const items = await this.allItems();
-		const doc = items.find((e) => e.type === "DocumentType" && e.id === deviceDocId);
+		const doc = items.find(
+			(e) => e.type === "DocumentType" && e.id === deviceDocId,
+		);
 		if (!doc) return;
 		await withGenerationRetry(
 			(refresh) => this.api.move(doc.hash, "trash", refresh),

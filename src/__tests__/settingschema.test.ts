@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, extrasFrom, settingsFrom, storedFrom } from "../settingsmodel";
+import {
+	DEFAULT_SETTINGS,
+	extrasFrom,
+	settingsFrom,
+	storedFrom,
+} from "../settingsmodel";
 import { sliderSpec } from "../settingschema";
 import {
 	SETTING_SECTIONS,
@@ -27,11 +32,18 @@ describe("the settings schema", () => {
 		// would be invisible in both renderers.
 		// lastSeenVersion is bookkeeping for the update notice (GP_E5_S3), not
 		// a user choice — only its showUpdateNotice toggle belongs in the UI.
-		const internal = new Set(["deviceToken", "mappings", "lastSeenVersion"]);
+		const internal = new Set([
+			"deviceToken",
+			"mappings",
+			"remoteRootHash",
+			"lastSeenVersion",
+		]);
 		const described = new Set(specs.map((spec) => spec.key.split(".")[0]));
 		for (const key of Object.keys(DEFAULT_SETTINGS)) {
 			if (internal.has(key)) continue;
-			expect(described.has(key), `${key} is not in the settings schema`).toBe(true);
+			expect(described.has(key), `${key} is not in the settings schema`).toBe(
+				true,
+			);
 		}
 	});
 
@@ -45,7 +57,10 @@ describe("the settings schema", () => {
 	it("only hides a setting behind a condition that can be met", () => {
 		for (const spec of specs) {
 			for (const condition of conditionsOf(spec)) {
-				expect(readSetting(DEFAULT_SETTINGS, condition.key), spec.key).toBeDefined();
+				expect(
+					readSetting(DEFAULT_SETTINGS, condition.key),
+					spec.key,
+				).toBeDefined();
 			}
 		}
 	});
@@ -54,7 +69,9 @@ describe("the settings schema", () => {
 		// A conditional setting whose controlling setting does not redraw the
 		// tab would appear only after closing and reopening settings.
 		const controllers = new Set(
-			specs.flatMap((spec) => conditionsOf(spec).map((condition) => condition.key)),
+			specs.flatMap((spec) =>
+				conditionsOf(spec).map((condition) => condition.key),
+			),
 		);
 		for (const spec of specs) {
 			if (!controllers.has(spec.key)) continue;
@@ -68,6 +85,17 @@ describe("the settings schema", () => {
 			const current = String(readSetting(DEFAULT_SETTINGS, spec.key));
 			expect(Object.keys(spec.control.options), spec.key).toContain(current);
 		}
+	});
+
+	it("places watch settings above device organization and mirror mode last", () => {
+		const deviceIndex = SETTING_SECTIONS.findIndex(
+			(candidate) => candidate.heading === "Device organization",
+		);
+		expect(SETTING_SECTIONS[deviceIndex - 1]?.heading).toBe("Watch folder");
+		expect(
+			SETTING_SECTIONS[deviceIndex]?.items.map((item) => item.key),
+		).toEqual(["mirrorFolders", "deviceBaseFolder", "mirrorMode"]);
+		expect(DEFAULT_SETTINGS.mirrorMode).toBe("strict");
 	});
 
 	it("keeps every default inside its slider's range", () => {
@@ -86,7 +114,11 @@ describe("reading and writing by dotted key", () => {
 	});
 
 	it("writes without mutating the original", () => {
-		const updated = writeSetting(DEFAULT_SETTINGS, "markStyles.circle", "highlight");
+		const updated = writeSetting(
+			DEFAULT_SETTINGS,
+			"markStyles.circle",
+			"highlight",
+		);
 		expect(updated.markStyles.circle).toBe("highlight");
 		expect(DEFAULT_SETTINGS.markStyles.circle).toBe("bold");
 		// Untouched branches come along unchanged.
@@ -103,13 +135,17 @@ describe("visibility", () => {
 	it("hides the endpoint URL until the self-hosted toggle is on", () => {
 		const spec = specs.find((item) => item.key === "customEndpointUrl")!;
 		expect(isVisible(spec, DEFAULT_SETTINGS)).toBe(false);
-		expect(isVisible(spec, { ...DEFAULT_SETTINGS, useCustomEndpoint: true })).toBe(true);
+		expect(
+			isVisible(spec, { ...DEFAULT_SETTINGS, useCustomEndpoint: true }),
+		).toBe(true);
 	});
 
 	it("hides the typography sliders for EPUB, which reflows on the device", () => {
 		const spec = specs.find((item) => item.key === "fontSize")!;
 		expect(isVisible(spec, DEFAULT_SETTINGS)).toBe(true);
-		expect(isVisible(spec, { ...DEFAULT_SETTINGS, outputFormat: "epub" })).toBe(false);
+		expect(isVisible(spec, { ...DEFAULT_SETTINGS, outputFormat: "epub" })).toBe(
+			false,
+		);
 	});
 });
 
@@ -144,8 +180,17 @@ describe("sliderSpec (GP_E6_S10)", () => {
 });
 
 describe("unknown data.json keys survive a save (GP_E7_S1 bevinding, 0.35.1)", () => {
+	it("defaults existing installs to strict mirror mode", () => {
+		const settings = settingsFrom({ mirrorFolders: true });
+		expect(settings.mirrorMode).toBe("strict");
+	});
+
 	it("carries hand-added keys through the exact save composition", () => {
-		const stored = { deviceToken: "t", spikeSchrijfmodus: true, toekomstig: 42 };
+		const stored = {
+			deviceToken: "t",
+			spikeSchrijfmodus: true,
+			toekomstig: 42,
+		};
 		const extras = extrasFrom(stored);
 		expect(extras).toEqual({ spikeSchrijfmodus: true, toekomstig: 42 });
 		// storedFrom IS the save path (main.ts saveSettings calls it): extras

@@ -70,7 +70,12 @@ export type WriteOutcome = AnnotationOutcome;
  * - `missing` — no note in the vault carries this document id any more.
  * - `no-snapshot` — sent before the plugin recorded typography (or as EPUB).
  */
-export type SourceState = "match" | "changed" | "moved" | "missing" | "no-snapshot";
+export type SourceState =
+	| "match"
+	| "changed"
+	| "moved"
+	| "missing"
+	| "no-snapshot";
 
 /** One annotation as it will appear in the vault (GP_E3_S9). */
 export interface ImportedMark {
@@ -108,7 +113,10 @@ export interface PullDeps {
 	/** Current device documents, by cloud document id → content hash. */
 	listDocumentHashes: () => Promise<Map<string, string>>;
 	/** Files belonging to a device document at the given hash. */
-	listDocumentFiles: (deviceDocId: string, hash: string) => Promise<DocumentFile[]>;
+	listDocumentFiles: (
+		deviceDocId: string,
+		hash: string,
+	) => Promise<DocumentFile[]>;
 	/** Text contents of one document file. */
 	readFile: (file: DocumentFile) => Promise<string>;
 	/** Raw bytes of one document file (for `.rm` stroke pages). */
@@ -147,6 +155,12 @@ export interface PullDeps {
 	) => Promise<WriteOutcome | void>;
 	/** Re-import even when the device hash is unchanged. */
 	force?: boolean;
+	/** Let pending outgoing work run between documents. */
+	yieldToPush?: () => Promise<void>;
+	/** False when a yielded push replaced this mapping before it was read. */
+	isCurrent?: (entry: MappingEntry) => boolean;
+	/** Keep missing documents tracked so mirror reconciliation can apply its mode. */
+	preserveMissingMappings?: boolean;
 }
 
 export interface PullSuccess {
@@ -157,7 +171,7 @@ export interface PullSuccess {
 	/** True when nothing changed on the device and the note was left alone. */
 	skipped?: boolean;
 	/** Why it was skipped, for the diagnostic report. */
-	skipReason?: "unchanged" | "not-on-device" | "write-mode";
+	skipReason?: "unchanged" | "not-on-device" | "superseded" | "write-mode";
 	/**
 	 * The mapping was dropped because the document no longer exists on the
 	 * account (GP_E5_S17). The note keeps its id; re-sending re-links it.
@@ -174,6 +188,37 @@ export interface PullFailure {
 }
 
 export type PullResult = PullSuccess | PullFailure;
+
+/**
+ * Apply pull-owned mapping changes without overwriting a push that completed
+ * while an account-wide pull yielded. Pulls only update importedHash or remove
+ * a mapping whose device document disappeared.
+ */
+export function mergePullMappings(
+	current: MappingTable,
+	scope: MappingTable,
+	pulled: MappingTable,
+): MappingTable {
+	const merged = { ...current };
+	for (const [docId, original] of Object.entries(scope)) {
+		const latest = merged[docId];
+		if (latest?.deviceDocId !== original.deviceDocId) continue;
+		const result = pulled[docId];
+		if (result === undefined) {
+			delete merged[docId];
+		} else {
+			const next = { ...latest, importedHash: result.importedHash };
+			if (result.remotePath !== original.remotePath) {
+				next.remotePath = result.remotePath;
+			}
+			if (result.lastSyncedAt !== original.lastSyncedAt) {
+				next.lastSyncedAt = result.lastSyncedAt;
+			}
+			merged[docId] = next;
+		}
+	}
+	return merged;
+}
 
 /**
  * Collect the highlights of one device document, ordered by page, together
@@ -263,8 +308,12 @@ export async function collectHighlights(
 
 	perFile.sort((a, b) => a.page - b.page);
 	// Both sources carry a page number, so merge and order by page.
-	const highlights = [...inkHighlights, ...perFile.flatMap((item) => item.highlights)].sort(
-		(a, b) => (a.page ?? Number.MAX_SAFE_INTEGER) - (b.page ?? Number.MAX_SAFE_INTEGER),
+	const highlights = [
+		...inkHighlights,
+		...perFile.flatMap((item) => item.highlights),
+	].sort(
+		(a, b) =>
+			(a.page ?? Number.MAX_SAFE_INTEGER) - (b.page ?? Number.MAX_SAFE_INTEGER),
 	);
 	scan.parsedHighlights = highlights.length;
 	return { highlights, scan, marks };
@@ -346,7 +395,10 @@ async function readAddedPage(
 }
 
 /** The last line of a page, for anchoring what was written after it. */
-function lastLineOf(layout: PdfLayout | null, page: number): string | undefined {
+function lastLineOf(
+	layout: PdfLayout | null,
+	page: number,
+): string | undefined {
 	if (layout === null) return undefined;
 	const onPage = layout.lines.filter((line) => line.page === page);
 	if (onPage.length === 0) return undefined;
@@ -388,7 +440,9 @@ async function readStrokePages(
 	try {
 		layout = deps.loadLayout ? await deps.loadLayout(entry) : null;
 	} catch (error) {
-		deps.log?.(`  no anchoring: ${error instanceof Error ? error.message : String(error)}`);
+		deps.log?.(
+			`  no anchoring: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
 	if (layout === null) scan.anchorSkipped = "no-layout";
 
@@ -409,7 +463,12 @@ async function readStrokePages(
 			// The "smart" highlighter writes its text into the same page file
 			// as the strokes on this firmware (GP_E3_S11).
 			for (const found of rm.highlights) {
-				highlights.push({ text: found.text, color: found.color, rgb: found.rgb, page });
+				highlights.push({
+					text: found.text,
+					color: found.color,
+					rgb: found.rgb,
+					page,
+				});
 				scan.highlightsInStrokes++;
 			}
 			if (rm.highlights.length > 0) {
@@ -428,7 +487,14 @@ async function readStrokePages(
 			// there is nothing to anchor its ink to and nothing to interpret:
 			// it is a sheet of notes, and it comes back whole (GP_E3_S20).
 			if (pages.isAdded(file.id)) {
-				const added = await readAddedPage(entry, file, rm.strokes, pages, layout, deps);
+				const added = await readAddedPage(
+					entry,
+					file,
+					rm.strokes,
+					pages,
+					layout,
+					deps,
+				);
 				if (added !== null) {
 					collected.push({ page: added.page, order: 0, mark: added.mark });
 					scan.addedPages++;
@@ -442,7 +508,11 @@ async function readStrokePages(
 				);
 				continue;
 			}
-			const marks = readMarks(rm.strokes, page ?? 0, page === undefined ? null : layout);
+			const marks = readMarks(
+				rm.strokes,
+				page ?? 0,
+				page === undefined ? null : layout,
+			);
 			// Raw ink geometry, so a mark that lands on the wrong line can be
 			// measured instead of guessed at (GP_E3_S15). Device units in,
 			// distance from the top of the page out — the two numbers that say
@@ -504,7 +574,8 @@ async function readStrokePages(
 				} else {
 					scan.interpretedMarks++;
 				}
-				if (mark.target !== undefined || mark.quote !== undefined) scan.anchoredRemarks++;
+				if (mark.target !== undefined || mark.quote !== undefined)
+					scan.anchoredRemarks++;
 				collected.push({
 					page,
 					order: position,
@@ -543,7 +614,9 @@ async function readStrokePages(
 	// Document order, not the order the cloud happened to list the files in —
 	// the beta returned pages 2, 4, 3, 1 (GP_E3_S9). Highlights need the same
 	// treatment: they came out in stroke-file order (GP_E3_S12).
-	collected.sort((a, b) => (a.page ?? Infinity) - (b.page ?? Infinity) || a.order - b.order);
+	collected.sort(
+		(a, b) => (a.page ?? Infinity) - (b.page ?? Infinity) || a.order - b.order,
+	);
 	highlights.sort((a, b) => (a.page ?? Infinity) - (b.page ?? Infinity));
 	deps.log?.(
 		`  ${scan.renderedRemarks} mark(s) on ${scan.renderedPages} page(s), ` +
@@ -584,31 +657,51 @@ export async function pullAnnotations(
 		};
 	}
 
-	deps.log?.(`${entries.length} mapped note(s); ${hashes.size} document(s) on the account`);
+	deps.log?.(
+		`${entries.length} mapped note(s); ${hashes.size} document(s) on the account`,
+	);
 
 	for (const entry of entries) {
+		await deps.yieldToPush?.();
 		const hash = hashes.get(entry.deviceDocId);
 		let result: PullResult;
 		try {
 			deps.log?.(`${entry.notePath} → device ${entry.deviceDocId}`);
-			if (hash === undefined) {
-				// The document is gone from the account (deleted on the
-				// device, trash emptied): drop the mapping so the run stops
-				// walking it forever (GP_E5_S17) — the note keeps its id in
-				// its frontmatter, so re-sending re-links it seamlessly. One
-				// guard: an EMPTY account listing is far more likely a fresh
-				// pairing or an endpoint switch than 300 real deletions, so
-				// then nothing is pruned.
-				const prune = hashes.size > 0;
+			if (deps.isCurrent?.(entry) === false) {
+				deps.log?.("  superseded by a newer push — skipped");
+				result = {
+					ok: true,
+					docId: entry.docId,
+					notePath: entry.notePath,
+					highlightCount: 0,
+					skipped: true,
+					skipReason: "superseded",
+				};
+			} else if (hash === undefined) {
+				// The document is gone from the account (deleted on the device,
+				// trash emptied). Folder mirroring keeps the mapping so its mode
+				// can restore or accept that deletion; flat uploads retain the
+				// older cleanup behavior. An empty listing is never pruned because
+				// it is more likely a pairing or endpoint switch.
+				const prune = hashes.size > 0 && !deps.preserveMissingMappings;
 				if (prune) {
 					updated = Object.fromEntries(
 						Object.entries(updated).filter(([docId]) => docId !== entry.docId),
 					);
+				} else if (deps.preserveMissingMappings) {
+					updated = {
+						...updated,
+						[entry.docId]: {
+							...entry,
+							remotePath: null,
+							lastSyncedAt: new Date().toISOString(),
+						},
+					};
 				}
 				deps.log?.(
 					prune
 						? "  not on the account — mapping removed"
-						: "  not on the account — kept (account listing is empty; not pruning)",
+						: "  not on the account — mapping kept for mirror reconciliation",
 				);
 				result = {
 					ok: true,
@@ -623,7 +716,9 @@ export async function pullAnnotations(
 				// A write-mode notebook (GP_E7_S2) carries typed text, not
 				// annotations on a review copy; its import is the write-mode
 				// route (GP_E7_S3), and reading it as ink would find nothing.
-				deps.log?.("  editable-text document — the annotation import does not apply");
+				deps.log?.(
+					"  editable-text document — the annotation import does not apply",
+				);
 				result = {
 					ok: true,
 					docId: entry.docId,
@@ -633,7 +728,9 @@ export async function pullAnnotations(
 					skipReason: "write-mode",
 				};
 			} else if (!deps.force && entry.importedHash === hash) {
-				deps.log?.(`  unchanged since last import (${hash.slice(0, 8)}…) — skipped`);
+				deps.log?.(
+					`  unchanged since last import (${hash.slice(0, 8)}…) — skipped`,
+				);
 				result = {
 					ok: true,
 					docId: entry.docId,
@@ -643,8 +740,17 @@ export async function pullAnnotations(
 					skipReason: "unchanged",
 				};
 			} else {
-				const { highlights, scan, marks } = await collectHighlights(entry, hash, deps);
-				const written = await deps.writeAnnotations(entry, highlights, marks, scan.sourceState);
+				const { highlights, scan, marks } = await collectHighlights(
+					entry,
+					hash,
+					deps,
+				);
+				const written = await deps.writeAnnotations(
+					entry,
+					highlights,
+					marks,
+					scan.sourceState,
+				);
 				if (written) scan.written = written;
 				updated = {
 					...updated,
@@ -659,7 +765,9 @@ export async function pullAnnotations(
 				};
 			}
 		} catch (error) {
-			deps.log?.(`  failed: ${error instanceof Error ? error.message : String(error)}`);
+			deps.log?.(
+				`  failed: ${error instanceof Error ? error.message : String(error)}`,
+			);
 			result = {
 				ok: false,
 				docId: entry.docId,

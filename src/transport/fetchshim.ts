@@ -26,10 +26,12 @@ interface ShimHandle {
 }
 
 export interface ShimOptions {
-	/** Attempts per request when the transport fails at connection level. */
+	/** Attempts per request for connection failures and HTTP 429 responses. */
 	attempts?: number;
 	/** Delay before retry N (ms); injected so tests run instantly. */
 	backoffMs?: (attempt: number) => number;
+	/** Longer shared cooldown after HTTP 429. */
+	rateLimitBackoffMs?: (attempt: number) => number;
 	sleep?: (ms: number) => Promise<void>;
 	/**
 	 * The window whose `fetch` is patched. Obsidian runs plugins per window
@@ -71,7 +73,9 @@ export interface ShimOptions {
  * to actionable messages themselves.
  */
 export function isTransientTransportError(error: unknown): boolean {
-	const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+	const message = (
+		error instanceof Error ? error.message : String(error)
+	).toLowerCase();
 	return (
 		message.includes("unexpected end of stream") ||
 		message.includes("request failed") ||
@@ -90,7 +94,9 @@ function matchesHost(url: string, hosts: string[]): boolean {
 	return hosts.some((host) => host !== "" && url.startsWith(host));
 }
 
-function headersToRecord(headers: HeadersInit | undefined): Record<string, string> {
+function headersToRecord(
+	headers: HeadersInit | undefined,
+): Record<string, string> {
 	const record: Record<string, string> = {};
 	if (!headers) return record;
 	if (headers instanceof Headers) {
@@ -112,10 +118,15 @@ async function bodyToTransportBody(
 	if (typeof body === "string") return body;
 	if (body instanceof ArrayBuffer) return body;
 	if (ArrayBuffer.isView(body)) {
-		return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
+		return body.buffer.slice(
+			body.byteOffset,
+			body.byteOffset + body.byteLength,
+		);
 	}
 	if (body instanceof Blob) return body.arrayBuffer();
-	throw new Error("Unsupported request body type for reMarkable transport shim.");
+	throw new Error(
+		"Unsupported request body type for reMarkable transport shim.",
+	);
 }
 
 /**
@@ -132,16 +143,24 @@ export function installFetchShim(
 	// so restore() is a true undo: binding here would stack a new wrapper on
 	// every settings save, since saveSettings reinstalls the shim.
 	const originalFetch = scope.fetch;
-	const callOriginal: typeof fetch = (input, init) => originalFetch.call(scope, input, init);
+	const callOriginal: typeof fetch = (input, init) =>
+		originalFetch.call(scope, input, init);
 	const attempts = options.attempts ?? 3;
-	const backoffMs = options.backoffMs ?? ((attempt: number) => 250 * 2 ** (attempt - 1));
+	const backoffMs =
+		options.backoffMs ?? ((attempt: number) => 250 * 2 ** (attempt - 1));
+	const rateLimitBackoffMs =
+		options.rateLimitBackoffMs ??
+		((attempt: number) => 5_000 * 2 ** (attempt - 1));
 	const sleep =
-		options.sleep ?? ((ms: number) => new Promise<void>((r) => window.setTimeout(r, ms)));
-	const maxConcurrent = Math.max(1, options.maxConcurrent ?? 8);
+		options.sleep ??
+		((ms: number) => new Promise<void>((r) => window.setTimeout(r, ms)));
+	const maxConcurrent = Math.max(1, options.maxConcurrent ?? 4);
 	const requestTimeoutMs = options.requestTimeoutMs ?? 300_000;
 	const setTimer =
-		options.setTimer ?? ((fn: () => void, ms: number) => window.setTimeout(fn, ms));
-	const clearTimer = options.clearTimer ?? ((id: number) => window.clearTimeout(id));
+		options.setTimer ??
+		((fn: () => void, ms: number) => window.setTimeout(fn, ms));
+	const clearTimer =
+		options.clearTimer ?? ((id: number) => window.clearTimeout(id));
 
 	// Minimal FIFO gate; a slot is held across a request's retries so a
 	// struggling request cannot be overtaken by an ever-growing queue.
@@ -196,37 +215,59 @@ export function installFetchShim(
 	 * writes are content-addressed, and the root update is generation-guarded
 	 * (a duplicate loses the race instead of corrupting state).
 	 */
+	let rateLimitRecovery = Promise.resolve();
+	const waitAfterRateLimit = (attempt: number): Promise<void> => {
+		const wait = rateLimitRecovery.then(() =>
+			sleep(rateLimitBackoffMs(attempt)),
+		);
+		rateLimitRecovery = wait.catch(() => undefined);
+		return wait;
+	};
+
 	const sendWithRetry = async (
 		request: Parameters<ShimTransport>[0],
 	): Promise<ShimTransportResponse> => {
 		let lastError: unknown;
 		for (let attempt = 1; attempt <= attempts; attempt++) {
 			try {
-				return await transport(request);
+				const response = await transport(request);
+				if (response.status !== 429 || attempt === attempts) return response;
+				await waitAfterRateLimit(attempt);
 			} catch (error) {
 				lastError = error;
-				if (attempt === attempts || !isTransientTransportError(error)) throw error;
+				if (attempt === attempts || !isTransientTransportError(error))
+					throw error;
 				await sleep(backoffMs(attempt));
 			}
 		}
 		throw lastError;
 	};
 
-	const shimmed = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+	const shimmed = async (
+		input: RequestInfo | URL,
+		init?: RequestInit,
+	): Promise<Response> => {
 		const url =
-			typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+			typeof input === "string"
+				? input
+				: input instanceof URL
+					? input.toString()
+					: input.url;
 		if (!matchesHost(url, hosts)) return callOriginal(input, init);
 
 		const request = input instanceof Request ? input : null;
 		const method = init?.method ?? request?.method ?? "GET";
 		const headers = headersToRecord(init?.headers ?? request?.headers);
-		const rawBody = init?.body ?? (request ? await request.arrayBuffer() : undefined);
+		const rawBody =
+			init?.body ?? (request ? await request.arrayBuffer() : undefined);
 		const body = await bodyToTransportBody(rawBody);
 
 		await acquire();
 		let response: ShimTransportResponse;
 		try {
-			response = await withTimeout(sendWithRetry({ url, method, headers, body }));
+			response = await withTimeout(
+				sendWithRetry({ url, method, headers, body }),
+			);
 		} finally {
 			release();
 		}
