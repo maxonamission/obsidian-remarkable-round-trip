@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.42.2] - 2026-09-11
+
+Documentation only: the plugin itself is unchanged from 0.42.1.
+
+### Changed
+
+- **A contributing guide.** `CONTRIBUTING.md` explains what this repository
+  is — a mirror of a private development repository, refreshed wholesale by
+  every release, which is why a pull request cannot be merged here and what
+  happens to one instead: it is read and discussed in the open, and what is
+  accepted travels onward with your commits and your name on them. It also
+  says where the product's boundaries lie, so nobody spends an evening
+  building something that was never going to fit, and how to report a bug so
+  the report answers the questions I would otherwise have to ask.
+- **The README says where the project stands**, now that "early days" no
+  longer describes it, and points to the issues and to the contributing
+  guide for reporting something or helping out.
+
 ## [0.42.1] - 2026-09-11
 
 ### Fixed

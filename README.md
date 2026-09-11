@@ -16,12 +16,16 @@ into the note they came from. The sentence you struck out is struck out. The
 phrase you circled is bold. The objection you scrawled sits under the
 paragraph it belongs to.
 
-This is the first version of reMarkable Round-Trip and I hope you'll enjoy
-using it. If you know what it should do next — do let me know.
+I hope you'll enjoy using it. If you know what it should do next — do let me
+know.
 
-> **Early days.** Fresh in the community plugin directory and under active
-> development. It is used daily on a real device, and rough edges get fixed
-> fast — please report what you hit.
+> **Where it stands.** In the community plugin directory since the end of
+> July 2026, and used daily on a real device. The loop is complete: send,
+> review with the pen, import; write with the keyboard on the device and get
+> that text back too. Development continues in the open — what gets reported
+> gets fixed, and what gets asked for shapes what comes next. See
+> [CONTRIBUTING.md](CONTRIBUTING.md) for reporting a bug, suggesting
+> something, or sending a patch.
 
 ## Start here
 
@@ -252,6 +256,20 @@ credential the plugin holds.
 - The stroke reader is written against an undocumented format: unusual pens or
   a future firmware may not render. The import report says so when a page could
   not be read.
+
+## Reporting something, or helping out
+
+Bugs, questions and ideas all belong in the
+[issues](https://github.com/maxonamission/obsidian-remarkable-round-trip/issues).
+For a bug, attach `reMarkable Round-Trip log.md` from your vault: the import
+writes it every run, and it answers most of what I would otherwise have to ask.
+
+Patches are welcome too, with one thing worth knowing before you spend an
+evening on one: this repository is a mirror of a private development
+repository, so a pull request cannot be merged here — it is read and
+discussed here, and what is accepted travels onward with your commits and
+your name on them. [CONTRIBUTING.md](CONTRIBUTING.md) explains how that
+works, and where the product's boundaries lie.
 
 ## License
 
