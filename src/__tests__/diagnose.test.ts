@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MappingTable } from "../id/mapping";
-import { DiagnoseApi, describeDiagnosis, diagnoseCloud } from "../transport/diagnose";
+import { ByteCompatReport } from "../transport/bytescompat";
+import { DiagnoseApi, describeByteCompat, describeDiagnosis, diagnoseCloud } from "../transport/diagnose";
 
 const TABLE: MappingTable = {
 	a: {
@@ -88,5 +89,27 @@ describe("describeDiagnosis on a failure", () => {
 	it("points at pairing when the cloud refuses the credentials", () => {
 		const verdict = describeDiagnosis({ reachable: false, error: "401 Unauthorized" });
 		expect(verdict).toContain("Pair again");
+	});
+});
+
+describe("describeByteCompat", () => {
+	const ALL_NATIVE: ByteCompatReport = {
+		toHex: true,
+		toBase64: true,
+		fromHex: true,
+		fromBase64: true,
+	};
+
+	it("says native when nothing was polyfilled", () => {
+		expect(describeByteCompat(ALL_NATIVE)).toBe("Bytes conversion (hex/base64): native on this runtime.");
+	});
+
+	it("names which methods came from the polyfill and points at the installer version", () => {
+		const text = describeByteCompat({ ...ALL_NATIVE, toHex: false, fromHex: false });
+		expect(text).toContain("polyfilled");
+		expect(text).toContain("toHex");
+		expect(text).toContain("fromHex");
+		expect(text).not.toContain("toBase64,");
+		expect(text).toContain("Settings → About");
 	});
 });

@@ -9,7 +9,7 @@
  */
 
 /** What kind of thing went wrong, as far as the message lets us tell. */
-export type FailureKind = "offline" | "auth" | "server" | "unknown";
+export type FailureKind = "offline" | "auth" | "server" | "runtime" | "unknown";
 
 const OFFLINE = [
 	// Android/okhttp, the mobile path
@@ -32,8 +32,24 @@ const AUTH = ["401", "403", "unauthorized", "forbidden", "invalid token", "expir
 
 const SERVER = ["500", "502", "503", "504", "bad gateway", "service unavailable"];
 
+// A missing ES2025 bytes-conversion method (GP_E5_S19): rmapi-js calls
+// `Uint8Array#toHex`/`toBase64` and the `fromHex`/`fromBase64` statics
+// directly, which only exist on newer engines (Chromium 140 / Electron 38 /
+// Safari 18.2 / Firefox 133 / Node 25). `bytescompat.ts` polyfills them
+// before the plugin ever calls rmapi-js, so seeing this means that install
+// step did not run — or a *different* missing ES2025 method surfaces the
+// same way.
+const RUNTIME_BYTES_METHODS = ["tohex", "tobase64", "fromhex", "frombase64"];
+
 function textOf(error: unknown): string {
 	return (error instanceof Error ? error.message : String(error)).toLowerCase();
+}
+
+function isMissingBytesMethod(message: string): boolean {
+	return (
+		message.includes("is not a function") &&
+		RUNTIME_BYTES_METHODS.some((needle) => message.includes(needle))
+	);
 }
 
 export function classifyFailure(error: unknown): FailureKind {
@@ -41,6 +57,7 @@ export function classifyFailure(error: unknown): FailureKind {
 	// Name resolution first: an offline device produces messages that also
 	// contain the word "failed", which the other buckets would happily claim.
 	if (OFFLINE.some((needle) => message.includes(needle))) return "offline";
+	if (isMissingBytesMethod(message)) return "runtime";
 	if (AUTH.some((needle) => message.includes(needle))) return "auth";
 	if (SERVER.some((needle) => message.includes(needle))) return "server";
 	return "unknown";
@@ -66,6 +83,14 @@ export function adviseFailure(kind: FailureKind): string {
 			);
 		case "server":
 			return "The reMarkable cloud itself returned an error. Nothing to fix here — try again later.";
+		case "runtime":
+			return (
+				"Your Obsidian installer is too old for this version of the plugin: it's " +
+				"missing a JavaScript feature the sync connection needs. Check Settings → " +
+				"About — Obsidian shows an App version and an Installer version separately, " +
+				"and only a fresh installer from obsidian.md/download updates the second one; " +
+				"an in-app update does not."
+			);
 		default:
 			return "";
 	}

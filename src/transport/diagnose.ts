@@ -11,6 +11,7 @@
  */
 
 import { MappingTable } from "../id/mapping";
+import { ByteCompatReport } from "./bytescompat";
 import { adviseFailure, classifyFailure } from "./failure";
 
 export interface DiagnoseApi {
@@ -87,4 +88,18 @@ export function describeDiagnosis(diagnosis: CloudDiagnosis): string {
 			"the device: restart it, and let it finish syncing before sending again.",
 	);
 	return lines.join("\n");
+}
+
+/**
+ * One line on where the bytes-conversion methods rmapi-js needs came from
+ * (GP_E5_S19): native on this runtime, or supplied by our polyfill because
+ * the runtime lacks them (see bytescompat.ts).
+ */
+export function describeByteCompat(report: ByteCompatReport): string {
+	const polyfilled = (Object.keys(report) as (keyof ByteCompatReport)[]).filter(
+		(name) => !report[name],
+	);
+	return polyfilled.length === 0
+		? "Bytes conversion (hex/base64): native on this runtime."
+		: `Bytes conversion (hex/base64): polyfilled (${polyfilled.join(", ")}) — your Obsidian installer is old; see Settings → About.`;
 }

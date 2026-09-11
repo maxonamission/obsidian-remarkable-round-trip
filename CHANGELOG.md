@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.42.1] - 2026-09-11
+
+### Fixed
+
+- **Folder mirroring no longer depends on how old your Obsidian installer
+  is.** Setting up the vault mirror could fail with "some folders could not
+  be created on the device", followed by `(intermediate value).toHex is not
+  a function`. The sync connection needs a few JavaScript
+  bytes-conversion methods that only exist in newer Electron versions, and
+  Obsidian's in-app update does not renew Electron — that follows the
+  *installer* you last ran, which is why "latest Obsidian" was not enough.
+  The plugin now brings those methods along itself, so mirroring, the write
+  mode and the import work on older installers too, on desktop and on
+  mobile. *Check reMarkable cloud status* reports which of the two your
+  runtime used, and if a comparable method ever goes missing, the message
+  points at Settings → About instead of showing a raw error. Reported as
+  issue #5.
+
 ## [0.42.0] - 2026-09-09
 
 ### Fixed

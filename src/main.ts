@@ -27,7 +27,8 @@ import {
 } from "./transport/cloud";
 import { installFetchShim, ShimTransport } from "./transport/fetchshim";
 import { MirrorTransport, toTransportError } from "./transport/mirror";
-import { describeDiagnosis, diagnoseCloud } from "./transport/diagnose";
+import { describeByteCompat, describeDiagnosis, diagnoseCloud } from "./transport/diagnose";
+import { ByteCompatReport, installByteCompat } from "./transport/bytescompat";
 import { EmbedContent } from "./preprocess/preprocess";
 import { ANNOTATIONS_FRONTMATTER_KEY, DOCID_FRONTMATTER_KEY } from "./id/docid";
 import { NoteInput, SendFormat, sendBatch, SendResult } from "./sync/send";
@@ -75,9 +76,21 @@ export default class RoundTripPlugin extends Plugin {
 	private extraData: Record<string, unknown> = {};
 	/** Layouts rebuilt during one import run, by document id (GP_E3_S12). */
 	private readonly layoutCache = new Map<string, PdfLayout | null>();
+	/** Which bytes-conversion methods came from the polyfill (GP_E5_S19). */
+	private byteCompat: ByteCompatReport = {
+		toHex: true,
+		toBase64: true,
+		fromHex: true,
+		fromBase64: true,
+	};
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		// Before anything can call rmapi-js: it uses the ES2025 bytes methods
+		// directly, which an older Obsidian installer's Electron may lack
+		// (GP_E5_S19). Installing here, once, covers every remarkable() call
+		// for the plugin's lifetime.
+		this.byteCompat = installByteCompat();
 		this.addSettingTab(new RoundTripSettingTab(this.app, this));
 		this.setupWatcher();
 		this.setupFetchShim();
@@ -869,7 +882,7 @@ export default class RoundTripPlugin extends Plugin {
 				},
 				this.settings.mappings,
 			);
-			const report = describeDiagnosis(diagnosis);
+			const report = `${describeDiagnosis(diagnosis)}\n${describeByteCompat(this.byteCompat)}`;
 			// On mobile a Notice scrolls away and there is no console to open,
 			// so put the report on the clipboard: it can be pasted into a note
 			// or a bug report.

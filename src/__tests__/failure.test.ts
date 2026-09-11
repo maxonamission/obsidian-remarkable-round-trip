@@ -33,4 +33,17 @@ describe("classifyFailure", () => {
 	it("says nothing when it cannot tell, rather than guessing", () => {
 		expect(adviseFailure("unknown")).toBe("");
 	});
+
+	it("recognises a missing ES2025 bytes method as a runtime problem (GP_E5_S19)", () => {
+		// Verbatim shape from issue #5: rmapi-js calling toHex() on an Electron
+		// too old to have it.
+		const message = "TypeError: (intermediate value).toHex is not a function";
+		expect(classifyFailure(new Error(message))).toBe("runtime");
+	});
+
+	it("names the installer-version fix for a runtime failure", () => {
+		const advice = adviseFailure("runtime");
+		expect(advice).toContain("installer");
+		expect(advice).toContain("Settings → About");
+	});
 });
