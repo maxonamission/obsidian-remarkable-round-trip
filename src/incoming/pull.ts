@@ -59,6 +59,19 @@ export interface DocumentScan {
 /** What the vault writer made of one document's annotations (GP_E3_S14). */
 export type WriteOutcome = AnnotationOutcome;
 
+/** What the vault writer reports back after persisting one document. */
+export interface WriteResult {
+	outcome?: WriteOutcome;
+	/**
+	 * Source fingerprint after the plugin's own write into the note
+	 * (annotation block or companion link). Stored as the mapping's
+	 * `localHash` so the next reconciliation does not send the plugin's
+	 * write back to the device. Undefined = the note was not in sync
+	 * before the write (user edit pending) or nothing was written.
+	 */
+	localHash?: string;
+}
+
 /**
  * How the note in the vault relates to the document that was sent (F14,
  * GP_E3_S3).
@@ -144,9 +157,15 @@ export interface PullDeps {
 		marks: ImportedMark[],
 		/** How the note relates to what was sent, so the block can say so (F14). */
 		sourceState?: SourceState,
-	) => Promise<WriteOutcome | void>;
+	) => Promise<WriteResult | void>;
 	/** Re-import even when the device hash is unchanged. */
 	force?: boolean;
+	/** Let pending outgoing work run between documents. */
+	yieldToPush?: () => Promise<void>;
+	/** False when a yielded push replaced this mapping before it was read. */
+	isCurrent?: (entry: MappingEntry) => boolean;
+	/** Keep missing documents tracked so mirror reconciliation can apply its mode. */
+	preserveMissingMappings?: boolean;
 }
 
 export interface PullSuccess {
@@ -157,7 +176,7 @@ export interface PullSuccess {
 	/** True when nothing changed on the device and the note was left alone. */
 	skipped?: boolean;
 	/** Why it was skipped, for the diagnostic report. */
-	skipReason?: "unchanged" | "not-on-device" | "write-mode";
+	skipReason?: "unchanged" | "not-on-device" | "superseded" | "write-mode";
 	/**
 	 * The mapping was dropped because the document no longer exists on the
 	 * account (GP_E5_S17). The note keeps its id; re-sending re-links it.
@@ -174,6 +193,43 @@ export interface PullFailure {
 }
 
 export type PullResult = PullSuccess | PullFailure;
+
+/**
+ * Apply pull-owned mapping changes without overwriting a push that completed
+ * while an account-wide pull yielded. Pulls update import state and the source
+ * fingerprint after plugin-authored writes, or remove disappeared mappings.
+ */
+export function mergePullMappings(
+	current: MappingTable,
+	scope: MappingTable,
+	pulled: MappingTable,
+): MappingTable {
+	const merged = { ...current };
+	for (const [docId, original] of Object.entries(scope)) {
+		const latest = merged[docId];
+		if (latest?.deviceDocId !== original.deviceDocId) continue;
+		const result = pulled[docId];
+		if (result === undefined) {
+			delete merged[docId];
+		} else {
+			const next = { ...latest, importedHash: result.importedHash };
+			if (
+				result.localHash !== original.localHash &&
+				latest.localHash === original.localHash
+			) {
+				next.localHash = result.localHash;
+			}
+			if (result.remotePath !== original.remotePath) {
+				next.remotePath = result.remotePath;
+			}
+			if (result.lastSyncedAt !== original.lastSyncedAt) {
+				next.lastSyncedAt = result.lastSyncedAt;
+			}
+			merged[docId] = next;
+		}
+	}
+	return merged;
+}
 
 /**
  * Collect the highlights of one device document, ordered by page, together
@@ -587,28 +643,46 @@ export async function pullAnnotations(
 	deps.log?.(`${entries.length} mapped note(s); ${hashes.size} document(s) on the account`);
 
 	for (const entry of entries) {
+		await deps.yieldToPush?.();
 		const hash = hashes.get(entry.deviceDocId);
 		let result: PullResult;
 		try {
 			deps.log?.(`${entry.notePath} → device ${entry.deviceDocId}`);
-			if (hash === undefined) {
-				// The document is gone from the account (deleted on the
-				// device, trash emptied): drop the mapping so the run stops
-				// walking it forever (GP_E5_S17) — the note keeps its id in
-				// its frontmatter, so re-sending re-links it seamlessly. One
-				// guard: an EMPTY account listing is far more likely a fresh
-				// pairing or an endpoint switch than 300 real deletions, so
-				// then nothing is pruned.
-				const prune = hashes.size > 0;
+			if (deps.isCurrent?.(entry) === false) {
+				deps.log?.("  superseded by a newer push — skipped");
+				result = {
+					ok: true,
+					docId: entry.docId,
+					notePath: entry.notePath,
+					highlightCount: 0,
+					skipped: true,
+					skipReason: "superseded",
+				};
+			} else if (hash === undefined) {
+				// The document is gone from the account (deleted on the device,
+				// trash emptied). Folder mirroring keeps the mapping so its mode
+				// can restore or accept that deletion; flat uploads retain the
+				// older cleanup behavior. An empty listing is never pruned because
+				// it is more likely a pairing or endpoint switch.
+				const prune = hashes.size > 0 && !deps.preserveMissingMappings;
 				if (prune) {
 					updated = Object.fromEntries(
 						Object.entries(updated).filter(([docId]) => docId !== entry.docId),
 					);
+				} else if (deps.preserveMissingMappings) {
+					updated = {
+						...updated,
+						[entry.docId]: {
+							...entry,
+							remotePath: null,
+							lastSyncedAt: new Date().toISOString(),
+						},
+					};
 				}
 				deps.log?.(
 					prune
 						? "  not on the account — mapping removed"
-						: "  not on the account — kept (account listing is empty; not pruning)",
+						: "  not on the account — mapping kept for mirror reconciliation",
 				);
 				result = {
 					ok: true,
@@ -645,10 +719,16 @@ export async function pullAnnotations(
 			} else {
 				const { highlights, scan, marks } = await collectHighlights(entry, hash, deps);
 				const written = await deps.writeAnnotations(entry, highlights, marks, scan.sourceState);
-				if (written) scan.written = written;
+				if (written?.outcome) scan.written = written.outcome;
 				updated = {
 					...updated,
-					[entry.docId]: { ...entry, importedHash: hash },
+					[entry.docId]: {
+						...entry,
+						importedHash: hash,
+						...(written?.localHash !== undefined
+							? { localHash: written.localHash }
+							: {}),
+					},
 				};
 				result = {
 					ok: true,

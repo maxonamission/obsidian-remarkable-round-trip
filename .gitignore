@@ -1,2 +1,5 @@
 node_modules/
 main.js
+/.cortexkit/
+/ARCHITECTURE.md
+/STRUCTURE.md

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	installFetchShim,
 	isTransientTransportError,
+	retryAfterMs,
 	ShimTransport,
 } from "../transport/fetchshim";
 
@@ -61,11 +62,130 @@ describe("isTransientTransportError", () => {
 	});
 
 	it("does not treat application errors as transient", () => {
-		expect(isTransientTransportError(new Error("Pairing code was rejected"))).toBe(false);
+		expect(
+			isTransientTransportError(new Error("Pairing code was rejected")),
+		).toBe(false);
+	});
+});
+
+describe("retryAfterMs", () => {
+	it("reads delay-seconds, case-insensitively", () => {
+		expect(retryAfterMs({ "retry-after": "7" })).toBe(7_000);
+		expect(retryAfterMs({ "Retry-After": " 0 " })).toBe(0);
+	});
+
+	it("reads an HTTP-date relative to now", () => {
+		const now = Date.parse("2026-09-09T12:00:00Z");
+		expect(
+			retryAfterMs(
+				{ "Retry-After": "Wed, 09 Sep 2026 12:00:30 GMT" },
+				() => now,
+			),
+		).toBe(30_000);
+		// A date in the past means "now", never a negative wait.
+		expect(
+			retryAfterMs(
+				{ "Retry-After": "Wed, 09 Sep 2026 11:00:00 GMT" },
+				() => now,
+			),
+		).toBe(0);
+	});
+
+	it("is undefined when absent or unparseable, so the schedule applies", () => {
+		expect(retryAfterMs({})).toBeUndefined();
+		expect(retryAfterMs({ "Retry-After": "soon" })).toBeUndefined();
 	});
 });
 
 describe("installFetchShim retries", () => {
+	it("shares a cooldown and retries HTTP 429 responses", async () => {
+		let calls = 0;
+		const waits: number[] = [];
+		const transport: ShimTransport = () => {
+			calls++;
+			return Promise.resolve(
+				calls === 1
+					? { ...okResponse(), status: 429 }
+					: okResponse("after-cooldown"),
+			);
+		};
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			rateLimitBackoffMs: () => 5_000,
+			sleep: (ms) => {
+				waits.push(ms);
+				return Promise.resolve();
+			},
+		});
+		restore = handle.restore;
+
+		const response = await fetch(`${HOSTS[0]}/sync/v4/root`);
+		expect(await response.text()).toBe("after-cooldown");
+		expect(calls).toBe(2);
+		expect(waits).toEqual([5_000]);
+	});
+
+	it("honours Retry-After on a 429 over the fallback schedule", async () => {
+		let calls = 0;
+		const waits: number[] = [];
+		const transport: ShimTransport = () => {
+			calls++;
+			return Promise.resolve(
+				calls === 1
+					? { ...okResponse(), status: 429, headers: { "Retry-After": "12" } }
+					: okResponse("after-retry-after"),
+			);
+		};
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			rateLimitBackoffMs: () => 5_000,
+			sleep: (ms) => {
+				waits.push(ms);
+				return Promise.resolve();
+			},
+		});
+		restore = handle.restore;
+
+		const response = await fetch(`${HOSTS[0]}/sync/v4/root`);
+		expect(await response.text()).toBe("after-retry-after");
+		expect(waits).toEqual([12_000]);
+	});
+
+	it("holds newly admitted requests behind the shared 429 cooldown", async () => {
+		const started: string[] = [];
+		let firstAttempts = 0;
+		let finishCooldown: (() => void) | undefined;
+		const handle = installFetchShim(
+			HOSTS,
+			(request) => {
+				started.push(request.url.split("/").pop() ?? "");
+				if (request.url.endsWith("/first") && ++firstAttempts === 1) {
+					return Promise.resolve({ ...okResponse(), status: 429 });
+				}
+				return Promise.resolve(okResponse());
+			},
+			{
+				...NO_WAIT,
+				sleep: () =>
+					new Promise<void>((resolve) => {
+						finishCooldown = resolve;
+					}),
+			},
+		);
+		restore = handle.restore;
+		const first = fetch(`${HOSTS[0]}/first`);
+		await flush();
+		expect(finishCooldown).toBeDefined();
+		const second = fetch(`${HOSTS[0]}/second`);
+		await flush();
+		expect(started).toEqual(["first"]);
+		finishCooldown?.();
+		const responses = await Promise.all([first, second]);
+		expect(responses.map((response) => response.status)).toEqual([200, 200]);
+		expect(started.filter((name) => name === "first")).toHaveLength(2);
+		expect(started.filter((name) => name === "second")).toHaveLength(1);
+	});
+
 	it("retries a transient failure and succeeds", async () => {
 		let calls = 0;
 		const transport: ShimTransport = () => {
@@ -91,10 +211,15 @@ describe("installFetchShim retries", () => {
 			calls++;
 			return Promise.reject(new Error("unexpected end of stream"));
 		};
-		const handle = installFetchShim(HOSTS, transport, { ...NO_WAIT, attempts: 2 });
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			attempts: 2,
+		});
 		restore = handle.restore;
 
-		await expect(fetch(`${HOSTS[0]}/sync/v4/root`)).rejects.toThrow(/unexpected end of stream/);
+		await expect(fetch(`${HOSTS[0]}/sync/v4/root`)).rejects.toThrow(
+			/unexpected end of stream/,
+		);
 		expect(calls).toBe(2);
 	});
 
@@ -125,13 +250,19 @@ describe("installFetchShim retries", () => {
 		restore = handle.restore;
 
 		expect(globalThis.fetch).not.toBe(original);
-		await globalThis.fetch("https://example.invalid/nothing").catch(() => undefined); // network is unavailable in tests; only routing matters
+		await globalThis
+			.fetch("https://example.invalid/nothing")
+			.catch(() => undefined); // network is unavailable in tests; only routing matters
 		expect(shimCalls).toBe(0);
 	});
 
 	it("restores the original fetch", () => {
 		const original = globalThis.fetch;
-		const handle = installFetchShim(HOSTS, () => Promise.resolve(okResponse()), NO_WAIT);
+		const handle = installFetchShim(
+			HOSTS,
+			() => Promise.resolve(okResponse()),
+			NO_WAIT,
+		);
 		handle.restore();
 		expect(globalThis.fetch).toBe(original);
 	});
@@ -152,11 +283,16 @@ describe("installFetchShim concurrency gate (GP_E5_S9)", () => {
 				});
 			});
 		};
-		const handle = installFetchShim(HOSTS, transport, { ...NO_WAIT, maxConcurrent: 3 });
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			maxConcurrent: 3,
+		});
 		restore = handle.restore;
 
 		// The flood rmapi-js produces: far more requests than the cap, at once.
-		const calls = Array.from({ length: 10 }, (_, i) => fetch(`${HOSTS[0]}/entry/${i}`));
+		const calls = Array.from({ length: 10 }, (_, i) =>
+			fetch(`${HOSTS[0]}/entry/${i}`),
+		);
 		// Drain: finish whatever is admitted until every request went through.
 		let finished = 0;
 		while (finished < 10) {
@@ -169,7 +305,9 @@ describe("installFetchShim concurrency gate (GP_E5_S9)", () => {
 			}
 		}
 		const responses = await Promise.all(calls);
-		expect(responses.map((r) => r.status)).toEqual(Array.from({ length: 10 }, () => 200));
+		expect(responses.map((r) => r.status)).toEqual(
+			Array.from({ length: 10 }, () => 200),
+		);
 		expect(maxSeen).toBe(3);
 	});
 
@@ -186,7 +324,10 @@ describe("installFetchShim concurrency gate (GP_E5_S9)", () => {
 			}
 			return Promise.resolve(okResponse());
 		};
-		const handle = installFetchShim(HOSTS, transport, { ...NO_WAIT, maxConcurrent: 1 });
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			maxConcurrent: 1,
+		});
 		restore = handle.restore;
 
 		const first = fetch(`${HOSTS[0]}/first`);
@@ -203,10 +344,16 @@ describe("installFetchShim concurrency gate (GP_E5_S9)", () => {
 			calls++;
 			return Promise.resolve(okResponse());
 		};
-		const handle = installFetchShim(HOSTS, transport, { ...NO_WAIT, maxConcurrent: 0 });
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			maxConcurrent: 0,
+		});
 		restore = handle.restore;
 
-		const responses = await Promise.all([fetch(`${HOSTS[0]}/a`), fetch(`${HOSTS[0]}/b`)]);
+		const responses = await Promise.all([
+			fetch(`${HOSTS[0]}/a`),
+			fetch(`${HOSTS[0]}/b`),
+		]);
 		expect(responses.map((r) => r.status)).toEqual([200, 200]);
 		expect(calls).toBe(2);
 	});
@@ -220,7 +367,10 @@ describe("installFetchShim concurrency gate (GP_E5_S9)", () => {
 				finishFirst = () => resolve(okResponse());
 			});
 		};
-		const handle = installFetchShim(HOSTS, transport, { ...NO_WAIT, maxConcurrent: 1 });
+		const handle = installFetchShim(HOSTS, transport, {
+			...NO_WAIT,
+			maxConcurrent: 1,
+		});
 
 		const first = fetch(`${HOSTS[0]}/holds-the-slot`);
 		const queued = fetch(`${HOSTS[0]}/never-admitted`);
