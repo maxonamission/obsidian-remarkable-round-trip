@@ -6,9 +6,17 @@
 export type SyncWorkKind = "folder" | "push" | "pull";
 
 interface QueueEntry<T> {
+	kind: SyncWorkKind;
 	run: () => Promise<T>;
 	resolve: (value: T) => void;
 	reject: (error: unknown) => void;
+}
+
+export interface SyncQueueStatus {
+	active: SyncWorkKind | null;
+	queuedFolders: number;
+	queuedPushes: number;
+	queuedPulls: number;
 }
 
 export class SyncQueueCoordinator {
@@ -17,16 +25,31 @@ export class SyncQueueCoordinator {
 	private readonly pulls: QueueEntry<unknown>[] = [];
 	private draining = false;
 	private disposed = false;
+	private active: SyncWorkKind | null = null;
 
 	enqueue<T>(kind: SyncWorkKind, run: () => Promise<T>): Promise<T> {
 		if (this.disposed) {
 			return Promise.reject(new Error("Sync queue was shut down."));
 		}
 		const promise = new Promise<T>((resolve, reject) => {
-			this.queue(kind).push({ run, resolve, reject } as QueueEntry<unknown>);
+			this.queue(kind).push({
+				kind,
+				run,
+				resolve,
+				reject,
+			} as QueueEntry<unknown>);
 		});
 		this.schedule();
 		return promise;
+	}
+
+	status(): SyncQueueStatus {
+		return {
+			active: this.active,
+			queuedFolders: this.folders.length,
+			queuedPushes: this.pushes.length,
+			queuedPulls: this.pulls.length,
+		};
 	}
 
 	dispose(): void {
@@ -70,10 +93,14 @@ export class SyncQueueCoordinator {
 	}
 
 	private async runEntry(entry: QueueEntry<unknown>): Promise<void> {
+		const previous = this.active;
+		this.active = entry.kind;
 		try {
 			entry.resolve(await entry.run());
 		} catch (error) {
 			entry.reject(error);
+		} finally {
+			this.active = previous;
 		}
 	}
 

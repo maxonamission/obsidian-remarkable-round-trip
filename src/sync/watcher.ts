@@ -52,6 +52,11 @@ export class WatchQueue {
 		}
 	}
 
+	/** Read-only count of the sends waiting for the debounce timer. */
+	status(): { pendingChanges: number } {
+		return { pendingChanges: this.pending.size };
+	}
+
 	/** Cancel everything (plugin unload or settings change). */
 	dispose(): void {
 		if (this.timer !== null) this.opts.clearTimer(this.timer);

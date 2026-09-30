@@ -9,13 +9,23 @@
 import {
 	Menu,
 	Notice,
+	Platform,
 	Plugin,
 	TAbstractFile,
 	TFile,
 	TFolder,
 	requestUrl,
 } from "obsidian";
-import { notify, progressNotice, updateProgress } from "./notify";
+import {
+	ProgressHandle,
+	ProgressStatus,
+	notify,
+	progressNotice,
+	updateProgress,
+} from "./notify";
+import type { ProgressCount } from "./status";
+import { SyncStatusModal } from "./syncstatusmodal";
+import { buildSyncStatusSummary } from "./sync/statussummary";
 import {
 	DEFAULT_SETTINGS,
 	RoundTripSettings,
@@ -35,7 +45,11 @@ import {
 } from "./transport/cloud";
 import { installFetchShim, ShimTransport } from "./transport/fetchshim";
 import { MirrorTransport, toTransportError } from "./transport/mirror";
-import { describeByteCompat, describeDiagnosis, diagnoseCloud } from "./transport/diagnose";
+import {
+	describeByteCompat,
+	describeDiagnosis,
+	diagnoseCloud,
+} from "./transport/diagnose";
 import { ByteCompatReport, installByteCompat } from "./transport/bytescompat";
 import { EmbedContent } from "./preprocess/preprocess";
 import { ANNOTATIONS_FRONTMATTER_KEY, DOCID_FRONTMATTER_KEY } from "./id/docid";
@@ -107,6 +121,7 @@ export default class RoundTripPlugin extends Plugin {
 	private readonly syncCoordinator = new SyncQueueCoordinator();
 	private readonly pushQueue = new PushQueue(this.syncCoordinator);
 	private readonly pullQueue = new PullQueue(this.syncCoordinator);
+	private progressStatus: ProgressStatus | null = null;
 	private fetchShim: { restore: () => void } | null = null;
 	/** Unknown data.json keys, preserved across saves (see extrasFrom). */
 	private extraData: Record<string, unknown> = {};
@@ -127,6 +142,9 @@ export default class RoundTripPlugin extends Plugin {
 		// (GP_E5_S19). Installing here, once, covers every remarkable() call
 		// for the plugin's lifetime.
 		this.byteCompat = installByteCompat();
+		if (!Platform.isMobile) {
+			this.progressStatus = new ProgressStatus(this.addStatusBarItem());
+		}
 		this.addSettingTab(new RoundTripSettingTab(this.app, this));
 		this.setupWatcher();
 		this.setupFetchShim();
@@ -158,6 +176,35 @@ export default class RoundTripPlugin extends Plugin {
 				this.watchQueue?.noteRemoved(file.path),
 			),
 		);
+
+		this.addRibbonIcon("tablet", "reMarkable sync", (event) => {
+			const menu = new Menu();
+			menu.addItem((item) =>
+				item
+					.setTitle("Sync status")
+					.setIcon("activity")
+					.onClick(() => this.openSyncStatus()),
+			);
+			menu.addSeparator();
+			menu.addItem((item) =>
+				item
+					.setTitle("Import unsynced annotations")
+					.setIcon("import")
+					.onClick(() => void this.pullAnnotations()),
+			);
+			menu.addItem((item) =>
+				item
+					.setTitle("Import full annotations")
+					.setIcon("rotate-ccw")
+					.onClick(() => void this.pullAnnotations({ force: true })),
+			);
+			menu.showAtMouseEvent(event);
+		});
+		this.addCommand({
+			id: "show-sync-status",
+			name: "Show sync status",
+			callback: () => this.openSyncStatus(),
+		});
 
 		this.addCommand({
 			id: "check-cloud-status",
@@ -384,6 +431,47 @@ export default class RoundTripPlugin extends Plugin {
 						);
 				},
 			),
+		);
+	}
+
+	private openSyncStatus(): void {
+		const localPaths = new Set(
+			this.app.vault.getMarkdownFiles().map((file) => file.path),
+		);
+		const watchPaths = new Set<string>();
+		if (
+			this.settings.watchFolderEnabled &&
+			this.settings.watchFolderPath !== ""
+		) {
+			const folder = this.app.vault.getFolderByPath(
+				this.settings.watchFolderPath,
+			);
+			if (folder) {
+				for (const file of collectMarkdownFiles(folder))
+					watchPaths.add(file.path);
+			}
+		}
+		new SyncStatusModal(this.app, {
+			mode: this.settings.mirrorFolders ? "On" : "Off (flat uploads)",
+			watchFolder:
+				this.settings.watchFolderEnabled && this.settings.watchFolderPath !== ""
+					? this.settings.watchFolderPath
+					: "Disabled",
+			summary: buildSyncStatusSummary({
+				mappings: this.settings.mappings,
+				localPaths,
+				watchPaths,
+				live: {
+					...this.syncCoordinator.status(),
+					pendingChanges: this.watchQueue?.status().pendingChanges ?? 0,
+				},
+			}),
+		}).open();
+	}
+
+	private progress(message: string, count?: ProgressCount): ProgressHandle {
+		return (
+			this.progressStatus?.begin(message, count) ?? progressNotice(message)
 		);
 	}
 
@@ -707,8 +795,9 @@ export default class RoundTripPlugin extends Plugin {
 				},
 				uploadFiles: async () => {
 					if (queuedNotes.length === 0) return;
-					const notice = progressNotice(
+					const notice = this.progress(
 						`Sending 0/${queuedNotes.length} to reMarkable…`,
+						{ done: 0, total: queuedNotes.length },
 					);
 					try {
 						const activeMirror = mirror;
@@ -771,6 +860,7 @@ export default class RoundTripPlugin extends Plugin {
 								updateProgress(
 									notice,
 									`Sending ${done}/${total} to reMarkable…`,
+									{ done, total },
 								),
 						);
 
@@ -826,7 +916,7 @@ export default class RoundTripPlugin extends Plugin {
 			);
 			return;
 		}
-		const notice = progressNotice(
+		const notice = this.progress(
 			`Reading "${file.basename}" from the reMarkable…`,
 		);
 		// Filled by readDeviceText below; a mobile user cannot open a console
@@ -1013,7 +1103,7 @@ export default class RoundTripPlugin extends Plugin {
 			);
 			return;
 		}
-		const notice = progressNotice("Reading your reMarkable cloud account…");
+		const notice = this.progress("Reading your reMarkable cloud account…");
 		try {
 			const api = await remarkable(
 				this.settings.deviceToken,
@@ -1102,7 +1192,7 @@ export default class RoundTripPlugin extends Plugin {
 		this.layoutCache.clear();
 		await this.reconcileNotePaths((line) => log.push(line));
 		const startedAt = new Date().toISOString().slice(0, 16).replace("T", " ");
-		const notice = progressNotice(
+		const notice = this.progress(
 			`Checking ${mappings} document(s) for annotations…`,
 		);
 		try {
@@ -1154,7 +1244,10 @@ export default class RoundTripPlugin extends Plugin {
 						),
 				},
 				(done, total) =>
-					updateProgress(notice, `Checking ${done}/${total} for annotations…`),
+					updateProgress(notice, `Checking ${done}/${total} for annotations…`, {
+						done,
+						total,
+					}),
 			);
 			// A scoped run returns only its slice; merging keeps the rest.
 			// Entries the run dropped — documents gone from the account

@@ -39,6 +39,12 @@ describe("SyncQueueCoordinator", () => {
 			async () => void order.push("pending-file"),
 		);
 		await Promise.resolve();
+		expect(coordinator.status()).toEqual({
+			active: "folder",
+			queuedFolders: 0,
+			queuedPushes: 1,
+			queuedPulls: 0,
+		});
 		const folder = coordinator.enqueue(
 			"folder",
 			async () => void order.push("new-folder"),
@@ -47,6 +53,12 @@ describe("SyncQueueCoordinator", () => {
 		release?.();
 		await Promise.all([active, file, folder]);
 		expect(order).toEqual(["active-folder", "new-folder", "pending-file"]);
+		expect(coordinator.status()).toEqual({
+			active: null,
+			queuedFolders: 0,
+			queuedPushes: 0,
+			queuedPulls: 0,
+		});
 	});
 
 	it("never overlaps cloud work and continues after a failure", async () => {

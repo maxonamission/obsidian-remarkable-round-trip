@@ -48,6 +48,11 @@ That is the whole loop. Everything below is detail for when you want it.
 
 ## Sending notes
 
+The **tablet ribbon icon** opens sync status and the annotation import actions.
+**Show sync status** is also available from the command palette: it shows queued
+work, pending watch-folder changes, tracked-note coverage, and the last upload.
+Long operations show progress in the desktop status bar; mobile uses notices.
+
 - **Command palette**: *Send current note to reMarkable*.
 - **Right-click a note or folder**: *Send to reMarkable* — a folder sends
   everything inside it, with progress and per-file errors, and keeps its own
