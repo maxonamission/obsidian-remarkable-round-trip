@@ -1120,12 +1120,8 @@ export default class RoundTripPlugin extends Plugin {
 						entry.deviceDocId,
 					log: (line) => log.push(line),
 					listDocumentHashes: async () => {
-						const items = await api.listItems(true);
-						return new Map(
-							items
-								.filter((item) => item.type === "DocumentType")
-								.map((item) => [item.id, item.hash]),
-						);
+						const items = await api.listIds(true);
+						return new Map(items.map((item) => [item.id, item.hash]));
 					},
 					listDocumentFiles: async (deviceDocId, hash) => {
 						// The document's file index is addressed as `<id>.docSchema`

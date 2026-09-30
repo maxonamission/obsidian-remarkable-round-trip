@@ -26,10 +26,12 @@ interface ShimHandle {
 }
 
 export interface ShimOptions {
-	/** Attempts per request when the transport fails at connection level. */
+	/** Attempts per request for connection failures and HTTP 429 responses. */
 	attempts?: number;
 	/** Delay before retry N (ms); injected so tests run instantly. */
 	backoffMs?: (attempt: number) => number;
+	/** Longer shared cooldown after HTTP 429. */
+	rateLimitBackoffMs?: (attempt: number) => number;
 	sleep?: (ms: number) => Promise<void>;
 	/**
 	 * The window whose `fetch` is patched. Obsidian runs plugins per window
@@ -52,7 +54,7 @@ export interface ShimOptions {
 	 * Ceiling (ms) before a gated request is failed to free its slot. A
 	 * deadlock valve, not a tuning knob: without it one transport call that
 	 * never settles (requestUrl has no timeout of its own) would hold its
-	 * slot forever, and eight of those would silently starve all reMarkable
+	 * slot forever, and four of those would silently starve all reMarkable
 	 * traffic until restart. Generous by default — a slow multi-MB upload
 	 * must comfortably fit.
 	 */
@@ -84,6 +86,24 @@ export function isTransientTransportError(error: unknown): boolean {
 		// left, so a retry (behind the concurrency gate) is safe (GP_E5_S9).
 		message.includes("insufficient_resources")
 	);
+}
+
+/**
+ * The wait a 429 asks for, in ms: `Retry-After` as delay-seconds or as an
+ * HTTP-date (RFC 9110 §10.2.3). Undefined when absent or unparseable, so the
+ * caller falls back to its own schedule. `now` is injected for tests.
+ */
+export function retryAfterMs(
+	headers: Record<string, string>,
+	now: () => number = Date.now,
+): number | undefined {
+	const key = Object.keys(headers).find((k) => k.toLowerCase() === "retry-after");
+	if (key === undefined) return undefined;
+	const value = headers[key].trim();
+	if (/^\d+$/.test(value)) return Number(value) * 1000;
+	const date = Date.parse(value);
+	if (Number.isNaN(date)) return undefined;
+	return Math.max(0, date - now());
 }
 
 function matchesHost(url: string, hosts: string[]): boolean {
@@ -135,9 +155,11 @@ export function installFetchShim(
 	const callOriginal: typeof fetch = (input, init) => originalFetch.call(scope, input, init);
 	const attempts = options.attempts ?? 3;
 	const backoffMs = options.backoffMs ?? ((attempt: number) => 250 * 2 ** (attempt - 1));
+	const rateLimitBackoffMs =
+		options.rateLimitBackoffMs ?? ((attempt: number) => 5_000 * 2 ** (attempt - 1));
 	const sleep =
 		options.sleep ?? ((ms: number) => new Promise<void>((r) => window.setTimeout(r, ms)));
-	const maxConcurrent = Math.max(1, options.maxConcurrent ?? 8);
+	const maxConcurrent = Math.max(1, options.maxConcurrent ?? 4);
 	const requestTimeoutMs = options.requestTimeoutMs ?? 300_000;
 	const setTimer =
 		options.setTimer ?? ((fn: () => void, ms: number) => window.setTimeout(fn, ms));
@@ -196,13 +218,29 @@ export function installFetchShim(
 	 * writes are content-addressed, and the root update is generation-guarded
 	 * (a duplicate loses the race instead of corrupting state).
 	 */
+	let rateLimitRecovery = Promise.resolve();
+	const waitAfterRateLimit = (
+		attempt: number,
+		response: ShimTransportResponse,
+	): Promise<void> => {
+		// The service says how long to wait when it can; the schedule is the
+		// fallback, not the rule.
+		const ms = retryAfterMs(response.headers) ?? rateLimitBackoffMs(attempt);
+		const wait = rateLimitRecovery.then(() => sleep(ms));
+		rateLimitRecovery = wait.catch(() => undefined);
+		return wait;
+	};
+
 	const sendWithRetry = async (
 		request: Parameters<ShimTransport>[0],
 	): Promise<ShimTransportResponse> => {
 		let lastError: unknown;
 		for (let attempt = 1; attempt <= attempts; attempt++) {
 			try {
-				return await transport(request);
+				await rateLimitRecovery;
+				const response = await transport(request);
+				if (response.status !== 429 || attempt === attempts) return response;
+				await waitAfterRateLimit(attempt, response);
 			} catch (error) {
 				lastError = error;
 				if (attempt === attempts || !isTransientTransportError(error)) throw error;
