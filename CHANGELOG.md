@@ -1,10 +1,26 @@
 # Changelog
 
+## [0.43.1] - 2026-10-02
+
+Documentation and release process only: the plugin itself is unchanged
+from 0.43.0.
+
+### Changed
+
+- **Contributors are named on the release commit.** This repository is a
+  mirror, refreshed by a workflow in one commit per release, so until now
+  the public history credited only the bot — even for 0.43.0, which was
+  mostly lexomis' work. From this release on, the release commit carries a
+  `Co-authored-by` trailer for every contributor whose work it brings over,
+  and this first one names everyone to date.
+
 ## [0.43.0] - 2026-10-02
 
 Most of this release was contributed by [lexomis](https://github.com/lexomis)
 (public PR #4), who ran into the limits of sending a few hundred notes at
-once. The commits travel with their author's name. Thank you.
+once. His commits carry his name in the development repository; this
+mirror is refreshed in one commit per release, which is why 0.43.1 adds him
+as co-author here. Thank you.
 
 ### Added
 
