@@ -57,9 +57,73 @@ function fakeApi(initial: MirrorEntry[] = []) {
 }
 
 describe("MirrorTransport.ensureFolderPath", () => {
+	it("reads metadata sequentially without validating document content via listItems", async () => {
+		const { api, calls } = fakeApi();
+		const seen: string[] = [];
+		let active = 0;
+		let maxActive = 0;
+		api.listIds = () =>
+			Promise.resolve([
+				{ id: "base", hash: "h0" },
+				{ id: "note", hash: "h1" },
+			]);
+		api.getMetadata = async (id, hash) => {
+			active++;
+			maxActive = Math.max(maxActive, active);
+			seen.push(`${id}:${hash}`);
+			await Promise.resolve();
+			active--;
+			return {
+				visibleName: id === "base" ? "Obsidian" : "Nota",
+				lastModified: "1",
+				pinned: false,
+				parent: "",
+				type: id === "base" ? "CollectionType" : "DocumentType",
+			};
+		};
+		const mirror = new MirrorTransport(api, "Obsidian");
+		expect(await mirror.ensureFolderPath("")).toBe("base");
+		expect(seen).toEqual(["base:h0", "note:h1"]);
+		expect(maxActive).toBe(1);
+		expect(calls.listItems).toBe(0);
+		expect(calls.putFolder).toEqual([]);
+	});
+
+	it("skips an item whose metadata fails instead of sinking the listing", async () => {
+		const { api, calls } = fakeApi();
+		const seen: string[] = [];
+		api.listIds = () =>
+			Promise.resolve([
+				{ id: "odd", hash: "bad" },
+				{ id: "base", hash: "h0" },
+			]);
+		api.getMetadata = (id) => {
+			seen.push(id);
+			if (id === "odd") return Promise.reject(new Error("metadata unreadable"));
+			return Promise.resolve({
+				visibleName: "Obsidian",
+				lastModified: "1",
+				pinned: false,
+				parent: "",
+				type: "CollectionType",
+			});
+		};
+		const mirror = new MirrorTransport(api, "Obsidian");
+		expect(await mirror.ensureFolderPath("")).toBe("base");
+		expect(seen).toEqual(["odd", "base"]);
+		expect(calls.listItems).toBe(0);
+		expect(calls.putFolder).toEqual([]);
+	});
+
 	it("creates missing segments under the base folder and reuses existing ones", async () => {
 		const { api, calls } = fakeApi([
-			{ id: "base", hash: "h0", type: "CollectionType", visibleName: "Obsidian", parent: "" },
+			{
+				id: "base",
+				hash: "h0",
+				type: "CollectionType",
+				visibleName: "Obsidian",
+				parent: "",
+			},
 		]);
 		const mirror = new MirrorTransport(api, "Obsidian");
 		const id = await mirror.ensureFolderPath("projecten/alpha");
@@ -77,8 +141,20 @@ describe("MirrorTransport.ensureFolderPath", () => {
 
 	it("does not confuse same-named folders under different parents", async () => {
 		const { api } = fakeApi([
-			{ id: "a", hash: "h1", type: "CollectionType", visibleName: "notes", parent: "" },
-			{ id: "b", hash: "h2", type: "CollectionType", visibleName: "sub", parent: "elders" },
+			{
+				id: "a",
+				hash: "h1",
+				type: "CollectionType",
+				visibleName: "notes",
+				parent: "",
+			},
+			{
+				id: "b",
+				hash: "h2",
+				type: "CollectionType",
+				visibleName: "sub",
+				parent: "elders",
+			},
 		]);
 		const mirror = new MirrorTransport(api, "");
 		const id = await mirror.ensureFolderPath("notes/sub");
@@ -98,7 +174,9 @@ describe("MirrorTransport upload + replace", () => {
 	it("uploads without the .pdf suffix into the given parent", async () => {
 		const { api, calls } = fakeApi();
 		const mirror = new MirrorTransport(api, "");
-		const result = await mirror.upload("Nota.pdf", new Uint8Array([1]), { parentId: "dir-9" });
+		const result = await mirror.upload("Nota.pdf", new Uint8Array([1]), {
+			parentId: "dir-9",
+		});
 		expect(calls.putPdf).toEqual(["dir-9:Nota"]);
 		expect(result.deviceDocId).toMatch(/^doc-/);
 	});
@@ -139,7 +217,9 @@ describe("generation conflicts", () => {
 		named.name = "GenerationError";
 		expect(isGenerationConflict(named)).toBe(true);
 		expect(isGenerationConflict(new Error("precondition failed"))).toBe(true);
-		expect(isGenerationConflict(new Error("Failed to upload root schema"))).toBe(true);
+		expect(
+			isGenerationConflict(new Error("Failed to upload root schema")),
+		).toBe(true);
 		expect(isGenerationConflict(new Error("gewoon kapot"))).toBe(false);
 	});
 
@@ -151,7 +231,9 @@ describe("generation conflicts", () => {
 		// fix that starts setting it does not break this test.
 		expect(isGenerationConflict(new GenerationError())).toBe(true);
 		expect(
-			isGenerationConflict(new Error("root generation was stale; try put again")),
+			isGenerationConflict(
+				new Error("root generation was stale; try put again"),
+			),
 		).toBe(true);
 	});
 
@@ -159,7 +241,9 @@ describe("generation conflicts", () => {
 		let calls = 0;
 		const result = await withGenerationRetry(() => {
 			calls++;
-			return calls < 2 ? Promise.reject(new GenerationError()) : Promise.resolve("ok");
+			return calls < 2
+				? Promise.reject(new GenerationError())
+				: Promise.resolve("ok");
 		}, NO_WAIT);
 		expect(result).toBe("ok");
 		expect(calls).toBe(2);
@@ -201,19 +285,24 @@ describe("generation conflicts", () => {
 			...api,
 			putPdf: (name, buffer, opts) => {
 				attempts++;
-				if (attempts === 1) return Promise.reject(new Error("precondition failed"));
+				if (attempts === 1)
+					return Promise.reject(new Error("precondition failed"));
 				return api.putPdf(name, buffer, opts);
 			},
 		};
 		const mirror = new MirrorTransport(flaky, "", NO_WAIT);
-		const result = await mirror.upload("Nota.pdf", new Uint8Array([1]), { parentId: "dir-1" });
+		const result = await mirror.upload("Nota.pdf", new Uint8Array([1]), {
+			parentId: "dir-1",
+		});
 		expect(attempts).toBe(2);
 		expect(calls.putPdf).toEqual(["dir-1:Nota"]);
 		expect(result.deviceDocId).toMatch(/^doc-/);
 	});
 
 	it("explains a persistent conflict in plain language", () => {
-		const message = toTransportError(new Error("Failed to upload root schema")).message;
+		const message = toTransportError(
+			new Error("Failed to upload root schema"),
+		).message;
 		expect(message).toContain("busy syncing");
 		expect(message).toContain("Nothing was lost");
 	});

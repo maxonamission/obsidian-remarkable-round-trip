@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.43.0] - 2026-10-02
+
+Most of this release was contributed by [lexomis](https://github.com/lexomis)
+(public PR #4), who ran into the limits of sending a few hundred notes at
+once. The commits travel with their author's name. Thank you.
+
+### Added
+
+- **Sync status.** A *Show sync status* command, and a tablet icon in the
+  ribbon with a small menu, show what is queued, which watch-folder changes
+  are still pending, how many tracked notes are covered, and when the last
+  upload finished. Long operations show their progress in the desktop status
+  bar; mobile keeps using notices.
+- **Progress is saved every 20 uploads.** A large batch that is interrupted —
+  Obsidian closed, connection gone — keeps the records of everything already
+  delivered instead of forgetting the whole run. From lexomis' follow-up
+  work, ported on its own.
+
+### Changed
+
+- **All cloud work goes through one queue.** Folder creation finishes before
+  any upload starts, an import waits for a send that is already running, and
+  the watch folder collects its changes into one batch after the quiet
+  period. Unchanged notes are dropped before any cloud request is made.
+- **When the device folders cannot be created, nothing is sent.** Earlier
+  versions fell back to uploading the batch into the root of the device so
+  the notes would at least arrive. With hundreds of notes that fallback
+  floods the root. The batch is now left unsent, with a message saying so,
+  and you send again once the folders are there. A deliberate change.
+- **Rate limiting is handled as the service asks.** An HTTP 429 ("too many
+  requests") pauses all traffic for one shared cooldown instead of every
+  request retrying on its own, and the `Retry-After` the service sends is
+  followed. The device tree is read one item at a time rather than all at
+  once.
+
+### Fixed
+
+- **Folder mirroring survives a document the plugin cannot read.** One item
+  with metadata that fails to parse — written by another tool, say — used
+  to sink the whole listing and push the batch to the root. It is now
+  skipped, with a note in the console, and the rest of the tree stays
+  usable.
+- **A `Retry-After` the plugin cannot trust no longer dictates the wait.**
+  The value is kept between 1 second and 2 minutes, nonsense falls back to
+  the plugin's own schedule, and several requests tripping the limit
+  together share one cooldown instead of adding theirs up.
+
 ## [0.42.2] - 2026-09-11
 
 Documentation only: the plugin itself is unchanged from 0.42.1.

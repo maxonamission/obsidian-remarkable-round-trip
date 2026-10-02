@@ -48,6 +48,11 @@ That is the whole loop. Everything below is detail for when you want it.
 
 ## Sending notes
 
+The **tablet ribbon icon** opens sync status and the annotation import actions.
+**Show sync status** is also available from the command palette: it shows queued
+work, pending watch-folder changes, tracked-note coverage, and the last upload.
+Long operations show progress in the desktop status bar; mobile uses notices.
+
 - **Command palette**: *Send current note to reMarkable*.
 - **Right-click a note or folder**: *Send to reMarkable* — a folder sends
   everything inside it, with progress and per-file errors, and keeps its own
@@ -59,8 +64,8 @@ That is the whole loop. Everything below is detail for when you want it.
   prefilled from your settings — applied to that send only. Your saved
   settings stay as they are.
 - **Watch folder** (optional, off by default): notes dropped into a folder you
-  choose are sent automatically, after a short quiet period. Unchanged notes
-  are skipped.
+  choose are collected into one automatic batch after a short quiet period.
+  Unchanged notes are skipped before any cloud work starts.
 
 What happens to your note on the way:
 
@@ -96,7 +101,8 @@ What happens to your note on the way:
   table of contents, and non-Latin scripts survive intact.
 - Your vault folders are recreated on the device under a base folder you
   choose. Re-sending replaces the previous copy; the old one goes to the
-  device trash.
+  device trash. Folder creation always finishes before file upload; if it
+  fails, the affected batch is left unsent rather than placed in the root.
 - Each note gets a stable `remarkable-id` in its frontmatter. That id — not the
   file path — is how a document finds its note again, so you can move and
   rename freely.

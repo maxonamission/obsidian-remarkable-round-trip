@@ -26,10 +26,22 @@ interface ShimHandle {
 }
 
 export interface ShimOptions {
-	/** Attempts per request when the transport fails at connection level. */
+	/** Attempts per request for connection failures and HTTP 429 responses. */
 	attempts?: number;
 	/** Delay before retry N (ms); injected so tests run instantly. */
 	backoffMs?: (attempt: number) => number;
+	/** Longer shared cooldown after HTTP 429. */
+	rateLimitBackoffMs?: (attempt: number) => number;
+	/**
+	 * Bounds on a `Retry-After` the service sends with a 429 (GP_E5_S21).
+	 * The header is advice from a machine we do not control: `0` would mean
+	 * "hammer again now", a stray `3600` would freeze every upload for an
+	 * hour. Inside the bounds the header wins; outside, the nearest bound.
+	 */
+	retryAfterMinMs?: number;
+	retryAfterMaxMs?: number;
+	/** Clock for cooldown deadlines; injected so tests can pin it. */
+	now?: () => number;
 	sleep?: (ms: number) => Promise<void>;
 	/**
 	 * The window whose `fetch` is patched. Obsidian runs plugins per window
@@ -52,7 +64,7 @@ export interface ShimOptions {
 	 * Ceiling (ms) before a gated request is failed to free its slot. A
 	 * deadlock valve, not a tuning knob: without it one transport call that
 	 * never settles (requestUrl has no timeout of its own) would hold its
-	 * slot forever, and eight of those would silently starve all reMarkable
+	 * slot forever, and four of those would silently starve all reMarkable
 	 * traffic until restart. Generous by default — a slow multi-MB upload
 	 * must comfortably fit.
 	 */
@@ -84,6 +96,27 @@ export function isTransientTransportError(error: unknown): boolean {
 		// left, so a retry (behind the concurrency gate) is safe (GP_E5_S9).
 		message.includes("insufficient_resources")
 	);
+}
+
+/**
+ * The wait a 429 asks for, in ms: `Retry-After` as delay-seconds or as an
+ * HTTP-date (RFC 9110 §10.2.3). Undefined when absent or unparseable, so the
+ * caller falls back to its own schedule. `now` is injected for tests.
+ */
+export function retryAfterMs(
+	headers: Record<string, string>,
+	now: () => number = Date.now,
+): number | undefined {
+	const key = Object.keys(headers).find((k) => k.toLowerCase() === "retry-after");
+	if (key === undefined) return undefined;
+	const value = headers[key].trim();
+	if (/^\d+$/.test(value)) {
+		const ms = Number(value) * 1000;
+		return Number.isFinite(ms) ? ms : undefined;
+	}
+	const date = Date.parse(value);
+	if (Number.isNaN(date)) return undefined;
+	return Math.max(0, date - now());
 }
 
 function matchesHost(url: string, hosts: string[]): boolean {
@@ -135,9 +168,14 @@ export function installFetchShim(
 	const callOriginal: typeof fetch = (input, init) => originalFetch.call(scope, input, init);
 	const attempts = options.attempts ?? 3;
 	const backoffMs = options.backoffMs ?? ((attempt: number) => 250 * 2 ** (attempt - 1));
+	const rateLimitBackoffMs =
+		options.rateLimitBackoffMs ?? ((attempt: number) => 5_000 * 2 ** (attempt - 1));
 	const sleep =
 		options.sleep ?? ((ms: number) => new Promise<void>((r) => window.setTimeout(r, ms)));
-	const maxConcurrent = Math.max(1, options.maxConcurrent ?? 8);
+	const retryAfterMinMs = Math.max(0, options.retryAfterMinMs ?? 1_000);
+	const retryAfterMaxMs = Math.max(retryAfterMinMs, options.retryAfterMaxMs ?? 120_000);
+	const now = options.now ?? Date.now;
+	const maxConcurrent = Math.max(1, options.maxConcurrent ?? 4);
 	const requestTimeoutMs = options.requestTimeoutMs ?? 300_000;
 	const setTimer =
 		options.setTimer ?? ((fn: () => void, ms: number) => window.setTimeout(fn, ms));
@@ -196,13 +234,49 @@ export function installFetchShim(
 	 * writes are content-addressed, and the root update is generation-guarded
 	 * (a duplicate loses the race instead of corrupting state).
 	 */
+	let rateLimitRecovery = Promise.resolve();
+	let cooldownUntil = 0;
+	const waitAfterRateLimit = (
+		attempt: number,
+		response: ShimTransportResponse,
+	): Promise<void> => {
+		// The service says how long to wait when it can; the schedule is the
+		// fallback, not the rule — but the header is bounded (GP_E5_S21).
+		const asked = retryAfterMs(response.headers, now);
+		const ms =
+			asked === undefined
+				? rateLimitBackoffMs(attempt)
+				: Math.min(retryAfterMaxMs, Math.max(retryAfterMinMs, asked));
+		// Four requests in flight trip the limit together and each carry the
+		// same advice. One cooldown covers them all: the latest deadline wins,
+		// the waits are never added up (GP_E5_S21).
+		const until = now() + ms;
+		if (until <= cooldownUntil) return rateLimitRecovery;
+		cooldownUntil = until;
+		const wait = sleep(ms);
+		rateLimitRecovery = wait.catch(() => undefined);
+		return wait;
+	};
+	// A cooldown can be extended while a request waits on it; it sends only
+	// once the deadline it woke up from is still the current one.
+	const awaitCooldown = async (): Promise<void> => {
+		for (;;) {
+			const current = rateLimitRecovery;
+			await current;
+			if (current === rateLimitRecovery) return;
+		}
+	};
+
 	const sendWithRetry = async (
 		request: Parameters<ShimTransport>[0],
 	): Promise<ShimTransportResponse> => {
 		let lastError: unknown;
 		for (let attempt = 1; attempt <= attempts; attempt++) {
 			try {
-				return await transport(request);
+				await awaitCooldown();
+				const response = await transport(request);
+				if (response.status !== 429 || attempt === attempts) return response;
+				await waitAfterRateLimit(attempt, response);
 			} catch (error) {
 				lastError = error;
 				if (attempt === attempts || !isTransientTransportError(error)) throw error;

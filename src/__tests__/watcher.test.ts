@@ -24,8 +24,12 @@ function fakeTimers() {
 describe("isInWatchFolder", () => {
 	it("matches the folder itself and nested paths only", () => {
 		expect(isInWatchFolder("reMarkable-out/a.md", "reMarkable-out")).toBe(true);
-		expect(isInWatchFolder("reMarkable-out/sub/b.md", "reMarkable-out")).toBe(true);
-		expect(isInWatchFolder("reMarkable-outtakes/c.md", "reMarkable-out")).toBe(false);
+		expect(isInWatchFolder("reMarkable-out/sub/b.md", "reMarkable-out")).toBe(
+			true,
+		);
+		expect(isInWatchFolder("reMarkable-outtakes/c.md", "reMarkable-out")).toBe(
+			false,
+		);
 		expect(isInWatchFolder("elders/d.md", "reMarkable-out")).toBe(false);
 		expect(isInWatchFolder("x.md", "")).toBe(false);
 	});
@@ -34,20 +38,41 @@ describe("isInWatchFolder", () => {
 describe("WatchQueue", () => {
 	it("debounces repeated changes into one send", () => {
 		const timers = fakeTimers();
-		const ready: string[] = [];
+		const ready: string[][] = [];
 		const queue = new WatchQueue({
 			folder: "out",
 			debounceMs: 1000,
 			setTimer: timers.setTimer,
 			clearTimer: timers.clearTimer,
-			onReady: (p) => ready.push(p),
+			onReady: (paths) => ready.push(paths),
 		});
 		queue.noteChanged("out/nota.md");
 		queue.noteChanged("out/nota.md");
 		queue.noteChanged("out/nota.md");
 		expect(timers.pending()).toBe(1);
+		expect(queue.status()).toEqual({ pendingChanges: 1 });
 		timers.fire();
-		expect(ready).toEqual(["out/nota.md"]);
+		expect(ready).toEqual([["out/nota.md"]]);
+		expect(queue.status()).toEqual({ pendingChanges: 0 });
+	});
+
+	it("coalesces different notes into one deduplicated batch", () => {
+		const timers = fakeTimers();
+		const ready: string[][] = [];
+		const queue = new WatchQueue({
+			folder: "out",
+			debounceMs: 1000,
+			setTimer: timers.setTimer,
+			clearTimer: timers.clearTimer,
+			onReady: (paths) => ready.push(paths),
+		});
+		queue.noteChanged("out/a.md");
+		queue.noteChanged("out/b.md");
+		queue.noteChanged("out/a.md");
+
+		expect(timers.pending()).toBe(1);
+		timers.fire();
+		expect(ready).toEqual([["out/a.md", "out/b.md"]]);
 	});
 
 	it("ignores non-markdown files and files outside the folder", () => {
@@ -66,18 +91,20 @@ describe("WatchQueue", () => {
 
 	it("cancels a pending send when the file is removed, and all on dispose", () => {
 		const timers = fakeTimers();
-		const ready: string[] = [];
+		const ready: string[][] = [];
 		const queue = new WatchQueue({
 			folder: "out",
 			debounceMs: 1000,
 			setTimer: timers.setTimer,
 			clearTimer: timers.clearTimer,
-			onReady: (p) => ready.push(p),
+			onReady: (paths) => ready.push(paths),
 		});
 		queue.noteChanged("out/a.md");
 		queue.noteRemoved("out/a.md");
+		expect(queue.status()).toEqual({ pendingChanges: 0 });
 		queue.noteChanged("out/b.md");
 		queue.dispose();
+		expect(queue.status()).toEqual({ pendingChanges: 0 });
 		timers.fire();
 		expect(ready).toEqual([]);
 	});

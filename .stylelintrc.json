@@ -1,0 +1,76 @@
+{
+	"//": [
+		"Template: copy to .stylelintrc.json in the plugin folder and fill in the",
+		"points below (codebase-standards, profiles/typescript/README.md, section",
+		"'CSS-lint voor een Obsidian-plugin').",
+		"",
+		"1. browsers — three floors, one per runtime the plugin actually lands in.",
+		"   Set them from where your plugin runs, not from manifest.json.",
+		"   - electron: the OLDEST desktop installer still plausibly in the field,",
+		"     NOT the Electron matching minAppVersion. Obsidian's Chromium ships",
+		"     with the installer, which does not auto-update; only the app version",
+		"     does. That is why Obsidian shows an app version and an installer",
+		"     version side by side in Show debug info.",
+		"   - ios_saf: the WKWebView, which is tied to the OS and cannot be updated",
+		"     on its own. This is the binding floor for a plugin that is not",
+		"     isDesktopOnly. Set it to Obsidian mobile's own iOS requirement.",
+		"   - and_chr: the Android System WebView, which updates through the Play",
+		"     Store independently of the OS, so it is effectively current and never",
+		"     the binding floor. Residual risk: a device with no Play Services.",
+		"   Drop the two mobile entries ONLY if manifest.json says isDesktopOnly.",
+		"   remarkable-round-trip has isDesktopOnly: false (PRD N7, platform",
+		"   parity desktop/mobile), so both mobile floors stay in.",
+		"2. ignore — features that cannot bite, each with the reason. css3-cursors-grab",
+		"   and css-resize are pointer-only: a touch device has no cursor and no",
+		"   resize handle, so they degrade to nothing. Add css-overflow here too if",
+		"   you lower the iOS floor below 16, but only while you use neither",
+		"   `overflow: clip` nor `overlay` — check before you add it.",
+		"3. property-no-vendor-prefix is OFF, and that is deliberate. The rule is",
+		"   browser-blind: it flags every -webkit- prefix on principle, without",
+		"   consulting browserslist. For a plugin that runs in WKWebView its advice",
+		"   is wrong by construction — `user-select` still requires the prefix on",
+		"   every Safari version, 26.x included. Worse, no-unsupported-browser-features",
+		"   does NOT catch the removal (measured), so the two rules together form a",
+		"   trap: one tells you to drop the fallback, the other cannot tell you it",
+		"   mattered. Turn this rule back on only in an isDesktopOnly plugin.",
+		"4. declaration-block-no-duplicate-properties allows a consecutive pair with",
+		"   different values, so a prefix or unit fallback does not warn.",
+		"5. selector-class-pattern — dropped here: remarkable-round-trip ships no",
+		"   own styling (styles.css is a placeholder comment), so there are no",
+		"   classes and no BEM modifiers to widen the pattern for. Add the widened",
+		"   pattern back if the plugin ever grows its own CSS classes.",
+		"6. no-duplicate-selectors — turned back on. The shared config disables it",
+		"   for theme CSS; in plugin CSS a duplicate selector is dead code."
+	],
+	"extends": "stylelint-config-obsidianmd",
+	"rules": {
+		"plugin/no-unsupported-browser-features": [
+			true,
+			{
+				"severity": "warning",
+				"browsers": [
+					"electron >= 39",
+					"ios_saf >= 16",
+					"and_chr >= 100"
+				],
+				"ignore": [
+					"css-nesting",
+					"css-cascade-layers",
+					"css3-cursors-grab",
+					"css-resize"
+				]
+			}
+		],
+		"property-no-vendor-prefix": null,
+		"declaration-block-no-duplicate-properties": [
+			true,
+			{
+				"severity": "warning",
+				"ignore": [
+					"consecutive-duplicates-with-different-values"
+				]
+			}
+		],
+		"no-duplicate-selectors": true
+	}
+}

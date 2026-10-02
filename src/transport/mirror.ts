@@ -18,6 +18,14 @@ import type { UploadResult } from "./cloud";
 /** The slice of rmapi-js' RemarkableApi that mirroring needs. */
 export interface MirrorApi {
 	listItems(refresh?: boolean): Promise<MirrorEntry[]>;
+	listIds?(refresh?: boolean): Promise<{ id: string; hash: string }[]>;
+	getMetadata?(id: string, hash: string): Promise<{
+		visibleName: string;
+		lastModified: string;
+		pinned: boolean;
+		parent: string;
+		type: "CollectionType" | "DocumentType" | "TemplateType";
+	}>;
 	putFolder(
 		visibleName: string,
 		opts?: { parent?: string },
@@ -127,7 +135,23 @@ export class MirrorTransport {
 
 	private async allItems(refresh = false): Promise<MirrorEntry[]> {
 		if (this.items === null || refresh) {
-			this.items = await this.api.listItems(refresh);
+			if (this.api.listIds && this.api.getMetadata) {
+				const items: MirrorEntry[] = [];
+				for (const { id, hash } of await this.api.listIds(refresh)) {
+					// One odd document must not sink the whole listing.
+					try {
+						const metadata = await this.api.getMetadata(id, hash);
+						items.push({ id, hash, ...metadata });
+					} catch (error) {
+						console.warn(
+							`reMarkable Round-Trip: skipping device item ${id} — metadata unreadable: ${error instanceof Error ? error.message : String(error)}`,
+						);
+					}
+				}
+				this.items = items;
+			} else {
+				this.items = await this.api.listItems(refresh);
+			}
 		}
 		return this.items;
 	}

@@ -1,6 +1,6 @@
 {
 	"name": "remarkable-round-trip",
-	"version": "0.42.2",
+	"version": "0.43.0",
 	"description": "reMarkable Round-Trip for Obsidian — send notes to your reMarkable as e-ink friendly PDFs, with a stable document-ID mapping that links annotations back to the source note.",
 	"main": "main.js",
 	"scripts": {
@@ -8,7 +8,9 @@
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && node scripts/check-bundle.mjs",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"lint": "eslint src/"
+		"lint": "npm run lint:js && npm run lint:css",
+		"lint:js": "eslint src/",
+		"lint:css": "stylelint styles.css --max-warnings 0"
 	},
 	"keywords": [
 		"obsidian",
@@ -30,9 +32,11 @@
 		"eslint-plugin-obsidianmd": "^0.4.1",
 		"jszip": "^3.10.1",
 		"obsidian": "~1.13.1",
+		"stylelint": "^17.15.0",
+		"stylelint-config-obsidianmd": "^0.1.0",
 		"tslib": "2.8.1",
 		"typescript": "^6.0.3",
 		"typescript-eslint": "^8.63.0",
-		"vitest": "^5.0.0"
+		"vitest": "^4.1.10"
 	}
 }
