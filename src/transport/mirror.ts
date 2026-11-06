@@ -18,10 +18,11 @@ import type { UploadResult } from "./cloud";
 /** The slice of rmapi-js' RemarkableApi that mirroring needs. */
 export interface MirrorApi {
 	listItems(refresh?: boolean): Promise<MirrorEntry[]>;
-	listIds?(refresh?: boolean): Promise<{ id: string; hash: string }[]>;
-	getMetadata?(id: string, hash: string): Promise<{
+	/** Ids and hashes only, no metadata (rmapi-js ≥ 14; was `listIds`). */
+	listRefs?(refresh?: boolean): Promise<ItemRef[]>;
+	getMetadata?(ref: ItemRef): Promise<{
 		visibleName: string;
-		lastModified: string;
+		lastModified?: string;
 		pinned: boolean;
 		parent: string;
 		type: "CollectionType" | "DocumentType" | "TemplateType";
@@ -41,7 +42,13 @@ export interface MirrorApi {
 		buffer: Uint8Array,
 		opts?: { parent?: string; refresh?: boolean },
 	): Promise<{ id: string; hash: string }>;
-	move(hash: string, parent: string, refresh?: boolean): Promise<unknown>;
+	move(ref: ItemRef, parent: string, refresh?: boolean): Promise<unknown>;
+}
+
+/** rmapi-js ≥ 14 addresses an item by id and hash together (GP_E5_S28). */
+export interface ItemRef {
+	id: string;
+	hash: string;
 }
 
 /**
@@ -135,13 +142,15 @@ export class MirrorTransport {
 
 	private async allItems(refresh = false): Promise<MirrorEntry[]> {
 		if (this.items === null || refresh) {
-			if (this.api.listIds && this.api.getMetadata) {
+			if (this.api.listRefs && this.api.getMetadata) {
 				const items: MirrorEntry[] = [];
-				for (const { id, hash } of await this.api.listIds(refresh)) {
+				for (const { id, hash } of await this.api.listRefs(refresh)) {
 					// One odd document must not sink the whole listing.
 					try {
-						const metadata = await this.api.getMetadata(id, hash);
-						items.push({ id, hash, ...metadata });
+						const metadata = await this.api.getMetadata({ id, hash });
+						// id and hash last: they identify the item, the metadata
+						// cannot overrule them.
+						items.push({ ...metadata, id, hash });
 					} catch (error) {
 						console.warn(
 							`reMarkable Round-Trip: skipping device item ${id} — metadata unreadable: ${error instanceof Error ? error.message : String(error)}`,
@@ -248,7 +257,7 @@ export class MirrorTransport {
 		const doc = items.find((e) => e.type === "DocumentType" && e.id === deviceDocId);
 		if (!doc) return;
 		await withGenerationRetry(
-			(refresh) => this.api.move(doc.hash, "trash", refresh),
+			(refresh) => this.api.move({ id: doc.id, hash: doc.hash }, "trash", refresh),
 			this.retry,
 		);
 	}

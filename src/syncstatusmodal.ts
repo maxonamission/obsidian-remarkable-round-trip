@@ -5,6 +5,8 @@ export interface SyncStatusView {
 	mode: string;
 	watchFolder: string;
 	summary: SyncStatusSummary;
+	/** Replace a stuck queue with a fresh one (GP_E5_S27). */
+	onReset?: () => void;
 }
 
 export class SyncStatusModal extends Modal {
@@ -40,6 +42,28 @@ export class SyncStatusModal extends Modal {
 				? "Never"
 				: new Date(summary.lastUploadedAt).toLocaleString(),
 		);
+		const onReset = this.view.onReset;
+		if (summary.canReset && onReset !== undefined) {
+			// Knowing is automatic; acting is the user's call. The queue is never
+			// reset behind their back, because the task it lets go of may still
+			// be running.
+			new Setting(this.contentEl)
+				.setName("Reset sync queue")
+				.setDesc(
+					"Cancels queued work and stops waiting for the running task. " +
+						"Use this when nothing has moved for a while; then run your " +
+						"send or import again.",
+				)
+				.addButton((button) =>
+					button
+						.setButtonText("Reset")
+						.setDestructive()
+						.onClick(() => {
+							this.close();
+							onReset();
+						}),
+				);
+		}
 	}
 
 	private row(name: string, value: string): void {

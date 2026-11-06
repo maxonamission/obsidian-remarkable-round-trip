@@ -14,9 +14,28 @@ interface QueueEntry<T> {
 
 export interface SyncQueueStatus {
 	active: SyncWorkKind | null;
+	/**
+	 * When the running task started (ms since epoch), so a user can tell a
+	 * slow task from a stuck one (GP_E5_S27). Null when nothing runs.
+	 */
+	activeSince: number | null;
 	queuedFolders: number;
 	queuedPushes: number;
 	queuedPulls: number;
+}
+
+export const QUEUE_SHUT_DOWN = "Sync queue was shut down.";
+export const QUEUE_RESET =
+	"Sync queue was reset; this task was cancelled. Run it again when you are ready.";
+
+/**
+ * True for the rejection a disposed lane hands its waiting work — a
+ * cancellation, not a failure. Anything else is a real error and must stay
+ * visible (GP_E5_S27).
+ */
+export function isQueueCancellation(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return message === QUEUE_SHUT_DOWN || message === QUEUE_RESET;
 }
 
 export class SyncQueueCoordinator {
@@ -25,11 +44,15 @@ export class SyncQueueCoordinator {
 	private readonly pulls: QueueEntry<unknown>[] = [];
 	private draining = false;
 	private disposed = false;
+	private disposeReason = QUEUE_SHUT_DOWN;
 	private active: SyncWorkKind | null = null;
+	private activeSince: number | null = null;
+
+	constructor(private readonly now: () => number = Date.now) {}
 
 	enqueue<T>(kind: SyncWorkKind, run: () => Promise<T>): Promise<T> {
 		if (this.disposed) {
-			return Promise.reject(new Error("Sync queue was shut down."));
+			return Promise.reject(new Error(this.disposeReason));
 		}
 		const promise = new Promise<T>((resolve, reject) => {
 			this.queue(kind).push({
@@ -46,15 +69,23 @@ export class SyncQueueCoordinator {
 	status(): SyncQueueStatus {
 		return {
 			active: this.active,
+			activeSince: this.activeSince,
 			queuedFolders: this.folders.length,
 			queuedPushes: this.pushes.length,
 			queuedPulls: this.pulls.length,
 		};
 	}
 
-	dispose(): void {
+	/**
+	 * Reject everything still waiting and accept nothing new. The task that is
+	 * running is not interrupted — a promise cannot be cancelled — but this
+	 * lane no longer waits for it: the owner replaces a disposed lane with a
+	 * fresh one (GP_E5_S27).
+	 */
+	dispose(reason: string = QUEUE_SHUT_DOWN): void {
 		this.disposed = true;
-		const error = new Error("Sync queue was shut down.");
+		this.disposeReason = reason;
+		const error = new Error(reason);
 		for (const queue of [this.folders, this.pushes, this.pulls]) {
 			for (const entry of queue.splice(0)) entry.reject(error);
 		}
@@ -63,8 +94,11 @@ export class SyncQueueCoordinator {
 	/**
 	 * A long pull calls this between documents. Pending pushes run at that safe
 	 * boundary without interrupting the cloud request currently in flight.
+	 * A pull from a disposed lane finds nothing here: it was let go of, and
+	 * must not run work beside the lane that replaced it (GP_E5_S27).
 	 */
 	async yieldToPush(): Promise<void> {
+		if (this.disposed) return;
 		let entry = this.nextPush();
 		while (entry !== undefined) {
 			await this.runEntry(entry);
@@ -93,14 +127,18 @@ export class SyncQueueCoordinator {
 	}
 
 	private async runEntry(entry: QueueEntry<unknown>): Promise<void> {
+		// A push run from inside a pull (yieldToPush) nests; restore both.
 		const previous = this.active;
+		const previousSince = this.activeSince;
 		this.active = entry.kind;
+		this.activeSince = this.now();
 		try {
 			entry.resolve(await entry.run());
 		} catch (error) {
 			entry.reject(error);
 		} finally {
 			this.active = previous;
+			this.activeSince = previousSince;
 		}
 	}
 

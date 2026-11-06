@@ -11,6 +11,42 @@ const prod = process.argv[2] === "production";
 // Readability Compass, BC_E1_S26).
 const version = JSON.parse(readFileSync("manifest.json", "utf8")).version;
 
+// core-js (via rmapi-js 14) finds the global object with a
+// `Function('return this')()` fallback that Obsidian's scan reads as dynamic
+// code. core-js requires that module by relative path, which `alias` cannot
+// reach, hence a resolve hook (GP_E5_S28; shim explains why it is safe).
+const coreJsGlobalThis = {
+	name: "core-js-global-this",
+	setup(build) {
+		build.onResolve({ filter: /(^|[\\/])global-this(\.js)?$/ }, (args) =>
+			/[\\/]core-js[\\/]/.test(args.resolveDir)
+				? {
+						path: fileURLToPath(
+							new URL("build/shims/core-js-global-this.cjs", import.meta.url),
+						),
+					}
+				: undefined,
+		);
+	},
+};
+
+// zod 4 (via rmapi-js 14) re-exports 64 translated message sets that nothing
+// here uses; keep English only (GP_E5_S28; the shim explains why it is safe).
+const zodEnglishOnly = {
+	name: "zod-english-only",
+	setup(build) {
+		build.onResolve({ filter: /^\.\.\/locales\/index\.js$/ }, (args) =>
+			/[\\/]zod[\\/]v4[\\/]/.test(args.resolveDir)
+				? {
+						path: fileURLToPath(
+							new URL("build/shims/zod-locales.mjs", import.meta.url),
+						),
+					}
+				: undefined,
+		);
+	},
+};
+
 const context = await esbuild.context({
 	entryPoints: ["src/main.ts"],
 	bundle: true,
@@ -33,6 +69,7 @@ const context = await esbuild.context({
 	alias: {
 		jszip: fileURLToPath(new URL("build/shims/jszip.mjs", import.meta.url)),
 	},
+	plugins: [coreJsGlobalThis, zodEnglishOnly],
 	format: "cjs",
 	target: "es2018",
 	logLevel: "info",

@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.43.2] - 2026-11-06
+
+### Fixed
+
+- **Sending and importing no longer stall for good on mobile.** Since 0.43.0
+  all cloud work waits in one queue, so a single request that never
+  answered — easy to hit on a phone that sleeps or switches networks — held
+  up every send and every import until Obsidian was restarted. Every wait in
+  that queue now has a limit: a request to the simple upload endpoint gives
+  up after five minutes, and turning a handwriting page into an image gives
+  up after thirty seconds. Either one fails with a clear message instead of
+  blocking what comes after it.
+
+### Added
+
+- **See a stuck queue, and clear it yourself.** *Show sync status* now says
+  how long the current task has been running ("Uploading (running for
+  9 min)"). A new *Reset sync queue* command, also a button in the sync
+  status, cancels the waiting work and stops waiting for the running task,
+  so you can send or import again without restarting Obsidian. It never
+  happens on its own: a task that is let go of may still be working, and
+  whether to let it go is your call.
+
+### Security
+
+- **Updated the library that talks to the reMarkable cloud** (rmapi-js 11 to
+  14). The old version depended on a release of the validation library zod
+  with a known weakness: a crafted, very large response from the cloud
+  could exhaust memory while being checked. Only the reMarkable cloud, or a
+  self-hosted server you configured yourself, could send one, and the worst
+  outcome was a crash, but it is fixed now. Sending, importing and the
+  editable-text mode work as before.
+
+### Changed
+
+- The test runner moved to Vitest 5. This changes nothing in the plugin.
+
 ## [0.43.1] - 2026-10-02
 
 Documentation and release process only: the plugin itself is unchanged

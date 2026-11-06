@@ -52,6 +52,9 @@ The **tablet ribbon icon** opens sync status and the annotation import actions.
 **Show sync status** is also available from the command palette: it shows queued
 work, pending watch-folder changes, tracked-note coverage, and the last upload.
 Long operations show progress in the desktop status bar; mobile uses notices.
+If the queue ever stops moving, the sync status shows how long the current
+task has been running, and **Reset sync queue** (a command, and a button in
+the sync status) cancels the waiting work so you can run it again.
 
 - **Command palette**: *Send current note to reMarkable*.
 - **Right-click a note or folder**: *Send to reMarkable* — a folder sends

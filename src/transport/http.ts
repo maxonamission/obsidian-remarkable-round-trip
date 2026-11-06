@@ -6,6 +6,8 @@
  * abstraction layer PRD §7 asks for against reMarkable API changes.
  */
 
+import { DeadlineTimers, withDeadline } from "../deadline";
+
 export interface HttpRequest {
 	url: string;
 	method: "GET" | "POST" | "PUT" | "DELETE";
@@ -22,6 +24,25 @@ export interface HttpResponse {
 }
 
 export type HttpClient = (request: HttpRequest) => Promise<HttpResponse>;
+
+/**
+ * Give every request a deadline (GP_E5_S27). The sync API already has one in
+ * the fetch shim; this covers the simple upload endpoint, which calls
+ * `requestUrl` directly and would otherwise hold the shared lane forever.
+ */
+export function timedHttp(
+	http: HttpClient,
+	ms: number,
+	timers?: DeadlineTimers,
+): HttpClient {
+	return (request) =>
+		withDeadline(
+			http(request),
+			ms,
+			`reMarkable request did not complete within ${Math.round(ms / 1000)}s and was abandoned.`,
+			timers,
+		);
+}
 
 /** Error with a user-facing, actionable message (N3: degrade cleanly). */
 export class TransportError extends Error {

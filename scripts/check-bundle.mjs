@@ -16,6 +16,13 @@ const FORBIDDEN = [
 		what: "dynamic <script> element creation",
 	},
 	{ pattern: /\bnew Function\s*\(/g, what: "new Function()" },
+	// The same constructor without `new`, fed a code string — core-js' global
+	// lookup fallback reached the bundle this way (GP_E5_S28). Requiring a
+	// string argument keeps `isFunction(` and friends out of it.
+	{
+		pattern: /(^|[^.\w$])Function\s*\(\s*["'`]/g,
+		what: "Function() called with a code string",
+	},
 	{ pattern: /(^|[^.\w])eval\s*\(/g, what: "eval()" },
 	{
 		pattern: /require\(\s*["'`](stream|fs|path|child_process)["'`]\s*\)/g,

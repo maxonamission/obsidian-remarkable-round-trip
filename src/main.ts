@@ -37,7 +37,8 @@ import {
 } from "./settings";
 import { LayoutChoiceModal } from "./layoutmodal";
 import { remarkable } from "rmapi-js";
-import { HttpClient } from "./transport/http";
+import { HttpClient, timedHttp } from "./transport/http";
+import { withDeadline } from "./deadline";
 import {
 	OFFICIAL_ENDPOINTS,
 	RemarkableCloudClient,
@@ -82,7 +83,13 @@ import {
 	upsertAnnotationBlock,
 } from "./incoming/annotationnote";
 import { WatchQueue } from "./sync/watcher";
-import { PullQueue, PushQueue, SyncQueueCoordinator } from "./sync/queues";
+import {
+	PullQueue,
+	PushQueue,
+	QUEUE_RESET,
+	SyncQueueCoordinator,
+	isQueueCancellation,
+} from "./sync/queues";
 import {
 	RawSyncApi,
 	readTextNotebook,
@@ -114,13 +121,22 @@ const EMBED_SCAN_RE = /!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g;
 const WATCH_DEBOUNCE_MS = 15000;
 // rmapi-js' default low-level host; part of the fetch-shim allowlist.
 const RAW_HOST = "https://eu.tectonic.remarkable.com";
+// Same ceiling as the fetch shim's valve: generous for a multi-MB upload on
+// a slow mobile link, finite so one request cannot hold the lane (GP_E5_S27).
+const REQUEST_DEADLINE_MS = 300_000;
+// Encoding one handwriting page takes well under a second; this only
+// catches a WebView that never calls back (GP_E5_S27).
+const PNG_ENCODE_DEADLINE_MS = 30_000;
 
 export default class RoundTripPlugin extends Plugin {
 	settings: RoundTripSettings = { ...DEFAULT_SETTINGS };
 	private watchQueue: WatchQueue | null = null;
-	private readonly syncCoordinator = new SyncQueueCoordinator();
-	private readonly pushQueue = new PushQueue(this.syncCoordinator);
-	private readonly pullQueue = new PullQueue(this.syncCoordinator);
+	// Replaced as a whole by resetSyncQueue (GP_E5_S27), hence not readonly.
+	private syncCoordinator = new SyncQueueCoordinator();
+	private pushQueue = new PushQueue(this.syncCoordinator);
+	private pullQueue = new PullQueue(this.syncCoordinator);
+	/** data.json changed under us and the reload still waits in the lane. */
+	private externalSettingsPending = false;
 	private progressStatus: ProgressStatus | null = null;
 	private fetchShim: { restore: () => void } | null = null;
 	/** Unknown data.json keys, preserved across saves (see extrasFrom). */
@@ -204,6 +220,12 @@ export default class RoundTripPlugin extends Plugin {
 			id: "show-sync-status",
 			name: "Show sync status",
 			callback: () => this.openSyncStatus(),
+		});
+
+		this.addCommand({
+			id: "reset-sync-queue",
+			name: "Reset sync queue",
+			callback: () => void this.resetSyncQueue(),
 		});
 
 		this.addCommand({
@@ -466,7 +488,52 @@ export default class RoundTripPlugin extends Plugin {
 					pendingChanges: this.watchQueue?.status().pendingChanges ?? 0,
 				},
 			}),
+			onReset: () => void this.resetSyncQueue(),
 		}).open();
+	}
+
+	/**
+	 * Put a fresh lane in place of one that stopped moving (GP_E5_S27).
+	 *
+	 * All cloud work shares one lane, so one task that never settles stops
+	 * every send and import; the pull queue's de-duplication then hands every
+	 * new import that same stuck promise. Waiting work is cancelled with a
+	 * message, the running task is let go of — it cannot be interrupted and
+	 * may still finish — and a new lane takes over. Never automatic: whether
+	 * to let go of a task that may still be working is the user's decision.
+	 *
+	 * A settings save or reload queued behind the stuck task is cancelled with
+	 * the rest, so it is applied here directly instead.
+	 */
+	private async resetSyncQueue(): Promise<void> {
+		const stuck = this.syncCoordinator;
+		const before = stuck.status();
+		this.syncCoordinator = new SyncQueueCoordinator();
+		this.pushQueue = new PushQueue(this.syncCoordinator);
+		this.pullQueue = new PullQueue(this.syncCoordinator);
+		stuck.dispose(QUEUE_RESET);
+		const cancelled =
+			before.queuedFolders + before.queuedPushes + before.queuedPulls;
+		console.warn(
+			"reMarkable Round-Trip: sync queue reset",
+			before.active === null
+				? "(nothing running)"
+				: `(let go of a ${before.active} task running since ${new Date(before.activeSince ?? Date.now()).toISOString()})`,
+			`${cancelled} queued task(s) cancelled`,
+		);
+		if (this.externalSettingsPending) {
+			this.externalSettingsPending = false;
+			await this.loadSettings();
+		} else {
+			await this.persistSettings();
+		}
+		this.setupWatcher();
+		this.setupFetchShim();
+		notify(
+			before.active === null && cancelled === 0
+				? "Sync queue was already idle; nothing to reset."
+				: "Sync queue reset. Run your send or import again.",
+		);
 	}
 
 	private progress(message: string, count?: ProgressCount): ProgressHandle {
@@ -493,19 +560,29 @@ export default class RoundTripPlugin extends Plugin {
 	 * edit (reviewvondst 0.35.1).
 	 */
 	async onExternalSettingsChange(): Promise<void> {
-		await this.syncCoordinator.enqueue("pull", async () => {
-			await this.loadSettings();
-			this.setupWatcher();
-			this.setupFetchShim();
-		});
+		this.externalSettingsPending = true;
+		await this.syncCoordinator
+			.enqueue("pull", async () => {
+				this.externalSettingsPending = false;
+				await this.loadSettings();
+				this.setupWatcher();
+				this.setupFetchShim();
+			})
+			// A reset (or unload) cancels this; resetSyncQueue applies it itself.
+			// A real load error stays visible.
+			.catch(rethrowUnlessCancelled);
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.syncCoordinator.enqueue("pull", async () => {
-			await this.persistSettings();
-			this.setupWatcher();
-			this.setupFetchShim();
-		});
+		await this.syncCoordinator
+			.enqueue("pull", async () => {
+				await this.persistSettings();
+				this.setupWatcher();
+				this.setupFetchShim();
+			})
+			// A reset (or unload) cancels this; resetSyncQueue saves itself.
+			// A real save error stays visible.
+			.catch(rethrowUnlessCancelled);
 	}
 
 	/** Persist runtime state without disrupting active or queued sync work. */
@@ -1167,6 +1244,9 @@ export default class RoundTripPlugin extends Plugin {
 	private async runPullAnnotations(
 		options: { force?: boolean; only?: TFile } = {},
 	): Promise<void> {
+		// The lane this pull runs in. After a reset it is disposed, and a pull
+		// that was let go of must not pull work from the lane that replaced it.
+		const lane = this.syncCoordinator;
 		let scope = this.settings.mappings;
 		if (options.only !== undefined) {
 			const entry = this.annotationEntry(options.only);
@@ -1208,29 +1288,29 @@ export default class RoundTripPlugin extends Plugin {
 				scope,
 				{
 					force: options.force,
-					yieldToPush: () => this.syncCoordinator.yieldToPush(),
+					yieldToPush: () => lane.yieldToPush(),
 					isCurrent: (entry) =>
 						this.settings.mappings[entry.docId]?.deviceDocId ===
 						entry.deviceDocId,
 					log: (line) => log.push(line),
 					listDocumentHashes: async () => {
-						const items = await api.listIds(true);
+						const items = await api.listRefs(true);
 						return new Map(items.map((item) => [item.id, item.hash]));
 					},
 					listDocumentFiles: async (deviceDocId, hash) => {
-						// The document's file index is addressed as `<id>.docSchema`
-						// — the same name rmapi-js uses internally. Passing the bare
-						// id returned nothing (GP_E3_S6).
-						const { entries } = await api.raw.getEntries(
-							`${deviceDocId}.docSchema`,
+						// The document's file index lives at `<id>.docSchema`. Since
+						// rmapi-js 14 `getEntries` appends `.docSchema` itself, so it
+						// takes the bare id (GP_E5_S28; the name mattered in GP_E3_S6).
+						const { entries } = await api.raw.getEntries({
+							id: deviceDocId,
 							hash,
-						);
+						});
 						return entries.map(
 							(entry): DocumentFile => ({ id: entry.id, hash: entry.hash }),
 						);
 					},
-					readFile: (file) => api.raw.getText(file.id, file.hash),
-					readBytes: (file) => api.raw.getHash(file.id, file.hash),
+					readFile: (file) => api.raw.getText({ id: file.id, hash: file.hash }),
+					readBytes: (file) => api.raw.getHash({ id: file.id, hash: file.hash }),
 					renderStrokes: this.settings.importHandwriting
 						? (request) => this.renderHandwriting(request)
 						: undefined,
@@ -1447,8 +1527,14 @@ export default class RoundTripPlugin extends Plugin {
 			throw new Error("no 2D canvas available for rendering");
 		paintPlan(context, plan);
 
-		const blob = await new Promise<Blob | null>((resolve) =>
-			canvas.toBlob((result) => resolve(result), "image/png"),
+		// A WebView may never call back (GP_E5_S27); without a deadline that
+		// one page would hold the shared sync lane for good.
+		const blob = await withDeadline(
+			new Promise<Blob | null>((resolve) =>
+				canvas.toBlob((result) => resolve(result), "image/png"),
+			),
+			PNG_ENCODE_DEADLINE_MS,
+			"the page could not be encoded as PNG in time",
 		);
 		if (blob === null) throw new Error("could not encode the page as PNG");
 		const buffer = await blob.arrayBuffer();
@@ -1700,7 +1786,7 @@ function reportResults(
 }
 
 /** Obsidian requestUrl adapter — CORS-free and mobile-safe (N7). */
-const obsidianHttp: HttpClient = async (request) => {
+const requestUrlHttp: HttpClient = async (request) => {
 	const response = await requestUrl({
 		url: request.url,
 		method: request.method,
@@ -1715,3 +1801,11 @@ const obsidianHttp: HttpClient = async (request) => {
 		arrayBuffer: response.arrayBuffer,
 	};
 };
+
+/** A lane cancellation is not an error to the caller; anything else is. */
+function rethrowUnlessCancelled(error: unknown): void {
+	if (!isQueueCancellation(error)) throw error;
+}
+
+/** Every simple-endpoint request gets a deadline (GP_E5_S27). */
+const obsidianHttp: HttpClient = timedHttp(requestUrlHttp, REQUEST_DEADLINE_MS);

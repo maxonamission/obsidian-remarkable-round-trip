@@ -5,6 +5,7 @@ import {
 	readTextNotebook,
 	sendTextNotebook,
 	uploadTextNotebook,
+	PendingEntry,
 } from "../transport/textnotebook";
 import { canonicalText, markdownFromParagraphs, paragraphsFromMarkdown } from "../convert/textdoc";
 import { PARAGRAPH_STYLE } from "../convert/rmtext";
@@ -90,40 +91,43 @@ function fakeApi(options: { failRootHashTimes?: number } = {}): {
 	const log: string[] = [];
 	let counter = 0;
 	const entry = (id: string): RawEntry => ({ id, hash: `h${++counter}` });
+	// rmapi-js 14 hands back a pending entry; disposing it waits for the
+	// upload (GP_E5_S28). Logged so a test can see it happened in time.
+	const pending = (e: RawEntry): PendingEntry => ({
+		...e,
+		[Symbol.asyncDispose]: () => {
+			log.push(`settled ${e.id}`);
+			return Promise.resolve();
+		},
+	});
 
 	const api: RawSyncApi = {
 		getRootHash: () => {
 			log.push("getRootHash");
 			return Promise.resolve([root?.hash ?? "root0", generation, 3]);
 		},
-		getEntries: (id, hash) => {
+		getEntries: ({ id, hash }) => {
 			log.push(`getEntries ${id}`);
 			return Promise.resolve({ entries: lists.get(hash) ?? [] });
 		},
-		getHash: (id, hash) => {
+		getHash: ({ id, hash }) => {
 			log.push(`getHash ${id}`);
 			const bytes = files.get(hash);
 			if (!bytes) throw new Error(`no file for ${hash}`);
 			return Promise.resolve(bytes);
 		},
-		putFile: (id, bytes) => {
-			log.push(`putFile ${id}`);
-			const e = entry(id);
+		putFile: (fileName, bytes) => {
+			log.push(`putFile ${fileName}`);
+			const e = entry(fileName);
 			files.set(e.hash, bytes);
-			return Promise.resolve([e, Promise.resolve()]);
-		},
-		putText: (id, content) => {
-			log.push(`putText ${id}`);
-			const e = entry(id);
-			files.set(e.hash, new TextEncoder().encode(content));
-			texts.set(id, content);
-			return Promise.resolve([e, Promise.resolve()]);
+			if (!fileName.endsWith(".rm")) texts.set(fileName, new TextDecoder().decode(bytes));
+			return Promise.resolve(pending(e));
 		},
 		putEntries: (id, entries, _schema) => {
 			log.push(`putEntries ${id}`);
 			const e = entry(id);
-			lists.set(e.hash, [...entries]);
-			return Promise.resolve([e, Promise.resolve()]);
+			lists.set(e.hash, entries.map(({ id, hash }) => ({ id, hash })));
+			return Promise.resolve(pending(e));
 		},
 		putRootHash: (hash, gen) => {
 			log.push("putRootHash");
@@ -149,7 +153,9 @@ describe("notebook upload + read-back (GP_E7_S2, uit spike GP_E7_S1)", () => {
 
 		// The bundle: content, metadata, pagedata, one page .rm, one entries
 		// list for the doc, a new root list, then the root hash swap.
-		expect(log.filter((l) => l.startsWith("putText"))).toHaveLength(3);
+		expect(
+			log.filter((l) => /^putFile .*\.(content|metadata|pagedata)$/.test(l)),
+		).toHaveLength(3);
 		expect(log).toContain(`putFile ${docId}/${pageId}.rm`);
 		expect(log).toContain(`putEntries ${docId}`);
 		expect(log).toContain("putEntries root");
@@ -159,6 +165,32 @@ describe("notebook upload + read-back (GP_E7_S2, uit spike GP_E7_S1)", () => {
 		expect(result.missing).toBe(false);
 		expect(result.markdown).toBe(MD);
 		expect(result.paragraphCount).toBe(8);
+	});
+
+	it("addresses entry lists by bare id: rmapi-js 14 appends .docSchema itself (GP_E5_S28)", async () => {
+		const { api, log } = fakeApi();
+		const { docId } = await uploadTextNotebook(api, "Weeklog", MD, {
+			now: () => 1755093600000,
+		});
+		await readTextNotebook(api, docId);
+		const lookups = log.filter((l) => l.startsWith("getEntries"));
+		expect(lookups).toContain("getEntries root");
+		expect(lookups).toContain(`getEntries ${docId}`);
+		// "root.docSchema" here would make the library ask for
+		// "root.docSchema.docSchema", which the server rejects.
+		expect(lookups.some((l) => l.includes(".docSchema"))).toBe(false);
+	});
+
+	it("waits for every upload to land before the root points at it (GP_E5_S28)", async () => {
+		const { api, log } = fakeApi();
+		await uploadTextNotebook(api, "Weeklog", MD, { now: () => 1755093600000 });
+		const settled = log
+			.map((line, index) => ({ line, index }))
+			.filter(({ line }) => line.startsWith("settled"));
+		// content, metadata, pagedata, page, the document's list, the root list
+		expect(settled).toHaveLength(6);
+		const swap = log.indexOf("putRootHash");
+		expect(settled.every(({ index }) => index < swap)).toBe(true);
 	});
 
 	it("writes content rmapi-js' reader accepts: fileType notebook (device-bevinding)", async () => {

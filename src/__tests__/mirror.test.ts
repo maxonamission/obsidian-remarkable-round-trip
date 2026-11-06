@@ -17,7 +17,7 @@ function fakeApi(initial: MirrorEntry[] = []) {
 		putFolder: [] as string[],
 		putPdf: [] as string[],
 		putEpub: [] as string[],
-		moves: [] as [string, string][],
+		moves: [] as [string, string, string][],
 	};
 	let nextId = 1;
 	const api: MirrorApi = {
@@ -48,8 +48,8 @@ function fakeApi(initial: MirrorEntry[] = []) {
 			const id = `doc-${nextId++}`;
 			return Promise.resolve({ id, hash: `hash-${id}` });
 		},
-		move: (hash, parent) => {
-			calls.moves.push([hash, parent]);
+		move: (ref, parent) => {
+			calls.moves.push([ref.id, ref.hash, parent]);
 			return Promise.resolve({});
 		},
 	};
@@ -62,12 +62,12 @@ describe("MirrorTransport.ensureFolderPath", () => {
 		const seen: string[] = [];
 		let active = 0;
 		let maxActive = 0;
-		api.listIds = () =>
+		api.listRefs = () =>
 			Promise.resolve([
 				{ id: "base", hash: "h0" },
 				{ id: "note", hash: "h1" },
 			]);
-		api.getMetadata = async (id, hash) => {
+		api.getMetadata = async ({ id, hash }) => {
 			active++;
 			maxActive = Math.max(maxActive, active);
 			seen.push(`${id}:${hash}`);
@@ -92,12 +92,12 @@ describe("MirrorTransport.ensureFolderPath", () => {
 	it("skips an item whose metadata fails instead of sinking the listing", async () => {
 		const { api, calls } = fakeApi();
 		const seen: string[] = [];
-		api.listIds = () =>
+		api.listRefs = () =>
 			Promise.resolve([
 				{ id: "odd", hash: "bad" },
 				{ id: "base", hash: "h0" },
 			]);
-		api.getMetadata = (id) => {
+		api.getMetadata = ({ id }) => {
 			seen.push(id);
 			if (id === "odd") return Promise.reject(new Error("metadata unreadable"));
 			return Promise.resolve({
@@ -205,7 +205,8 @@ describe("MirrorTransport upload + replace", () => {
 		const mirror = new MirrorTransport(api, "");
 		await mirror.trashPrevious("old-doc");
 		await mirror.trashPrevious("nonexistent");
-		expect(calls.moves).toEqual([["hash-old", "trash"]]);
+		// rmapi-js 14 moves by reference: id and hash together (GP_E5_S28).
+		expect(calls.moves).toEqual([["old-doc", "hash-old", "trash"]]);
 	});
 });
 

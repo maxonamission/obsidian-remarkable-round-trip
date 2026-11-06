@@ -21,24 +21,52 @@ import { markdownFromParagraphs, paragraphsFromMarkdown } from "../convert/textd
 import { withGenerationRetry, type RetryOptions } from "./mirror";
 import type { UploadResult } from "./cloud";
 
-/** The slice of rmapi-js' raw api this module consumes (structural, testable). */
+/**
+ * The slice of rmapi-js' raw api this module consumes (structural, testable).
+ *
+ * rmapi-js 14 (GP_E5_S28) changed three things this module depends on:
+ * - `getEntries` takes the item's id and appends `.docSchema` itself — pass
+ *   `"root"` or the bare document id, never `"root.docSchema"`, or the
+ *   server rejects the doubled name;
+ * - `getHash` takes a reference whose id is the full file name
+ *   (`<doc>/<page>.rm`); sub-entries from `getEntries` can be passed as is;
+ * - writes return a pending entry that is usable at once; disposing it waits
+ *   for the upload. `putText` is gone: text goes through `putFile` as UTF-8,
+ *   which is all the old `putText` did.
+ */
 export interface RawSyncApi {
 	getRootHash(): Promise<[string, number, number]>;
-	getEntries(id: string, hash: string): Promise<{ entries: RawEntry[] }>;
-	getHash(id: string, hash: string): Promise<Uint8Array>;
-	putFile(id: string, bytes: Uint8Array): Promise<[RawEntry, Promise<void>]>;
-	putText(id: string, content: string): Promise<[RawEntry, Promise<void>]>;
+	getEntries(ref: RawEntry): Promise<{ entries: RawEntry[] }>;
+	getHash(ref: RawEntry): Promise<Uint8Array>;
+	putFile(fileName: string, bytes: Uint8Array): Promise<PendingEntry>;
 	putEntries(
 		id: string,
 		entries: readonly RawEntry[],
 		schemaVersion: number,
-	): Promise<[RawEntry, Promise<void>]>;
+	): Promise<PendingEntry>;
 	putRootHash(hash: string, generation: number): Promise<[string, number]>;
 }
 
 export interface RawEntry {
 	id: string;
 	hash: string;
+}
+
+/** An entry whose upload may still be in flight; disposing it waits for it. */
+export interface PendingEntry extends RawEntry {
+	[Symbol.asyncDispose](): PromiseLike<void>;
+}
+
+/** The account's root listing, as rmapi-js names it (GP_E5_S28). */
+const ROOT_LIST = "root";
+
+function putText(api: RawSyncApi, fileName: string, text: string): Promise<PendingEntry> {
+	return api.putFile(fileName, new TextEncoder().encode(text));
+}
+
+/** Wait for every upload behind these entries to land. */
+async function settled(entries: readonly PendingEntry[]): Promise<void> {
+	await Promise.all(entries.map((entry) => entry[Symbol.asyncDispose]()));
 }
 
 export interface TextUploadResult {
@@ -112,38 +140,39 @@ export async function uploadTextNotebook(
 		zoomMode: "bestFit",
 	};
 
-	const [[contentEntry, uploadContent], [metadataEntry, uploadMetadata], [pagedataEntry, uploadPagedata], [fileEntry, uploadFile], [rootHash, generation, schemaVersion]] =
+	const [contentEntry, metadataEntry, pagedataEntry, fileEntry, [rootHash, generation, schemaVersion]] =
 		await Promise.all([
-			api.putText(`${docId}.content`, JSON.stringify(content)),
-			api.putText(`${docId}.metadata`, JSON.stringify(metadata)),
-			api.putText(`${docId}.pagedata`, "\n"),
+			putText(api, `${docId}.content`, JSON.stringify(content)),
+			putText(api, `${docId}.metadata`, JSON.stringify(metadata)),
+			putText(api, `${docId}.pagedata`, "\n"),
 			api.putFile(`${docId}/${pageId}.rm`, rm),
 			api.getRootHash(),
 		]);
 
-	const [[collectionEntry, uploadCollection], { entries: rootEntries }] = await Promise.all([
+	const [collectionEntry, { entries: rootEntries }] = await Promise.all([
 		api.putEntries(
 			docId,
 			[contentEntry, metadataEntry, pagedataEntry, fileEntry],
 			schemaVersion,
 		),
-		api.getEntries("root.docSchema", rootHash),
+		api.getEntries({ id: ROOT_LIST, hash: rootHash }),
 	]);
 
 	// A retry re-runs the whole attempt with the same docId: drop any entry a
 	// previous attempt already placed, so the root never lists it twice.
-	const [rootEntry, uploadRoot] = await api.putEntries(
-		"root",
+	const rootEntry = await api.putEntries(
+		ROOT_LIST,
 		[...rootEntries.filter((entry) => entry.id !== docId), collectionEntry],
 		4,
 	);
-	await Promise.all([
-		uploadContent,
-		uploadMetadata,
-		uploadPagedata,
-		uploadFile,
-		uploadCollection,
-		uploadRoot,
+	// Every file must have landed before the root points at it.
+	await settled([
+		contentEntry,
+		metadataEntry,
+		pagedataEntry,
+		fileEntry,
+		collectionEntry,
+		rootEntry,
 	]);
 	await api.putRootHash(rootEntry.hash, generation);
 
@@ -202,16 +231,16 @@ export async function readTextNotebook(
 	docId: string,
 ): Promise<TextReadResult> {
 	const [rootHash] = await api.getRootHash();
-	const { entries: rootEntries } = await api.getEntries("root.docSchema", rootHash);
+	const { entries: rootEntries } = await api.getEntries({ id: ROOT_LIST, hash: rootHash });
 	const docEntry = rootEntries.find((entry) => entry.id === docId);
 	if (!docEntry) throw new Error(`Notebook ${docId} not found in the account root.`);
-	const { entries } = await api.getEntries(`${docId}.docSchema`, docEntry.hash);
+	const { entries } = await api.getEntries({ id: docId, hash: docEntry.hash });
 	const pageFiles = entries
 		.filter((entry) => entry.id.endsWith(".rm"))
 		.map((entry) => entry.id);
 	const page = entries.find((entry) => entry.id.endsWith(".rm"));
 	if (!page) throw new Error(`Notebook ${docId} has no .rm page.`);
-	const bytes = await api.getHash(page.id, page.hash);
+	const bytes = await api.getHash({ id: page.id, hash: page.hash });
 	const { paragraphs, missing, unanchored, topology } = readTextPageRm(bytes);
 	return {
 		markdown: markdownFromParagraphs(paragraphs),

@@ -15,7 +15,7 @@
 		"skipLibCheck": true,
 		"resolveJsonModule": true,
 		"allowSyntheticDefaultImports": true,
-		"lib": ["DOM", "ES2020"],
+		"lib": ["DOM", "ES2020", "ESNext.Disposable"],
 		"types": ["node"]
 	},
 	"include": ["**/*.ts"],
