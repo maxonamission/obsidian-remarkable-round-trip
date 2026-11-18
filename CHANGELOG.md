@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.43.3] - 2026-11-17
+
+### Fixed
+
+- **No more second "Obsidian" folder on your reMarkable.** Before sending,
+  the plugin reads your library item by item to find the folder it sends
+  into. If one item could not be read — a network hiccup, or the cloud
+  asking it to slow down — it was skipped, and when that item happened to
+  be your existing folder, a new one with the same name was made and the
+  note landed there. Now an item that fails gets a second try, and if
+  anything stays unreadable the plugin creates no folder at all: the send
+  stops with a message saying why, and trying again a moment later
+  normally works. Folders it does find are used as before.
+- **Two folders with the same name no longer split your notes.** The
+  plugin now always picks the oldest one and tells you there are
+  duplicates, so you can move the documents into it and delete the other.
+  Your notes find their documents by id, not by folder, so moving them on
+  the device is safe.
+
 ## [0.43.2] - 2026-11-06
 
 ### Fixed

@@ -110,7 +110,8 @@ describe("MirrorTransport.ensureFolderPath", () => {
 		};
 		const mirror = new MirrorTransport(api, "Obsidian");
 		expect(await mirror.ensureFolderPath("")).toBe("base");
-		expect(seen).toEqual(["odd", "base"]);
+		// The odd one gets a second try at the end (GP_E5_S30).
+		expect(seen).toEqual(["odd", "base", "odd"]);
 		expect(calls.listItems).toBe(0);
 		expect(calls.putFolder).toEqual([]);
 	});
@@ -207,6 +208,127 @@ describe("MirrorTransport upload + replace", () => {
 		await mirror.trashPrevious("nonexistent");
 		// rmapi-js 14 moves by reference: id and hash together (GP_E5_S28).
 		expect(calls.moves).toEqual([["old-doc", "hash-old", "trash"]]);
+	});
+});
+
+describe("MirrorTransport on an incomplete listing (GP_E5_S30)", () => {
+	type Meta = {
+		visibleName: string;
+		parent: string;
+		type: "CollectionType" | "DocumentType";
+		createdTime?: string;
+	};
+	/** A device library whose items fail to read a given number of times. */
+	function library(entries: Record<string, Meta>, failures: Record<string, number> = {}) {
+		const { api, calls } = fakeApi();
+		const reads: string[] = [];
+		const left = { ...failures };
+		api.listRefs = () =>
+			Promise.resolve(Object.keys(entries).map((id) => ({ id, hash: `h-${id}` })));
+		api.getMetadata = ({ id }) => {
+			reads.push(id);
+			if ((left[id] ?? 0) > 0) {
+				left[id]--;
+				return Promise.reject(new Error("429 too many requests"));
+			}
+			return Promise.resolve({ ...entries[id], lastModified: "1", pinned: false });
+		};
+		return { api, calls, reads };
+	}
+
+	it("finds the base folder on the second read instead of creating a duplicate", async () => {
+		const { api, calls, reads } = library(
+			{
+				base: { visibleName: "Obsidian", parent: "", type: "CollectionType" },
+				doc: { visibleName: "Nota", parent: "base", type: "DocumentType" },
+			},
+			{ base: 1 },
+		);
+		const mirror = new MirrorTransport(api, "Obsidian");
+		expect(await mirror.ensureFolderPath("")).toBe("base");
+		expect(reads).toEqual(["base", "doc", "base"]);
+		expect(calls.putFolder).toEqual([]);
+	});
+
+	it("creates nothing when the base folder stays unreadable, and says why", async () => {
+		const { api, calls } = library(
+			{ base: { visibleName: "Obsidian", parent: "", type: "CollectionType" } },
+			{ base: 2 },
+		);
+		const mirror = new MirrorTransport(api, "Obsidian");
+		await expect(mirror.ensureFolderPath("")).rejects.toThrow(
+			'1 item(s) in your reMarkable library could not be read, so the folder "Obsidian" was not created',
+		);
+		await expect(mirror.ensureFolderPath("")).rejects.toBeInstanceOf(TransportError);
+		expect(calls.putFolder).toEqual([]);
+	});
+
+	it("also refuses when another item is unreadable: it could be the folder", async () => {
+		const { api, calls } = library(
+			{
+				base: { visibleName: "Obsidian", parent: "", type: "CollectionType" },
+				odd: { visibleName: "?", parent: "", type: "DocumentType" },
+			},
+			{ odd: 2 },
+		);
+		const mirror = new MirrorTransport(api, "Obsidian");
+		await expect(mirror.ensureFolderPath("projecten")).rejects.toThrow(
+			'so the folder "projecten" was not created',
+		);
+		expect(calls.putFolder).toEqual([]);
+	});
+
+	it("still uses a folder it did find while another item is unreadable", async () => {
+		const { api, calls } = library(
+			{
+				base: { visibleName: "Obsidian", parent: "", type: "CollectionType" },
+				odd: { visibleName: "?", parent: "", type: "DocumentType" },
+			},
+			{ odd: 2 },
+		);
+		const mirror = new MirrorTransport(api, "Obsidian");
+		expect(await mirror.ensureFolderPath("")).toBe("base");
+		expect(calls.putFolder).toEqual([]);
+	});
+
+	it("creates a folder that is really missing when the listing is complete", async () => {
+		const { api, calls } = library(
+			{ base: { visibleName: "Obsidian", parent: "", type: "CollectionType" } },
+			{},
+		);
+		const mirror = new MirrorTransport(api, "Obsidian");
+		await mirror.ensureFolderPath("projecten");
+		expect(calls.putFolder).toEqual(["projecten"]);
+	});
+
+	it.each([
+		["original listed first", ["original", "duplicate"]],
+		["duplicate listed first", ["duplicate", "original"]],
+	])("picks the oldest of two same-named folders (%s) and says so", async (_label, order) => {
+		const meta: Record<string, Meta> = {
+			original: {
+				visibleName: "Obsidian",
+				parent: "",
+				type: "CollectionType",
+				createdTime: "1700000000000",
+			},
+			duplicate: {
+				visibleName: "Obsidian",
+				parent: "",
+				type: "CollectionType",
+				createdTime: "1763000000000",
+			},
+		};
+		const ordered = Object.fromEntries(order.map((id) => [id, meta[id]]));
+		const { api, calls } = library(ordered);
+		const mirror = new MirrorTransport(api, "Obsidian");
+		expect(await mirror.ensureFolderPath("")).toBe("original");
+		expect(calls.putFolder).toEqual([]);
+		expect(mirror.warnings).toHaveLength(1);
+		expect(mirror.warnings[0]).toContain('2 folders named "Obsidian"');
+		// Warned once per folder, however often it is looked up.
+		await mirror.ensureFolderPath("");
+		expect(mirror.warnings).toHaveLength(1);
 	});
 });
 

@@ -126,12 +126,46 @@ export interface MirrorEntry {
 	type: string;
 	visibleName: string;
 	parent?: string;
+	/** Milliseconds since epoch, as a string; picks the oldest of duplicates. */
+	createdTime?: string;
+	lastModified?: string;
+}
+
+/**
+ * The oldest of several same-named folders (GP_E5_S30): by creation time,
+ * then last change, then id, so every run picks the same one whatever order
+ * the cloud lists them in. A folder without a time sorts last — the one this
+ * run just created has none, and is never the user's original.
+ */
+function oldestFolder(folders: readonly MirrorEntry[]): MirrorEntry {
+	const time = (value: string | undefined): number => {
+		const parsed = Number(value);
+		return value === undefined || value === "" || !Number.isFinite(parsed)
+			? Number.POSITIVE_INFINITY
+			: parsed;
+	};
+	return [...folders].sort(
+		(a, b) =>
+			time(a.createdTime) - time(b.createdTime) ||
+			time(a.lastModified) - time(b.lastModified) ||
+			a.id.localeCompare(b.id),
+	)[0];
 }
 
 export class MirrorTransport {
 	private items: MirrorEntry[] | null = null;
 	/** path → collection id, cached per instance (one send-run). */
 	private readonly folderIds = new Map<string, string>();
+	/**
+	 * Items whose metadata stayed unreadable after a second try, in the last
+	 * listing. While this is above zero the listing is incomplete, and no
+	 * folder may be created: the unreadable item could be the folder we were
+	 * looking for (GP_E5_S30).
+	 */
+	private unreadable = 0;
+	/** Things the user should hear about after the send (duplicate folders). */
+	readonly warnings: string[] = [];
+	private readonly warned = new Set<string>();
 
 	constructor(
 		private readonly api: MirrorApi,
@@ -143,22 +177,37 @@ export class MirrorTransport {
 	private async allItems(refresh = false): Promise<MirrorEntry[]> {
 		if (this.items === null || refresh) {
 			if (this.api.listRefs && this.api.getMetadata) {
+				const getMetadata = this.api.getMetadata.bind(this.api);
 				const items: MirrorEntry[] = [];
-				for (const { id, hash } of await this.api.listRefs(refresh)) {
+				const read = async ({ id, hash }: ItemRef): Promise<boolean> => {
 					// One odd document must not sink the whole listing.
 					try {
-						const metadata = await this.api.getMetadata({ id, hash });
+						const metadata = await getMetadata({ id, hash });
 						// id and hash last: they identify the item, the metadata
 						// cannot overrule them.
 						items.push({ ...metadata, id, hash });
+						return true;
 					} catch (error) {
 						console.warn(
-							`reMarkable Round-Trip: skipping device item ${id} — metadata unreadable: ${error instanceof Error ? error.message : String(error)}`,
+							`reMarkable Round-Trip: device item ${id} — metadata unreadable: ${error instanceof Error ? error.message : String(error)}`,
 						);
+						return false;
 					}
+				};
+				const failed: ItemRef[] = [];
+				for (const ref of await this.api.listRefs(refresh)) {
+					if (!(await read(ref))) failed.push(ref);
 				}
+				// A second chance at the end (GP_E5_S30): a network hiccup or a
+				// rate-limit burst has usually passed by then.
+				let unreadable = 0;
+				for (const ref of failed) {
+					if (!(await read(ref))) unreadable++;
+				}
+				this.unreadable = unreadable;
 				this.items = items;
 			} else {
+				this.unreadable = 0;
 				this.items = await this.api.listItems(refresh);
 			}
 		}
@@ -177,13 +226,26 @@ export class MirrorTransport {
 		refresh = false,
 	): Promise<string> {
 		const items = await this.allItems(refresh);
-		const existing = items.find(
+		const matches = items.filter(
 			(e) =>
 				e.type === "CollectionType" &&
 				e.visibleName === name &&
 				(e.parent ?? "") === parent,
 		);
-		if (existing) return existing.id;
+		if (matches.length > 0) {
+			if (matches.length > 1) this.warnDuplicate(name, parent, matches.length);
+			return oldestFolder(matches).id;
+		}
+		// Unreadable is not absent (GP_E5_S30). Creating the folder now could
+		// make a second one next to the original the listing failed to read —
+		// documents then split over both. Rather send nothing.
+		if (this.unreadable > 0) {
+			throw new TransportError(
+				`${this.unreadable} item(s) in your reMarkable library could not be read, ` +
+					`so the folder "${name}" was not created: it may already exist, and ` +
+					"creating it again would make a duplicate. Try again in a moment.",
+			);
+		}
 		const created = await withGenerationRetry(
 			(retryRefresh) => this.api.putFolder(name, { parent }, retryRefresh),
 			this.retry,
@@ -197,6 +259,17 @@ export class MirrorTransport {
 			parent,
 		});
 		return created.id;
+	}
+
+	private warnDuplicate(name: string, parent: string, count: number): void {
+		const key = `${parent}/${name}`;
+		if (this.warned.has(key)) return;
+		this.warned.add(key);
+		this.warnings.push(
+			`Your reMarkable has ${count} folders named "${name}" in the same place. ` +
+				"The oldest one is used. Move the documents from the others into it " +
+				"and delete the empty ones.",
+		);
 	}
 
 	/**

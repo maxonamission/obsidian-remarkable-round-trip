@@ -950,6 +950,11 @@ export default class RoundTripPlugin extends Plugin {
 						reportResults(results, {
 							quietWhenAllSkipped: options.auto === true,
 						});
+						// Duplicate folders on the device (GP_E5_S30): said after
+						// the result, so it is not lost behind the progress notice.
+						for (const warning of activeMirror?.warnings ?? []) {
+							notify(warning, 15000);
+						}
 					} finally {
 						notice.hide();
 					}
