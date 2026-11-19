@@ -8,6 +8,7 @@
 
 import type { MappingTable } from "./id/mapping";
 import type { OutputFormat } from "./sync/send";
+import { type DeviceIndex, parseDeviceIndex } from "./transport/deviceindex";
 import {
 	DEFAULT_MARK_STYLES,
 	MARK_STYLE_LABELS,
@@ -66,6 +67,8 @@ export interface RoundTripSettings {
 	lastSeenVersion: string;
 	/** docId ↔ device document mapping (round-trip foundation, F5). */
 	mappings: MappingTable;
+	/** Which device items are folders, kept between sends (GP_E5_S24). */
+	deviceIndex: DeviceIndex;
 }
 
 export const DEFAULT_SETTINGS: RoundTripSettings = {
@@ -93,6 +96,7 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
 	showUpdateNotice: true,
 	lastSeenVersion: "",
 	mappings: {},
+	deviceIndex: { nonFolders: [], folders: {} },
 };
 
 /**
@@ -103,6 +107,8 @@ export const DEFAULT_SETTINGS: RoundTripSettings = {
  */
 export function settingsFrom(stored: Partial<RoundTripSettings>): RoundTripSettings {
 	const settings = { ...DEFAULT_SETTINGS, ...stored };
+	// A damaged or hand-edited index only costs a re-read (GP_E5_S24).
+	settings.deviceIndex = parseDeviceIndex(stored.deviceIndex);
 	// Count KNOWN keys only: a data.json holding nothing but a hand-added
 	// extra (the spike flag) is still a fresh install, not an upgrade
 	// (reviewvondst 0.35.1).

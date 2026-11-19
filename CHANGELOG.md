@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.44.1] - 2026-11-19
+
+### Changed
+
+- **Sending is faster once the plugin knows your library.** Before a send,
+  the plugin reads your reMarkable library to find the folders it sends
+  into, one item at a time. It now remembers which items are folders, and
+  on the next send it only reads what is new or changed. The first send
+  after the update still reads everything; after that, *Reading your
+  reMarkable library* only counts the new items, which is usually a handful.
+  A folder you rename or move on the tablet is read again, so the plugin
+  never works from an old name.
+
+### Fixed
+
+- **A re-sent note no longer leaves a silent duplicate.** When you send a
+  note again, the plugin moves the earlier copy on your reMarkable to the
+  trash. If it could not read that copy's details, it used to skip this
+  without a word, and you ended up with two copies. It now finds the copy
+  without needing those details. If moving it still fails, a notice names
+  the note and says the copy is still there, and the plugin tries again the
+  next time the note is sent.
+
 ## [0.44.0] - 2026-11-17
 
 ### Added

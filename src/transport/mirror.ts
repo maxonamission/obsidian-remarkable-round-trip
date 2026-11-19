@@ -14,6 +14,7 @@ import { GenerationError } from "rmapi-js";
 import { TransportError } from "./http";
 import { adviseFailure, classifyFailure } from "./failure";
 import type { UploadResult } from "./cloud";
+import type { DeviceIndex, FolderRecord } from "./deviceindex";
 
 /** The slice of rmapi-js' RemarkableApi that mirroring needs. */
 export interface MirrorApi {
@@ -22,6 +23,7 @@ export interface MirrorApi {
 	listRefs?(refresh?: boolean): Promise<ItemRef[]>;
 	getMetadata?(ref: ItemRef): Promise<{
 		visibleName: string;
+		createdTime?: string;
 		lastModified?: string;
 		pinned: boolean;
 		parent: string;
@@ -152,17 +154,31 @@ function oldestFolder(folders: readonly MirrorEntry[]): MirrorEntry {
 	)[0];
 }
 
+/**
+ * Where a device document stands (GP_E5_S22). "unknown" is not "absent": the
+ * account listing could not be read, so nothing may be concluded — and
+ * nothing may be replaced or cleaned up on the strength of it.
+ */
+export type DocumentState =
+	| { state: "present"; ref: ItemRef }
+	| { state: "absent" }
+	| { state: "unknown"; reason: string };
+
 export class MirrorTransport {
 	private items: MirrorEntry[] | null = null;
 	/** path → collection id, cached per instance (one send-run). */
 	private readonly folderIds = new Map<string, string>();
 	/**
 	 * Items whose metadata stayed unreadable after a second try, in the last
-	 * listing. While this is above zero the listing is incomplete, and no
-	 * folder may be created: the unreadable item could be the folder we were
-	 * looking for (GP_E5_S30).
+	 * listing. While there are any the listing is incomplete, and no folder
+	 * may be created: the unreadable item could be the folder we were looking
+	 * for (GP_E5_S30). They stay out of the device index, so the next run
+	 * reads them again (GP_E5_S22).
 	 */
-	private unreadable = 0;
+	private unreadable = new Set<string>();
+	/** What is known across runs about which items are folders (GP_E5_S24). */
+	private readonly nonFolders: Set<string>;
+	private readonly folderRecords: Map<string, FolderRecord>;
 	/** Things the user should hear about after the send (duplicate folders). */
 	readonly warnings: string[] = [];
 	/** Progress while the library is read, item by item (GP_E5_S31). */
@@ -176,45 +192,93 @@ export class MirrorTransport {
 		/** Device base folder under which the vault tree is mirrored ("" = root). */
 		private readonly baseFolder: string,
 		private readonly retry: RetryOptions = {},
-	) {}
+		/** What an earlier run learned about the device's items (GP_E5_S24). */
+		known: DeviceIndex = { nonFolders: [], folders: {} },
+	) {
+		this.nonFolders = new Set(known.nonFolders);
+		this.folderRecords = new Map(Object.entries(known.folders));
+	}
+
+	/**
+	 * The device index to keep for the next run (GP_E5_S24): only what this
+	 * run could confirm, so it never holds an item the account no longer has.
+	 */
+	index(): DeviceIndex {
+		return {
+			nonFolders: [...this.nonFolders],
+			folders: Object.fromEntries(this.folderRecords),
+		};
+	}
+
+	/** Read one item's metadata into the index; false when it failed. */
+	private async readItem({ id, hash }: ItemRef): Promise<boolean> {
+		if (!this.api.getMetadata) return false;
+		// One odd document must not sink the whole listing.
+		try {
+			const metadata = await this.api.getMetadata({ id, hash });
+			if (metadata.type === "CollectionType") {
+				const folder: FolderRecord = {
+					hash,
+					visibleName: metadata.visibleName,
+					parent: metadata.parent ?? "",
+				};
+				if (metadata.createdTime !== undefined) folder.createdTime = metadata.createdTime;
+				if (metadata.lastModified !== undefined) folder.lastModified = metadata.lastModified;
+				this.folderRecords.set(id, folder);
+			} else {
+				this.folderRecords.delete(id);
+				this.nonFolders.add(id);
+			}
+			return true;
+		} catch (error) {
+			console.warn(
+				`reMarkable Round-Trip: device item ${id} — metadata unreadable: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return false;
+		}
+	}
 
 	private async allItems(refresh = false): Promise<MirrorEntry[]> {
 		if (this.items === null || refresh) {
 			if (this.api.listRefs && this.api.getMetadata) {
-				const getMetadata = this.api.getMetadata.bind(this.api);
-				const items: MirrorEntry[] = [];
-				const read = async ({ id, hash }: ItemRef): Promise<boolean> => {
-					// One odd document must not sink the whole listing.
-					try {
-						const metadata = await getMetadata({ id, hash });
-						// id and hash last: they identify the item, the metadata
-						// cannot overrule them.
-						items.push({ ...metadata, id, hash });
-						return true;
-					} catch (error) {
-						console.warn(
-							`reMarkable Round-Trip: device item ${id} — metadata unreadable: ${error instanceof Error ? error.message : String(error)}`,
-						);
-						return false;
-					}
-				};
-				const failed: ItemRef[] = [];
 				const refs = await this.api.listRefs(refresh);
-				this.onListing?.(0, refs.length);
-				for (const [index, ref] of refs.entries()) {
-					if (!(await read(ref))) failed.push(ref);
-					this.onListing?.(index + 1, refs.length);
+				const present = new Map(refs.map((ref) => [ref.id, ref.hash]));
+				// Forget what the account no longer has (GP_E5_S24).
+				for (const id of [...this.nonFolders]) {
+					if (!present.has(id)) this.nonFolders.delete(id);
+				}
+				for (const id of [...this.folderRecords.keys()]) {
+					if (!present.has(id)) this.folderRecords.delete(id);
+				}
+				// Only new items and folders that changed since they were read.
+				const toRead = refs.filter(
+					(ref) =>
+						!this.nonFolders.has(ref.id) &&
+						this.folderRecords.get(ref.id)?.hash !== ref.hash,
+				);
+				const failed: ItemRef[] = [];
+				if (toRead.length > 0) this.onListing?.(0, toRead.length);
+				for (const [index, ref] of toRead.entries()) {
+					if (!(await this.readItem(ref))) failed.push(ref);
+					this.onListing?.(index + 1, toRead.length);
 				}
 				// A second chance at the end (GP_E5_S30): a network hiccup or a
 				// rate-limit burst has usually passed by then.
-				let unreadable = 0;
+				const unreadable = new Set<string>();
 				for (const ref of failed) {
-					if (!(await read(ref))) unreadable++;
+					if (!(await this.readItem(ref))) unreadable.add(ref.id);
 				}
+				// A folder that changed but could not be read is not trusted
+				// from its old record; it is read again next time.
+				for (const id of unreadable) this.folderRecords.delete(id);
 				this.unreadable = unreadable;
-				this.items = items;
+				this.items = refs.flatMap((ref): MirrorEntry[] => {
+					const folder = this.folderRecords.get(ref.id);
+					if (folder === undefined || folder.hash !== ref.hash) return [];
+					return [{ ...folder, id: ref.id, hash: ref.hash, type: "CollectionType" }];
+				});
 			} else {
-				this.unreadable = 0;
+				this.unreadable = new Set();
 				this.items = await this.api.listItems(refresh);
 			}
 		}
@@ -246,9 +310,9 @@ export class MirrorTransport {
 		// Unreadable is not absent (GP_E5_S30). Creating the folder now could
 		// make a second one next to the original the listing failed to read —
 		// documents then split over both. Rather send nothing.
-		if (this.unreadable > 0) {
+		if (this.unreadable.size > 0) {
 			throw new TransportError(
-				`${this.unreadable} item(s) in your reMarkable library could not be read, ` +
+				`${this.unreadable.size} item(s) in your reMarkable library could not be read, ` +
 					`so the folder "${name}" was not created: it may already exist, and ` +
 					"creating it again would make a duplicate. Try again in a moment.",
 			);
@@ -266,6 +330,10 @@ export class MirrorTransport {
 			visibleName: name,
 			parent,
 		});
+		// The hash the write returned, not a later read (GP_E5_S24): a change
+		// on the tablet after this moment gives a different hash, and the next
+		// run reads the folder again.
+		this.folderRecords.set(created.id, { hash: created.hash, visibleName: name, parent });
 		return created.id;
 	}
 
@@ -325,22 +393,56 @@ export class MirrorTransport {
 				? this.api.putEpub(visibleName, bytes, opts)
 				: this.api.putPdf(visibleName, bytes, opts);
 		}, this.retry);
+		// A document is never a folder; no need to read it next time.
+		this.nonFolders.add(entry.id);
 		return { deviceDocId: entry.id, hash: entry.hash };
 	}
 
 	/**
+	 * Where a device document stands, from the account's list of ids and
+	 * hashes (GP_E5_S22). That list comes in one piece or not at all, so
+	 * presence never depends on reading the document's own metadata: an
+	 * item whose metadata is unreadable is still "present".
+	 */
+	async documentState(deviceDocId: string, refresh = false): Promise<DocumentState> {
+		try {
+			if (this.api.listRefs) {
+				const refs = await this.api.listRefs(refresh);
+				const ref = refs.find((candidate) => candidate.id === deviceDocId);
+				return ref ? { state: "present", ref } : { state: "absent" };
+			}
+			const items = await this.allItems(refresh);
+			const doc = items.find((e) => e.id === deviceDocId);
+			return doc ? { state: "present", ref: { id: doc.id, hash: doc.hash } } : { state: "absent" };
+		} catch (error) {
+			return {
+				state: "unknown",
+				reason: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
+	/**
 	 * Move a previously uploaded document to the trash (idempotent re-send,
-	 * N3): recoverable for the user, so safer than a hard delete. Missing
-	 * documents (already removed on-device) are silently fine.
+	 * N3): recoverable for the user, so safer than a hard delete. A document
+	 * already gone from the account is fine. When it cannot be checked or
+	 * moved, it is left alone and this throws, so the send can say so
+	 * (GP_E5_S22) — "unknown" is never treated as "gone".
 	 */
 	async trashPrevious(deviceDocId: string): Promise<void> {
-		const items = await this.allItems();
-		const doc = items.find((e) => e.type === "DocumentType" && e.id === deviceDocId);
-		if (!doc) return;
-		await withGenerationRetry(
-			(refresh) => this.api.move({ id: doc.id, hash: doc.hash }, "trash", refresh),
-			this.retry,
-		);
+		await withGenerationRetry(async (refresh) => {
+			// Look the reference up inside the retry: after a conflict the
+			// document's hash may have changed (the tablet synced ink to it).
+			const found = await this.documentState(deviceDocId, refresh);
+			if (found.state === "absent") return;
+			if (found.state === "unknown") throw new Error(found.reason);
+			// Defence in depth (security-review): a mapped id is always one of
+			// our own uploads, but a folder is never trashed on its strength.
+			if (this.folderRecords.has(deviceDocId)) {
+				throw new Error("the id belongs to a folder, not a document");
+			}
+			await this.api.move(found.ref, "trash", refresh);
+		}, this.retry);
 	}
 }
 

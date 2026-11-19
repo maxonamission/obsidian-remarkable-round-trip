@@ -55,6 +55,12 @@ export interface MappingEntry {
 		/** Whether #/## sections were packed (GP_E6_S9); absent = false. */
 		packSections?: boolean;
 	};
+	/**
+	 * Earlier device copies of this note that a re-send could not move to the
+	 * trash (GP_E5_S22): the cloud listing was unreadable, or the move failed.
+	 * They are still on the device; the next upload of the note tries again.
+	 */
+	leftoverCopies?: string[];
 }
 
 export type MappingTable = Record<string, MappingEntry>;

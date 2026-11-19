@@ -456,3 +456,218 @@ describe("toTransportError", () => {
 		expect(toTransportError(original)).toBe(original);
 	});
 });
+
+/**
+ * A device library read through ids/hashes plus per-item metadata, like
+ * rmapi-js ≥ 14. `entries` can be changed between runs to play the tablet.
+ */
+function refLibrary(entries: Record<string, { meta: Meta; hash?: string }>) {
+	const { api, calls } = fakeApi();
+	const reads: string[] = [];
+	const unreadable = new Set<string>();
+	let listingFails: string | null = null;
+	api.listRefs = () =>
+		listingFails !== null
+			? Promise.reject(new Error(listingFails))
+			: Promise.resolve(
+					Object.entries(entries).map(([id, entry]) => ({ id, hash: entry.hash ?? `h-${id}` })),
+				);
+	api.getMetadata = ({ id }) => {
+		reads.push(id);
+		if (unreadable.has(id)) return Promise.reject(new Error("content JSON not understood"));
+		return Promise.resolve({ ...entries[id].meta, pinned: false });
+	};
+	return {
+		api,
+		calls,
+		reads,
+		unreadable,
+		failListing: (message: string | null) => {
+			listingFails = message;
+		},
+	};
+}
+
+type Meta = {
+	visibleName: string;
+	parent: string;
+	type: "CollectionType" | "DocumentType";
+	createdTime?: string;
+};
+
+const folder = (visibleName: string, parent = ""): { meta: Meta } => ({
+	meta: { visibleName, parent, type: "CollectionType" },
+});
+const doc = (visibleName: string, parent = ""): { meta: Meta } => ({
+	meta: { visibleName, parent, type: "DocumentType" },
+});
+
+describe("device index between runs (GP_E5_S24)", () => {
+	it("reads nothing on the next run when nothing changed", async () => {
+		const { api, reads } = refLibrary({
+			base: folder("Obsidian"),
+			a: doc("Nota", "base"),
+			b: doc("Weeklog", "base"),
+		});
+		const first = new MirrorTransport(api, "Obsidian");
+		expect(await first.ensureFolderPath("")).toBe("base");
+		expect(reads).toEqual(["base", "a", "b"]);
+
+		reads.length = 0;
+		const second = new MirrorTransport(api, "Obsidian", {}, first.index());
+		expect(await second.ensureFolderPath("")).toBe("base");
+		expect(reads).toEqual([]);
+	});
+
+	it("reads only new items, and forgets what left the account", async () => {
+		const entries: Record<string, { meta: Meta; hash?: string }> = {
+			base: folder("Obsidian"),
+			a: doc("Nota", "base"),
+		};
+		const { api, reads } = refLibrary(entries);
+		const first = new MirrorTransport(api, "Obsidian");
+		await first.ensureFolderPath("");
+
+		delete entries.a;
+		entries.c = doc("Nieuw", "base");
+		reads.length = 0;
+		const second = new MirrorTransport(api, "Obsidian", {}, first.index());
+		await second.ensureFolderPath("");
+		expect(reads).toEqual(["c"]);
+		expect(second.index().nonFolders.sort()).toEqual(["c"]);
+	});
+
+	it("reads a folder again when its hash changed: a rename on the tablet is seen", async () => {
+		const entries: Record<string, { meta: Meta; hash?: string }> = {
+			base: folder("Obsidian"),
+		};
+		const { api, calls, reads } = refLibrary(entries);
+		const first = new MirrorTransport(api, "Obsidian");
+		await first.ensureFolderPath("");
+
+		entries.base = { meta: { ...entries.base.meta, visibleName: "Archief" }, hash: "h-base-2" };
+		reads.length = 0;
+		const second = new MirrorTransport(api, "Obsidian", {}, first.index());
+		// The old name is not trusted: the folder is read, found renamed, and
+		// a fresh "Obsidian" is created.
+		await second.ensureFolderPath("");
+		expect(reads).toEqual(["base"]);
+		expect(calls.putFolder).toEqual(["Obsidian"]);
+	});
+
+	it("keeps the hash a folder creation returned, not a later read", async () => {
+		const { api, reads, calls } = refLibrary({});
+		const first = new MirrorTransport(api, "Obsidian");
+		const created = await first.ensureFolderPath("");
+		expect(first.index().folders[created]).toMatchObject({
+			hash: `hash-${created}`,
+			visibleName: "Obsidian",
+			parent: "",
+		});
+		expect(calls.putFolder).toEqual(["Obsidian"]);
+		expect(reads).toEqual([]);
+	});
+
+	it("remembers an uploaded document as no folder", async () => {
+		const { api } = refLibrary({});
+		const mirror = new MirrorTransport(api, "");
+		const { deviceDocId } = await mirror.upload("Nota.pdf", new Uint8Array([1]));
+		expect(mirror.index().nonFolders).toEqual([deviceDocId]);
+	});
+
+	it("leaves an unreadable item out, so the next run reads it again (GP_E5_S22)", async () => {
+		const { api, reads, unreadable } = refLibrary({
+			base: folder("Obsidian"),
+			odd: doc("Vreemd"),
+		});
+		unreadable.add("odd");
+		const first = new MirrorTransport(api, "Obsidian");
+		await first.ensureFolderPath("");
+		expect(first.index().nonFolders).toEqual([]);
+
+		unreadable.clear();
+		reads.length = 0;
+		const second = new MirrorTransport(api, "Obsidian", {}, first.index());
+		await second.ensureFolderPath("");
+		expect(reads).toEqual(["odd"]);
+		expect(second.index().nonFolders).toEqual(["odd"]);
+	});
+
+	it("does not trust an old record of a changed folder it could not read", async () => {
+		const entries: Record<string, { meta: Meta; hash?: string }> = {
+			base: folder("Obsidian"),
+		};
+		const { api, unreadable, calls } = refLibrary(entries);
+		const first = new MirrorTransport(api, "Obsidian");
+		await first.ensureFolderPath("");
+
+		entries.base = { ...entries.base, hash: "h-base-2" };
+		unreadable.add("base");
+		const second = new MirrorTransport(api, "Obsidian", { sleep: () => Promise.resolve() }, first.index());
+		await expect(second.ensureFolderPath("")).rejects.toThrow(/could not be read/);
+		expect(calls.putFolder).toEqual([]);
+		expect(second.index().folders.base).toBeUndefined();
+	});
+});
+
+describe("previous copies by reference (GP_E5_S22)", () => {
+	it("moves the previous copy to the trash even when its metadata is unreadable", async () => {
+		const { api, calls, unreadable } = refLibrary({ old: doc("Nota") });
+		unreadable.add("old");
+		const mirror = new MirrorTransport(api, "");
+		await mirror.trashPrevious("old");
+		expect(calls.moves).toEqual([["old", "h-old", "trash"]]);
+	});
+
+	it("never trashes an id it knows as a folder", async () => {
+		const { api, calls } = refLibrary({ base: folder("Obsidian") });
+		const mirror = new MirrorTransport(api, "Obsidian");
+		await mirror.ensureFolderPath("");
+		await expect(mirror.trashPrevious("base")).rejects.toThrow(/folder/);
+		expect(calls.moves).toEqual([]);
+	});
+
+	it("knows the three states: present, absent, unknown", async () => {
+		const { api, failListing } = refLibrary({ old: doc("Nota") });
+		const mirror = new MirrorTransport(api, "");
+		expect(await mirror.documentState("old")).toEqual({
+			state: "present",
+			ref: { id: "old", hash: "h-old" },
+		});
+		expect(await mirror.documentState("gone")).toEqual({ state: "absent" });
+		failListing("503 service unavailable");
+		expect(await mirror.documentState("old")).toEqual({
+			state: "unknown",
+			reason: "503 service unavailable",
+		});
+	});
+
+	it("does nothing for a copy that is gone, and refuses when it cannot tell", async () => {
+		const { api, calls, failListing } = refLibrary({});
+		const mirror = new MirrorTransport(api, "");
+		await mirror.trashPrevious("gone");
+		failListing("503 service unavailable");
+		await expect(mirror.trashPrevious("gone")).rejects.toThrow("503 service unavailable");
+		expect(calls.moves).toEqual([]);
+	});
+
+	it("looks the reference up again after a conflict: the tablet may have synced ink", async () => {
+		const entries: Record<string, { meta: Meta; hash?: string }> = { old: doc("Nota") };
+		const { api, calls } = refLibrary(entries);
+		let attempt = 0;
+		api.move = (ref, parent) => {
+			calls.moves.push([ref.id, ref.hash, parent]);
+			if (attempt++ === 0) {
+				entries.old = { ...entries.old, hash: "h-old-ink" };
+				return Promise.reject(new GenerationError());
+			}
+			return Promise.resolve({});
+		};
+		const mirror = new MirrorTransport(api, "", { sleep: () => Promise.resolve() });
+		await mirror.trashPrevious("old");
+		expect(calls.moves).toEqual([
+			["old", "h-old", "trash"],
+			["old", "h-old-ink", "trash"],
+		]);
+	});
+});

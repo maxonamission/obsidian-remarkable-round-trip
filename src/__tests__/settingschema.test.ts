@@ -27,7 +27,8 @@ describe("the settings schema", () => {
 		// would be invisible in both renderers.
 		// lastSeenVersion is bookkeeping for the update notice (GP_E5_S3), not
 		// a user choice — only its showUpdateNotice toggle belongs in the UI.
-		const internal = new Set(["deviceToken", "mappings", "lastSeenVersion"]);
+		// deviceIndex is a cache of the device's folders (GP_E5_S24).
+		const internal = new Set(["deviceToken", "mappings", "lastSeenVersion", "deviceIndex"]);
 		const described = new Set(specs.map((spec) => spec.key.split(".")[0]));
 		for (const key of Object.keys(DEFAULT_SETTINGS)) {
 			if (internal.has(key)) continue;

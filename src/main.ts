@@ -896,6 +896,8 @@ export default class RoundTripPlugin extends Plugin {
 							mirrorFoldersActive && !structureOnly
 								? this.settings.deviceBaseFolder
 								: "",
+							{},
+							this.settings.deviceIndex,
 						);
 						prepared.onListing = (done, total) =>
 							progress?.setMessage(
@@ -1001,6 +1003,7 @@ export default class RoundTripPlugin extends Plugin {
 						);
 
 						this.settings.mappings = table;
+						if (activeMirror) this.settings.deviceIndex = activeMirror.index();
 						await this.persistSettings();
 						reportResults(results, {
 							quietWhenAllSkipped: options.auto === true,
@@ -1851,6 +1854,30 @@ function reportResults(
 			10000,
 		);
 	}
+	reportKeptCopies(results);
+}
+
+/**
+ * Earlier device copies a re-send could not move to the trash (GP_E5_S22).
+ * Said after the result, separately, so a duplicate on the tablet is never a
+ * surprise: the user knows it is there and that the next send tries again.
+ */
+function reportKeptCopies(results: SendResult[]): void {
+	const kept = results.filter(
+		(r): r is Extract<SendResult, { ok: true }> => r.ok && r.previousKept !== undefined,
+	);
+	if (kept.length === 0) return;
+	const names = kept
+		.slice(0, 3)
+		.map((r) => `"${(r.path.split("/").pop() ?? r.path).replace(/\.md$/i, "")}"`)
+		.join(", ");
+	const more = kept.length > 3 ? ` and ${kept.length - 3} more` : "";
+	notify(
+		`The previous copy of ${names}${more} is still on your reMarkable: it could not be ` +
+			`moved to the trash (${kept[0].previousKept}). The next time the note is sent, ` +
+			"the plugin tries again.",
+		15000,
+	);
 }
 
 /** Obsidian requestUrl adapter — CORS-free and mobile-safe (N7). */

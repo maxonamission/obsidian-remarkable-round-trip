@@ -18,7 +18,7 @@ import {
 } from "../convert/pdf";
 import { renderEpub } from "../convert/epub";
 import { ensureDocId } from "../id/docid";
-import { MappingTable, contentHash, recordUpload } from "../id/mapping";
+import { MappingEntry, MappingTable, contentHash, recordUpload } from "../id/mapping";
 import type { UploadResult } from "../transport/cloud";
 
 /** Vault access seam: the plugin edge adapts TFile/Vault to this shape. */
@@ -74,8 +74,9 @@ export interface SendDeps {
 	resolveParent?: (notePath: string) => Promise<string>;
 	/**
 	 * Retire the previous device copy after a successful re-upload
-	 * (idempotent re-send, N3). Failures are non-fatal: the old copy then
-	 * simply lingers, which is the pre-mirroring behavior.
+	 * (idempotent re-send, N3). A failure is not fatal to the send: the old
+	 * copy stays, the result says so, and the mapping keeps its id so the
+	 * next upload tries again (GP_E5_S22).
 	 */
 	replacePrevious?: (previousDeviceDocId: string) => Promise<void>;
 	layout?: PdfLayoutOptions;
@@ -95,6 +96,11 @@ export interface SendSuccess {
 	missingEmbeds: string[];
 	/** True when the note was up to date and no upload happened. */
 	skipped?: boolean;
+	/**
+	 * Why an earlier device copy could not be moved to the trash (GP_E5_S22).
+	 * The new copy was sent; the old one is still on the device.
+	 */
+	previousKept?: string;
 }
 
 export interface SendFailure {
@@ -146,6 +152,35 @@ export function notesNeedingUpload(
 		);
 		return previous.contentHash !== contentHash(markdown);
 	});
+}
+
+/**
+ * Move the earlier device copies of a note to the trash after a re-upload:
+ * the previous copy plus any a former send had to leave (GP_E5_S22). What
+ * cannot be moved stays listed, so it is never forgotten on the device.
+ * Without a way to retire copies (no sync API), earlier leftovers are kept.
+ */
+async function retirePrevious(
+	previous: MappingEntry | undefined,
+	uploadedId: string,
+	replacePrevious: SendDeps["replacePrevious"],
+): Promise<{ leftovers: string[]; previousKept?: string }> {
+	const earlier = previous?.leftoverCopies ?? [];
+	if (previous === undefined) return { leftovers: [] };
+	if (replacePrevious === undefined) return { leftovers: [...earlier] };
+	const leftovers: string[] = [];
+	let previousKept: string | undefined;
+	const candidates = new Set([previous.deviceDocId, ...earlier]);
+	candidates.delete(uploadedId);
+	for (const id of candidates) {
+		try {
+			await replacePrevious(id);
+		} catch (error) {
+			leftovers.push(id);
+			previousKept ??= error instanceof Error ? error.message : String(error);
+		}
+	}
+	return previousKept === undefined ? { leftovers } : { leftovers, previousKept };
 }
 
 /** Send one note; never throws — failures come back as a result (F8). */
@@ -216,18 +251,11 @@ export async function sendNote(
 			});
 		}
 
-		const previous = table[docId];
-		if (
-			deps.replacePrevious &&
-			previous !== undefined &&
-			previous.deviceDocId !== upload.deviceDocId
-		) {
-			try {
-				await deps.replacePrevious(previous.deviceDocId);
-			} catch {
-				// Non-fatal: the old device copy lingers (pre-mirroring behavior).
-			}
-		}
+		const { leftovers, previousKept } = await retirePrevious(
+			table[docId],
+			upload.deviceDocId,
+			deps.replacePrevious,
+		);
 
 		const updated = recordUpload(table, {
 			docId,
@@ -245,6 +273,7 @@ export async function sendNote(
 			// only PDF records layout to anchor imported ink against (GP_E3_S8).
 			pdfLayout:
 				format === "pdf" ? resolveLayoutOptions(deps.layout) : undefined,
+			...(leftovers.length > 0 ? { leftoverCopies: leftovers } : {}),
 		});
 		return {
 			result: {
@@ -253,6 +282,7 @@ export async function sendNote(
 				docId,
 				deviceDocId: upload.deviceDocId,
 				missingEmbeds,
+				...(previousKept !== undefined ? { previousKept } : {}),
 			},
 			table: updated,
 		};

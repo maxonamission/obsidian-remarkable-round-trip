@@ -319,7 +319,7 @@ describe("sendNote folder mirroring hooks", () => {
 		expect(trashed).toEqual(["device-1"]);
 	});
 
-	it("treats a failing replacePrevious as non-fatal", async () => {
+	it("treats a failing replacePrevious as non-fatal, and says the old copy stayed (GP_E5_S22)", async () => {
 		const { deps } = makeDeps({
 			replacePrevious: () => Promise.reject(new Error("trash faalt")),
 		});
@@ -330,7 +330,48 @@ describe("sendNote folder mirroring hooks", () => {
 			first.table,
 			deps,
 		);
-		expect(second.result.ok).toBe(true);
+		expect(second.result).toMatchObject({ ok: true, previousKept: "trash faalt" });
+		expect(second.table[first.result.docId].leftoverCopies).toEqual(["device-1"]);
+	});
+
+	it("tries a kept copy again on the next upload, and forgets it once it is gone", async () => {
+		const trashed: string[] = [];
+		let failing = true;
+		const { deps } = makeDeps({
+			replacePrevious: (id) => {
+				if (failing) return Promise.reject(new Error("listing onleesbaar"));
+				trashed.push(id);
+				return Promise.resolve();
+			},
+		});
+		const first = await sendNote(NOTE, {}, deps);
+		if (!first.result.ok) throw new Error("unexpected failure");
+		const docId = first.result.docId;
+		const second = await sendNote({ ...NOTE, content: "twee", existingDocId: docId }, first.table, deps);
+		expect(second.table[docId].leftoverCopies).toEqual(["device-1"]);
+
+		failing = false;
+		const third = await sendNote({ ...NOTE, content: "drie", existingDocId: docId }, second.table, deps);
+		expect(third.result).toMatchObject({ ok: true });
+		expect(third.result).not.toHaveProperty("previousKept");
+		expect(trashed.sort()).toEqual(["device-1", "device-2"]);
+		expect(third.table[docId].leftoverCopies).toBeUndefined();
+	});
+
+	it("carries kept copies along when a send cannot retire copies at all", async () => {
+		const { deps } = makeDeps();
+		const table = {
+			"doc-1": {
+				docId: "doc-1",
+				notePath: NOTE.path,
+				deviceDocId: "device-0",
+				uploadedAt: "2026-11-01T00:00:00.000Z",
+				contentHash: "00000000",
+				leftoverCopies: ["device-old"],
+			},
+		};
+		const { table: updated } = await sendNote({ ...NOTE, existingDocId: "doc-1" }, table, deps);
+		expect(updated["doc-1"].leftoverCopies).toEqual(["device-old"]);
 	});
 });
 

@@ -486,6 +486,20 @@ describe("pullAnnotations", () => {
 		expect(updated["doc-b"].importedHash).toBeUndefined();
 	});
 
+	it("keeps the mapping of a document it cannot read: unknown is not gone (GP_E5_S22)", async () => {
+		// Presence comes from the account's id/hash list; a document that is
+		// listed but unreadable is reported with the reason, never pruned.
+		const { deps } = makeDeps({
+			listDocumentHashes: () => Promise.resolve(new Map([["device-a", "hash-1"]])),
+			listDocumentFiles: () => Promise.reject(new Error("metadata onleesbaar")),
+		});
+		const { results, table: updated } = await pullAnnotations(TABLE, deps);
+		expect(results).toEqual([
+			expect.objectContaining({ ok: false, docId: "doc-a", error: "metadata onleesbaar" }),
+		]);
+		expect(updated["doc-a"]).toEqual(TABLE["doc-a"]);
+	});
+
 	it("imports both documents of a mixed tree when one has foreign content JSON (GP_E5_S13)", async () => {
 		// A document written by another tool can carry a `.content` this
 		// plugin cannot parse. The listing reads ids and hashes only, and the
