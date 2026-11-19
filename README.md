@@ -49,9 +49,13 @@ That is the whole loop. Everything below is detail for when you want it.
 ## Sending notes
 
 The **tablet ribbon icon** opens sync status and the annotation import actions.
-**Show sync status** is also available from the command palette: it shows queued
-work, pending watch-folder changes, tracked-note coverage, and the last upload.
-Long operations show progress in the desktop status bar; mobile uses notices.
+**Show sync status** is also available from the command palette: it shows what
+is happening right now, queued work, pending watch-folder changes, tracked-note
+coverage, and the last upload, and keeps updating while it is open.
+A send shows its progress from the moment you start it — preparing the notes,
+reading your reMarkable library, creating folders, sending — in the desktop
+status bar, or in one updating notice on mobile. When it is done, the notice
+says which folder on your reMarkable the notes went into.
 If the queue ever stops moving, the sync status shows how long the current
 task has been running, and **Reset sync queue** (a command, and a button in
 the sync status) cancels the waiting work so you can run it again.

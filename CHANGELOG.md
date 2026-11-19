@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.44.0] - 2026-11-17
+
+### Added
+
+- **You see a send happen from the moment you start it.** Progress used to
+  appear only once the upload itself began, so a send could look like it
+  did nothing while the plugin was preparing the notes, waiting for another
+  sync, or reading your reMarkable library — which can take a minute on a
+  phone. One progress message now carries every step: *Preparing 3 notes*,
+  *Waiting for the current sync to finish*, *Connecting to your
+  reMarkable*, *Reading your reMarkable library 120/340*, *Creating folder
+  "Projects"*, *Sending 1/3*. On desktop it is the status bar; on mobile it
+  is one notice that keeps updating. A watch-folder send only shows itself
+  when there is something to send.
+- **The finishing notice says where the notes went**, for example *Sent
+  "Weeklog" to Obsidian/Projects on your reMarkable*, so a note that lands
+  somewhere unexpected is visible at once.
+- **Show sync status keeps up.** The window now updates every second while
+  it is open, and a new *Now* line says what is happening at that moment,
+  in the same words as the progress message.
+
 ## [0.43.3] - 2026-11-17
 
 ### Fixed

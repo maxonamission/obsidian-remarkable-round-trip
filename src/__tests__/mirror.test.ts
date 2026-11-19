@@ -291,6 +291,22 @@ describe("MirrorTransport on an incomplete listing (GP_E5_S30)", () => {
 		expect(calls.putFolder).toEqual([]);
 	});
 
+	it("reports reading progress and announces a folder before creating it (GP_E5_S31)", async () => {
+		const { api } = library(
+			{
+				base: { visibleName: "Obsidian", parent: "", type: "CollectionType" },
+				doc: { visibleName: "Nota", parent: "base", type: "DocumentType" },
+			},
+			{},
+		);
+		const mirror = new MirrorTransport(api, "Obsidian");
+		const events: string[] = [];
+		mirror.onListing = (done, total) => events.push(`${done}/${total}`);
+		mirror.onCreateFolder = (name) => events.push(`create ${name}`);
+		await mirror.ensureFolderPath("projecten");
+		expect(events).toEqual(["0/2", "1/2", "2/2", "create projecten"]);
+	});
+
 	it("creates a folder that is really missing when the listing is complete", async () => {
 		const { api, calls } = library(
 			{ base: { visibleName: "Obsidian", parent: "", type: "CollectionType" } },

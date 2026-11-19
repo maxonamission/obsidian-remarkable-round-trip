@@ -33,6 +33,7 @@ describe("buildSyncStatusSummary", () => {
 		});
 
 		expect(summary).toEqual({
+			now: "Uploading",
 			queue: "Uploading",
 			queuedWork: 6,
 			canReset: true,
@@ -73,6 +74,19 @@ describe("buildSyncStatusSummary", () => {
 		expect(
 			summarise({ active: "push", activeSince: start }, start + 9 * 60_000 + 5_000).queue,
 		).toBe("Uploading (running for 9 min)");
+	});
+
+	it("says what is happening now, in the progress bar's own words (GP_E5_S31)", () => {
+		const summary = buildSyncStatusSummary({
+			mappings: {},
+			localPaths: new Set(),
+			watchPaths: new Set(),
+			live: live({ active: "folder", activeSince: 0 }),
+			now: 60_000,
+			activity: { message: "Reading your reMarkable library 120/340…", since: 0 },
+		});
+		expect(summary.now).toBe("Reading your reMarkable library 120/340…");
+		expect(summarise({}).now).toBe("Nothing running");
 	});
 
 	it("offers a reset only when something runs or waits", () => {

@@ -1,4 +1,5 @@
 import type { MappingTable } from "../id/mapping";
+import type { ActivitySnapshot } from "./activity";
 import type { SyncQueueStatus } from "./queues";
 
 export interface LiveSyncStatus extends SyncQueueStatus {
@@ -6,6 +7,8 @@ export interface LiveSyncStatus extends SyncQueueStatus {
 }
 
 export interface SyncStatusSummary {
+	/** What is happening this moment, in the words the progress bar uses. */
+	now: string;
 	queue: string;
 	queuedWork: number;
 	/** Something runs or waits, so resetting the queue would change anything. */
@@ -26,6 +29,8 @@ export function buildSyncStatusSummary(input: {
 	live: LiveSyncStatus;
 	/** Clock for the running time of the active task; injected for tests. */
 	now?: number;
+	/** The latest progress message (GP_E5_S31); null when nothing reports. */
+	activity?: ActivitySnapshot | null;
 }): SyncStatusSummary {
 	const entries = Object.values(input.mappings);
 	const mappedPaths = new Set(entries.map((entry) => entry.notePath));
@@ -54,6 +59,7 @@ export function buildSyncStatusSummary(input: {
 					: "Idle";
 
 	return {
+		now: input.activity?.message ?? (activeLabel !== null ? activeLabel : "Nothing running"),
 		queue,
 		queuedWork,
 		canReset: activeLabel !== null || queuedWork > 0,

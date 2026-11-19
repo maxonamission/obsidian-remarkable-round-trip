@@ -26,6 +26,8 @@ import {
 import type { ProgressCount } from "./status";
 import { SyncStatusModal } from "./syncstatusmodal";
 import { buildSyncStatusSummary } from "./sync/statussummary";
+import { SyncActivity } from "./sync/activity";
+import { describeSent } from "./sync/destination";
 import {
 	DEFAULT_SETTINGS,
 	RoundTripSettings,
@@ -143,6 +145,8 @@ export default class RoundTripPlugin extends Plugin {
 	private extraData: Record<string, unknown> = {};
 	/** Layouts rebuilt during one import run, by document id (GP_E3_S12). */
 	private readonly layoutCache = new Map<string, PdfLayout | null>();
+	/** What the progress bar or notice says right now (GP_E5_S31). */
+	private readonly activity = new SyncActivity();
 	/** Which bytes-conversion methods came from the polyfill (GP_E5_S19). */
 	private byteCompat: ByteCompatReport = {
 		toHex: true,
@@ -473,7 +477,9 @@ export default class RoundTripPlugin extends Plugin {
 					watchPaths.add(file.path);
 			}
 		}
-		new SyncStatusModal(this.app, {
+		// The vault scan above is done once; the live part is asked again on
+		// every redraw while the window is open (GP_E5_S31).
+		new SyncStatusModal(this.app, () => ({
 			mode: this.settings.mirrorFolders ? "On" : "Off (flat uploads)",
 			watchFolder:
 				this.settings.watchFolderEnabled && this.settings.watchFolderPath !== ""
@@ -487,9 +493,10 @@ export default class RoundTripPlugin extends Plugin {
 					...this.syncCoordinator.status(),
 					pendingChanges: this.watchQueue?.status().pendingChanges ?? 0,
 				},
+				activity: this.activity.snapshot(),
 			}),
 			onReset: () => void this.resetSyncQueue(),
-		}).open();
+		})).open();
 	}
 
 	/**
@@ -537,9 +544,10 @@ export default class RoundTripPlugin extends Plugin {
 	}
 
 	private progress(message: string, count?: ProgressCount): ProgressHandle {
-		return (
-			this.progressStatus?.begin(message, count) ?? progressNotice(message)
-		);
+		const handle =
+			this.progressStatus?.begin(message, count) ?? progressNotice(message);
+		// Recorded too, so the sync-status window shows the same (GP_E5_S31).
+		return this.activity.track(handle, message, count);
 	}
 
 	async loadSettings(): Promise<void> {
@@ -782,6 +790,17 @@ export default class RoundTripPlugin extends Plugin {
 			);
 			return;
 		}
+		// Visible from the command onward (GP_E5_S31): reading and converting
+		// notes, waiting for a running sync, connecting and reading the device
+		// library all used to happen without a sign. One handle carries every
+		// phase. An automatic send only shows itself once there is work.
+		let progress: ProgressHandle | null = options.auto
+			? null
+			: this.progress(
+					files.length === 1
+						? `Preparing "${files[0].basename}"…`
+						: `Preparing ${files.length} notes…`,
+				);
 		const format: SendFormat = options.format ?? this.settings.outputFormat;
 		const notes: NoteInput[] = [];
 		const embedMaps = new Map<string, Map<string, EmbedContent>>();
@@ -799,6 +818,7 @@ export default class RoundTripPlugin extends Plugin {
 				embedMaps.set(file.path, await this.buildEmbedMap(file));
 			}
 		} catch (error) {
+			progress?.hide();
 			notify(error instanceof Error ? error.message : String(error), 10000);
 			return;
 		}
@@ -814,8 +834,16 @@ export default class RoundTripPlugin extends Plugin {
 					this.settings.frontmatterAsTitleBlock,
 				);
 			} catch (error) {
+				progress?.hide();
 				notify(error instanceof Error ? error.message : String(error), 10000);
 				return;
+			}
+			if (queuedNotes.length > 0) {
+				progress = this.progress(
+					queuedNotes.length === 1
+						? `Preparing "${queuedNotes[0].basename}"…`
+						: `Preparing ${queuedNotes.length} notes…`,
+				);
 			}
 		}
 		const queuedPaths = new Set(queuedNotes.map((note) => note.path));
@@ -833,23 +861,50 @@ export default class RoundTripPlugin extends Plugin {
 				: dir;
 		};
 
+		// The device folder a note goes into, for the closing notice.
+		const deviceFolderOf = (notePath: string): string =>
+			mirrorFoldersActive
+				? [
+						...(structureOnly ? [] : this.settings.deviceBaseFolder.split("/")),
+						...targetFolder(notePath).split("/"),
+					]
+						.filter(Boolean)
+						.join("/")
+				: "";
+		const lane = this.syncCoordinator.status();
+		if (
+			lane.active !== null ||
+			lane.queuedFolders + lane.queuedPushes + lane.queuedPulls > 0
+		) {
+			progress?.setMessage("Waiting for the current sync to finish…");
+		}
+
 		await this.pushQueue
 			.enqueue({
 				ensureFolders: async () => {
 					if (queuedFiles.length === 0) return;
 					if (!mirrorFoldersActive && format !== "text") return;
 					try {
+						progress?.setMessage("Connecting to your reMarkable…");
 						const api = await remarkable(
 							this.settings.deviceToken,
 							this.rmapiOptions(),
 						);
 						rawApi = api.raw;
-						mirror = new MirrorTransport(
+						const prepared = new MirrorTransport(
 							api,
 							mirrorFoldersActive && !structureOnly
 								? this.settings.deviceBaseFolder
 								: "",
 						);
+						prepared.onListing = (done, total) =>
+							progress?.setMessage(
+								`Reading your reMarkable library ${done}/${total}…`,
+								{ done, total },
+							);
+						prepared.onCreateFolder = (name) =>
+							progress?.setMessage(`Creating folder "${name}" on your reMarkable…`);
+						mirror = prepared;
 						if (!mirrorFoldersActive) return;
 
 						const targets = [
@@ -872,10 +927,10 @@ export default class RoundTripPlugin extends Plugin {
 				},
 				uploadFiles: async () => {
 					if (queuedNotes.length === 0) return;
-					const notice = this.progress(
-						`Sending 0/${queuedNotes.length} to reMarkable…`,
-						{ done: 0, total: queuedNotes.length },
-					);
+					const sending = `Sending 0/${queuedNotes.length} to reMarkable…`;
+					const start = { done: 0, total: queuedNotes.length };
+					const notice = progress ?? this.progress(sending, start);
+					notice.setMessage(sending, start);
 					try {
 						const activeMirror = mirror;
 						const activeRaw = rawApi;
@@ -949,6 +1004,7 @@ export default class RoundTripPlugin extends Plugin {
 						await this.persistSettings();
 						reportResults(results, {
 							quietWhenAllSkipped: options.auto === true,
+							folderOf: deviceFolderOf,
 						});
 						// Duplicate folders on the device (GP_E5_S30): said after
 						// the result, so it is not lost behind the progress notice.
@@ -964,6 +1020,7 @@ export default class RoundTripPlugin extends Plugin {
 				const message = error instanceof Error ? error.message : String(error);
 				notify(`${message} No notes were uploaded.`, 10000);
 			});
+		progress?.hide();
 	}
 
 	/** The mapping entry of a note whose LAST send was write-mode, if any. */
@@ -1760,7 +1817,11 @@ function describeTextImport(name: string, outcome: TextImportOutcome): string {
 
 function reportResults(
 	results: SendResult[],
-	options: { quietWhenAllSkipped?: boolean } = {},
+	options: {
+		quietWhenAllSkipped?: boolean;
+		/** The device folder each note went into (GP_E5_S31). */
+		folderOf?: (notePath: string) => string;
+	} = {},
 ): void {
 	const failures = results.filter(
 		(r): r is Extract<SendResult, { ok: false }> => !r.ok,
@@ -1769,10 +1830,12 @@ function reportResults(
 	if (failures.length === 0) {
 		const sent = results.filter((r) => r.ok && r.skipped !== true);
 		if (sent.length === 0 && options.quietWhenAllSkipped) return;
-		const base =
-			sent.length === 1
-				? `Sent "${sent[0].path.split("/").pop()}" to reMarkable.`
-				: `Sent ${sent.length} notes to reMarkable.`;
+		const base = describeSent(
+			sent.map((result) => ({
+				name: result.path.split("/").pop() ?? result.path,
+				folder: options.folderOf?.(result.path) ?? "",
+			})),
+		);
 		notify(
 			missing.length > 0
 				? `${base} (${missing.length} embeds not found)`

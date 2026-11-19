@@ -165,6 +165,10 @@ export class MirrorTransport {
 	private unreadable = 0;
 	/** Things the user should hear about after the send (duplicate folders). */
 	readonly warnings: string[] = [];
+	/** Progress while the library is read, item by item (GP_E5_S31). */
+	onListing?: (done: number, total: number) => void;
+	/** Called just before a missing folder is created (GP_E5_S31). */
+	onCreateFolder?: (name: string) => void;
 	private readonly warned = new Set<string>();
 
 	constructor(
@@ -195,8 +199,11 @@ export class MirrorTransport {
 					}
 				};
 				const failed: ItemRef[] = [];
-				for (const ref of await this.api.listRefs(refresh)) {
+				const refs = await this.api.listRefs(refresh);
+				this.onListing?.(0, refs.length);
+				for (const [index, ref] of refs.entries()) {
 					if (!(await read(ref))) failed.push(ref);
+					this.onListing?.(index + 1, refs.length);
 				}
 				// A second chance at the end (GP_E5_S30): a network hiccup or a
 				// rate-limit burst has usually passed by then.
@@ -246,6 +253,7 @@ export class MirrorTransport {
 					"creating it again would make a duplicate. Try again in a moment.",
 			);
 		}
+		this.onCreateFolder?.(name);
 		const created = await withGenerationRetry(
 			(retryRefresh) => this.api.putFolder(name, { parent }, retryRefresh),
 			this.retry,

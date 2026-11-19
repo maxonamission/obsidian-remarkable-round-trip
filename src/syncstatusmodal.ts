@@ -9,22 +9,45 @@ export interface SyncStatusView {
 	onReset?: () => void;
 }
 
+/** How often the open window redraws (GP_E5_S31). */
+const REFRESH_MS = 1000;
+
 export class SyncStatusModal extends Modal {
+	private timer: number | null = null;
+
+	/**
+	 * `view` is asked again on every redraw, so the window follows a running
+	 * send instead of freezing the moment it was opened (GP_E5_S31).
+	 */
 	constructor(
 		app: App,
-		private readonly view: SyncStatusView,
+		private readonly view: () => SyncStatusView,
 	) {
 		super(app);
 	}
 
 	onOpen(): void {
 		this.setTitle("reMarkable sync status");
-		const { summary } = this.view;
+		this.render();
+		this.timer = window.setInterval(() => this.render(), REFRESH_MS);
+	}
+
+	onClose(): void {
+		if (this.timer !== null) window.clearInterval(this.timer);
+		this.timer = null;
+		this.contentEl.empty();
+	}
+
+	private render(): void {
+		this.contentEl.empty();
+		const view = this.view();
+		const { summary } = view;
+		this.row("Now", summary.now);
 		this.row("Queue", summary.queue);
 		this.row("Queued work", String(summary.queuedWork));
 		this.row("Pending local changes", String(summary.pendingChanges));
-		this.row("Folder mirroring", this.view.mode);
-		this.row("Watch folder", this.view.watchFolder);
+		this.row("Folder mirroring", view.mode);
+		this.row("Watch folder", view.watchFolder);
 		this.row("Notes in watch folder", String(summary.watchNotes));
 		this.row("Watch notes not yet synced", String(summary.untrackedWatchNotes));
 		this.row("Tracked notes", String(summary.trackedNotes));
@@ -42,7 +65,7 @@ export class SyncStatusModal extends Modal {
 				? "Never"
 				: new Date(summary.lastUploadedAt).toLocaleString(),
 		);
-		const onReset = this.view.onReset;
+		const onReset = view.onReset;
 		if (summary.canReset && onReset !== undefined) {
 			// Knowing is automatic; acting is the user's call. The queue is never
 			// reset behind their back, because the task it lets go of may still
